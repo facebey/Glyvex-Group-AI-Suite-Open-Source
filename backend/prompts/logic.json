@@ -1,0 +1,132 @@
+{
+  "id": "logic",
+  "name": "Lógica",
+  "description": "Puzzles lógicos, secuencias, silogismos y razonamiento deductivo",
+  "icon": "🧩",
+  "version": "1.0",
+  "prompts": [
+    {
+      "id": "logic_01",
+      "title": "Caballeros y villanos",
+      "prompt": "En una isla los caballeros siempre dicen la verdad y los villanos siempre mienten. A dice: 'Exactamente uno de nosotros tres es caballero'. B dice: 'A miente'. C dice: 'B y yo somos del mismo tipo'. Determiná qué es cada uno (A, B y C), mostrando el razonamiento paso a paso.",
+      "expected_keywords": [
+        "villano",
+        "caballero"
+      ],
+      "category": "puzzle",
+      "difficulty": "hard",
+      "expected_answer": "A es villano, B es caballero, C es caballero."
+    },
+    {
+      "id": "logic_02",
+      "title": "Secuencia numérica",
+      "prompt": "Continuá la secuencia y explicá la regla: 2, 6, 12, 20, 30, ?",
+      "expected_keywords": [
+        "42"
+      ],
+      "category": "sequence",
+      "difficulty": "easy",
+      "expected_answer": "42 (regla: n×(n+1))"
+    },
+    {
+      "id": "logic_03",
+      "title": "Silogismo",
+      "prompt": "Completá el silogismo: Todos los mamíferos son animales de sangre caliente. Todos los delfines son mamíferos. Por lo tanto, ¿qué se puede concluir sobre los delfines? Explicá la estructura lógica del silogismo (premisa mayor, premisa menor, conclusión).",
+      "expected_keywords": [
+        "premisa mayor",
+        "premisa menor",
+        "conclusión"
+      ],
+      "category": "syllogism",
+      "difficulty": "easy",
+      "expected_answer": "Todos los delfines son animales de sangre caliente."
+    },
+    {
+      "id": "logic_04",
+      "title": "Problema de las velas",
+      "prompt": "Tenés dos velas de la misma longitud. La primera tarda 4 horas en consumirse completamente y la segunda tarda 3 horas. Encendés ambas al mismo tiempo. ¿Cuánto tiempo tiene que pasar para que la vela 1 mida el doble de longitud que la vela 2? Mostrá el planteo algebraico.",
+      "expected_keywords": [
+        "2.4"
+      ],
+      "category": "puzzle",
+      "difficulty": "hard",
+      "expected_answer": "t = 2.4 horas (2h 24min)"
+    },
+    {
+      "id": "logic_05",
+      "title": "Torre de Hanoi (N=3)",
+      "prompt": "Listá los 7 movimientos necesarios para resolver la Torre de Hanoi con 3 discos, moviendo la torre completa de la varilla A a la varilla C (usando B como auxiliar). Numerá cada movimiento indicando disco y varillas origen/destino.",
+      "expected_keywords": [
+        "disco 1",
+        "disco 2",
+        "disco 3"
+      ],
+      "category": "puzzle",
+      "difficulty": "medium",
+      "expected_answer": "1) disco1 A→C, 2) disco2 A→B, 3) disco1 C→B, 4) disco3 A→C, 5) disco1 B→A, 6) disco2 B→C, 7) disco1 A→C"
+    },
+    {
+      "id": "logic_06",
+      "title": "Lobo, cabra y repollo",
+      "prompt": "Un granjero debe cruzar un río con un lobo, una cabra y un repollo. La barca solo tiene espacio para el granjero y una sola cosa más por viaje. Si el lobo y la cabra quedan solos sin el granjero, el lobo se come a la cabra; si la cabra y el repollo quedan solos, la cabra se come el repollo. Dá la secuencia completa de viajes que permite cruzar a todos sin pérdidas.",
+      "expected_keywords": [
+        "cabra",
+        "lobo",
+        "repollo"
+      ],
+      "category": "puzzle",
+      "difficulty": "medium",
+      "expected_answer": "1) lleva cabra, 2) vuelve solo, 3) lleva lobo, 4) vuelve con la cabra, 5) lleva repollo, 6) vuelve solo, 7) lleva cabra"
+    },
+    {
+      "id": "logic_07",
+      "title": "Analogía",
+      "prompt": "Completá la analogía: Libro es a Biblioteca como Cuadro es a ___. Explicá la relación lógica entre los pares.",
+      "expected_keywords": [
+        "museo",
+        "galería"
+      ],
+      "category": "analogy",
+      "difficulty": "easy",
+      "expected_answer": "Museo (o Galería)"
+    },
+    {
+      "id": "logic_08",
+      "title": "Deducción — testigos de una carrera",
+      "prompt": "Cinco testigos declaran sobre el orden de llegada de una carrera con cuatro corredores (Norte, Sur, Este, Oeste):\n1. Testigo 1: 'Norte llegó primero.'\n2. Testigo 2: 'Sur no llegó último.'\n3. Testigo 3: 'Este llegó justo después de Norte.'\n4. Testigo 4: 'Oeste llegó segundo.'\n5. Testigo 5: 'Sur llegó tercero.'\nSe sabe que solo uno de los cinco testigos mintió. Determiná el orden de llegada completo y quién mintió.",
+      "expected_keywords": [
+        "Norte",
+        "Este",
+        "Sur",
+        "Oeste"
+      ],
+      "category": "deduction",
+      "difficulty": "hard",
+      "expected_answer": "Orden: Norte, Este, Sur, Oeste. El testigo 4 mintió (dijo que Oeste llegó segundo, pero llegó cuarto)."
+    },
+    {
+      "id": "logic_09",
+      "title": "El problema del mentiroso",
+      "prompt": "Analizá el siguiente enunciado desde la lógica: 'Esta oración es falsa.' ¿Por qué genera una paradoja? Explicá el problema de auto-referencia y por qué no se le puede asignar un valor de verdad consistente (verdadero o falso).",
+      "expected_keywords": [
+        "paradoja",
+        "autorreferencia"
+      ],
+      "category": "paradox",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "logic_10",
+      "title": "Rotación espacial",
+      "prompt": "Imaginá la letra 'F' escrita en una hoja de papel en su orientación normal. Si rotás la hoja 90° en sentido horario, describí textualmente cómo queda orientada la letra F después de la rotación (hacia dónde apunta el trazo horizontal superior y el trazo vertical).",
+      "expected_keywords": [
+        "horario",
+        "horizontal"
+      ],
+      "category": "spatial",
+      "difficulty": "hard",
+      "expected_answer": "El trazo vertical queda horizontal a lo largo del borde superior; los dos trazos que apuntaban a la derecha ahora apuntan hacia abajo."
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+package-lock.json
+frontend/node_modules/
+frontend/package-lock.json
+vite.config.js.timestamp-*.mjs
+
+# Build
+frontend/dist/
+
+# Data / logs (no commitear datos locales)
+data/models.json
+data/logs/
+data/benchmarks/
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/

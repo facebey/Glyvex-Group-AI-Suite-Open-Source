@@ -1,0 +1,138 @@
+{
+  "id": "spanish",
+  "name": "Español",
+  "description": "Comprensión lectora, gramática, redacción y vocabulario en español",
+  "icon": "📝",
+  "version": "1.0",
+  "prompts": [
+    {
+      "id": "spanish_01",
+      "title": "Resumen de párrafo",
+      "prompt": "Resumí el siguiente párrafo en no más de 30 palabras, conservando la idea principal:\n\nLa energía solar fotovoltaica se ha convertido en una de las fuentes de generación eléctrica de más rápido crecimiento en el mundo durante la última década. Los paneles solares, compuestos por celdas de silicio que convierten la luz en electricidad mediante el efecto fotovoltaico, han bajado drásticamente su costo de fabricación gracias a economías de escala y mejoras tecnológicas. Esto permitió que países con alta radiación solar, como España, Chile o Australia, instalen plantas de gran escala capaces de competir en precio con la generación a partir de combustibles fósiles. Sin embargo, la intermitencia sigue siendo un desafío importante que exige el desarrollo paralelo de sistemas de almacenamiento en baterías y de redes eléctricas más flexibles.",
+      "expected_keywords": [
+        "energía solar",
+        "almacenamiento"
+      ],
+      "category": "summary",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "spanish_02",
+      "title": "Corregir errores gramaticales",
+      "prompt": "El siguiente texto tiene 5 errores gramaticales u ortográficos. Encontralos y corregilos, indicando cuál era el error en cada caso:\n\n\"Los alumno's fueron a la escuela ayer, pero no llevaron sus libro's de matemática. El profesor le dijo que abrán un exámen la próxima semana, y que si no estudian, van a tener problemas serios con las nota's.\"",
+      "expected_keywords": [
+        "alumnos",
+        "libros",
+        "habrá",
+        "examen",
+        "notas"
+      ],
+      "category": "grammar",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "spanish_03",
+      "title": "Reescribir en registro formal",
+      "prompt": "Reescribí el siguiente mensaje informal en un registro formal, apto para enviar por email a un cliente:\n\n\"Hola! Te cuento que el pedido se atrasó un toque, va a llegar tipo el viernes. Cualquier cosa avisame.\"",
+      "expected_keywords": [
+        "estimado",
+        "atentamente"
+      ],
+      "category": "register",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "spanish_04",
+      "title": "Sinónimos y antónimos",
+      "prompt": "Dá un sinónimo y un antónimo para cada una de las siguientes palabras: efímero, recalcitrante, prolijo.",
+      "expected_keywords": [
+        "fugaz",
+        "obstinado",
+        "meticuloso"
+      ],
+      "category": "vocabulary",
+      "difficulty": "medium",
+      "expected_answer": "efímero: sinónimo fugaz/pasajero, antónimo duradero. recalcitrante: sinónimo obstinado/terco, antónimo dócil. prolijo: sinónimo meticuloso/detallado, antónimo descuidado."
+    },
+    {
+      "id": "spanish_05",
+      "title": "Conjugación — subjuntivo imperfecto",
+      "prompt": "Conjugá los verbos poder, tener e ir en subjuntivo imperfecto (pretérito imperfecto de subjuntivo), primera persona del singular (yo) y tercera persona del plural (ellos).",
+      "expected_keywords": [
+        "pudiera",
+        "tuviera",
+        "fuera"
+      ],
+      "category": "conjugation",
+      "difficulty": "medium",
+      "expected_answer": "poder: pudiera/pudiese, pudieran/pudiesen. tener: tuviera/tuviese, tuvieran/tuviesen. ir: fuera/fuese, fueran/fuesen."
+    },
+    {
+      "id": "spanish_06",
+      "title": "Haber/a ver, sino/si no",
+      "prompt": "Completá los espacios en blanco con la opción correcta (haber/a ver o sino/si no) y explicá brevemente la diferencia:\n1. Tiene que ___ una solución para este problema.\n2. Vamos a ___ qué pasa mañana.\n3. No quiero ir al cine, ___ prefiero quedarme en casa.\n4. ___ llovía, hubiéramos ido a la playa.",
+      "expected_keywords": [
+        "haber",
+        "a ver",
+        "sino"
+      ],
+      "category": "usage",
+      "difficulty": "medium",
+      "expected_answer": "1. haber, 2. a ver, 3. sino, 4. Si no"
+    },
+    {
+      "id": "spanish_07",
+      "title": "Email formal de queja",
+      "prompt": "Escribí un email formal de queja dirigido a una empresa de servicios de internet, por cortes de conexión reiterados durante la última semana. Incluí asunto, saludo, cuerpo con los hechos, un pedido concreto de solución, y despedida formal.",
+      "expected_keywords": [
+        "asunto",
+        "atentamente",
+        "solicito"
+      ],
+      "category": "writing",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "spanish_08",
+      "title": "Identificar tema y tesis",
+      "prompt": "Leé el siguiente párrafo e identificá: (a) el tema general, y (b) la tesis (idea principal que el autor defiende):\n\nEl teletrabajo llegó para quedarse. Si bien muchas empresas insistieron en volver a la presencialidad total tras la pandemia, la evidencia muestra que los equipos que mantuvieron esquemas híbridos no solo reportaron mayor satisfacción laboral, sino también niveles de productividad iguales o superiores a los previos. Insistir en el regreso obligatorio a la oficina cinco días a la semana ignora estos datos y responde más a una lógica de control que a una de eficiencia real.",
+      "expected_keywords": [
+        "teletrabajo",
+        "tesis"
+      ],
+      "category": "comprehension",
+      "difficulty": "medium",
+      "expected_answer": "Tema: el teletrabajo/trabajo híbrido. Tesis: el regreso obligatorio a la oficina no se justifica por productividad, sino por una lógica de control."
+    },
+    {
+      "id": "spanish_09",
+      "title": "Voz pasiva",
+      "prompt": "Pasá a voz pasiva las siguientes oraciones:\n1. El gato rompió el jarrón.\n2. Los ingenieros diseñaron el puente.\n3. La empresa contratará a diez nuevos empleados.",
+      "expected_keywords": [
+        "fue roto",
+        "fue diseñado",
+        "serán contratados"
+      ],
+      "category": "grammar",
+      "difficulty": "medium",
+      "expected_answer": "1. El jarrón fue roto por el gato. 2. El puente fue diseñado por los ingenieros. 3. Diez nuevos empleados serán contratados por la empresa."
+    },
+    {
+      "id": "spanish_10",
+      "title": "Descripción a partir de elementos dados",
+      "prompt": "A partir de estos elementos: 'atardecer en la playa, dos personas caminando, olas suaves, gaviotas volando, cielo naranja y violeta', escribí un párrafo descriptivo de al menos 60 palabras que integre todos los elementos de forma fluida.",
+      "expected_keywords": [
+        "atardecer",
+        "playa",
+        "gaviotas"
+      ],
+      "category": "description",
+      "difficulty": "easy",
+      "expected_answer": null
+    }
+  ]
+}

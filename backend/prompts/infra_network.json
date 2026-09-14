@@ -1,0 +1,110 @@
+{
+  "id": "infra_network",
+  "name": "Infraestructura de Redes",
+  "description": "Networking, monitoreo y telecomunicaciones a nivel operativo (BGP, OSPF, SNMP, DWDM, MPLS)",
+  "icon": "🌐",
+  "version": "1.0",
+  "prompts": [
+    {
+      "id": "infra_01",
+      "title": "Establecimiento de sesión BGP",
+      "prompt": "Describí el proceso de establecimiento de una sesión BGP entre dos routers, indicando los 4 estados principales de la máquina de estados (después de Idle y Connect) y qué mensajes BGP se intercambian en cada transición hasta llegar a Established.",
+      "expected_keywords": [
+        "OpenSent",
+        "OpenConfirm",
+        "Established",
+        "KEEPALIVE"
+      ],
+      "category": "networking",
+      "difficulty": "medium",
+      "expected_answer": "Idle → Connect → Active → OpenSent (intercambio de mensajes OPEN) → OpenConfirm (intercambio de KEEPALIVE) → Established (UPDATE/KEEPALIVE)."
+    },
+    {
+      "id": "infra_02",
+      "title": "OSPF neighbor atascado en EXSTART",
+      "prompt": "Analizá el siguiente output de 'show ip ospf neighbor' y explicá qué problema indica y cuál es la causa más común:\n\nNeighbor ID     Pri   State           Dead Time   Address         Interface\n10.0.0.2          1   EXSTART/DR      00:00:38    10.0.0.2        Gi0/1",
+      "expected_keywords": [
+        "EXSTART",
+        "MTU"
+      ],
+      "category": "debug",
+      "difficulty": "medium",
+      "expected_answer": "El vecino está atascado en estado EXSTART, lo que típicamente indica un mismatch de MTU entre las interfaces de ambos routers (los paquetes DBD no pueden intercambiarse completamente)."
+    },
+    {
+      "id": "infra_03",
+      "title": "Query InfluxQL — promedio de RSSI",
+      "prompt": "Escribí una query InfluxQL que calcule el promedio de RSSI de los últimos 30 minutos, agrupado por el tag 'site' y por el tag 'cell_id', con intervalos de 5 minutos.",
+      "expected_keywords": [
+        "mean",
+        "GROUP BY",
+        "cell_id"
+      ],
+      "category": "monitoring",
+      "difficulty": "medium",
+      "expected_answer": "SELECT mean(\"rssi\") FROM \"cpe_metrics\" WHERE time > now() - 30m GROUP BY time(5m), \"site\", \"cell_id\""
+    },
+    {
+      "id": "infra_04",
+      "title": "Subinterfaz VLAN en Nokia 7750 SR (SR-OS)",
+      "prompt": "Mostrá la configuración SR-OS necesaria en un Nokia 7750 SR para crear una subinterfaz con VLAN 100 sobre el puerto 1/1/1, asignarle la IP 10.10.100.1/24 y habilitarla.",
+      "expected_keywords": [
+        "1/1/1:100",
+        "10.10.100.1/24",
+        "no shutdown"
+      ],
+      "category": "configuration",
+      "difficulty": "hard",
+      "expected_answer": null
+    },
+    {
+      "id": "infra_05",
+      "title": "QoS en MPLS — DiffServ vs MPLS-TE",
+      "prompt": "Explicá la diferencia entre DiffServ y MPLS-TE en el contexto de QoS sobre una red MPLS, y dá un ejemplo de cuándo usarías cada uno.",
+      "expected_keywords": [
+        "DiffServ",
+        "MPLS-TE"
+      ],
+      "category": "qos",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "infra_06",
+      "title": "SNMP polling vs trap",
+      "prompt": "Explicá la diferencia entre SNMP polling y SNMP trap: cómo funciona cada mecanismo, sus ventajas/desventajas, y en qué escenario usarías cada uno para monitorear una red de CPEs LTE.",
+      "expected_keywords": [
+        "polling",
+        "trap"
+      ],
+      "category": "monitoring",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "infra_07",
+      "title": "Bug de sintaxis en config Telegraf (TOML)",
+      "prompt": "El siguiente snippet de configuración Telegraf (TOML) para el plugin SNMP tiene un error de sintaxis que va a hacer fallar el parseo. Encontralo y corregilo:\n\n```toml\n[[inputs.snmp]]\n  agents = [\"udp://10.0.0.1:161]\n  version = 2\n  community = \"public\"\n  [[inputs.snmp.field]]\n    name = \"rssi\"\n    oid = \"1.3.6.1.4.1.1.1.1\"\n```",
+      "expected_keywords": [
+        "comilla",
+        "agents"
+      ],
+      "category": "debug",
+      "difficulty": "medium",
+      "expected_answer": "Falta la comilla de cierre en el string de \"agents\": debe ser agents = [\"udp://10.0.0.1:161\"]"
+    },
+    {
+      "id": "infra_08",
+      "title": "Presupuesto óptico DWDM",
+      "prompt": "Calculá el margen del presupuesto óptico (power budget) de un enlace DWDM con los siguientes datos: potencia de transmisión TX=+3dBm, sensibilidad del receptor RX=-28dBm, atenuación de fibra de 0.25dB/km sobre 80km, 4 conectores de 0.5dB cada uno, y 8 empalmes (splices) de 0.1dB cada uno. Mostrá el cálculo paso a paso y el margen final.",
+      "expected_keywords": [
+        "22.8",
+        "31",
+        "8.2"
+      ],
+      "category": "calculation",
+      "difficulty": "medium",
+      "expected_answer": "Pérdida total = 22.8 dB; presupuesto disponible = 31 dB; margen = 8.2 dB."
+    }
+  ]
+}

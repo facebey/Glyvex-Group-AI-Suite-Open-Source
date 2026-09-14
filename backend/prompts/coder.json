@@ -1,0 +1,146 @@
+{
+  "id": "coder",
+  "name": "Programación",
+  "description": "Generación de código, debug, algoritmos y SQL",
+  "icon": "💻",
+  "version": "1.0",
+  "prompts": [
+    {
+      "id": "coder_01",
+      "title": "Función Python — Fibonacci",
+      "prompt": "Escribí una función Python eficiente para calcular el número de Fibonacci en la posición N usando memoización. Incluí docstring y manejo de casos borde.",
+      "expected_keywords": [
+        "def",
+        "fibonacci",
+        "memo",
+        "cache"
+      ],
+      "category": "generation",
+      "difficulty": "easy",
+      "expected_answer": null
+    },
+    {
+      "id": "coder_02",
+      "title": "Búsqueda binaria",
+      "prompt": "Implementá en Python una función de búsqueda binaria iterativa sobre una lista ordenada de enteros. Debe devolver el índice del elemento buscado o -1 si no está presente. Incluí type hints.",
+      "expected_keywords": [
+        "def",
+        "low",
+        "high",
+        "mid"
+      ],
+      "category": "generation",
+      "difficulty": "easy",
+      "expected_answer": null
+    },
+    {
+      "id": "coder_03",
+      "title": "Refactor de función con code smell",
+      "prompt": "Refactorizá la siguiente función Python para que sea más legible y eficiente, evitando anidamiento innecesario y usando nombres de variables descriptivos:\n\n```python\ndef proc(l):\n    r = []\n    for i in range(len(l)):\n        if l[i] != None:\n            if l[i] > 0:\n                if l[i] % 2 == 0:\n                    r.append(l[i] * 2)\n                else:\n                    r.append(l[i])\n    return r\n```\n\nExplicá brevemente qué cambios hiciste y por qué.",
+      "expected_keywords": [
+        "def",
+        "return",
+        "legible"
+      ],
+      "category": "refactor",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "coder_04",
+      "title": "SQL — JOIN + GROUP BY + HAVING",
+      "prompt": "Escribí una consulta SQL que, sobre las tablas orders(id, customer_id, amount, created_at) y customers(id, name, country), devuelva el nombre del cliente, su país y el total gastado, solo para clientes que gastaron más de 1000 en total, ordenado de mayor a menor gasto. Usá JOIN, GROUP BY y HAVING.",
+      "expected_keywords": [
+        "JOIN",
+        "GROUP BY",
+        "HAVING",
+        "SUM"
+      ],
+      "category": "query",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "coder_05",
+      "title": "Regex para validar IPv4",
+      "prompt": "Escribí una expresión regular en Python que valide correctamente una dirección IPv4 (cada octeto entre 0 y 255, sin ceros a la izquierda inválidos). Mostrá el patrón y un ejemplo de uso con re.match.",
+      "expected_keywords": [
+        "import re",
+        "match",
+        "25[0-5]"
+      ],
+      "category": "regex",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "coder_06",
+      "title": "Estructura de datos — Stack",
+      "prompt": "Implementá una clase Stack en Python con los métodos push, pop, peek e is_empty. pop y peek deben manejar el caso de pila vacía lanzando una excepción apropiada.",
+      "expected_keywords": [
+        "class Stack",
+        "def push",
+        "def pop",
+        "def peek"
+      ],
+      "category": "datastructure",
+      "difficulty": "easy",
+      "expected_answer": null
+    },
+    {
+      "id": "coder_07",
+      "title": "Debug — argumento por defecto mutable",
+      "prompt": "El siguiente código tiene un bug sutil. Encontralo, explicá por qué ocurre y corregilo:\n\n```python\ndef agregar_item(item, lista=[]):\n    lista.append(item)\n    return lista\n\nprint(agregar_item(1))\nprint(agregar_item(2))\n```",
+      "expected_keywords": [
+        "mutable",
+        "default",
+        "None"
+      ],
+      "category": "debug",
+      "difficulty": "medium",
+      "expected_answer": "El argumento por defecto lista=[] se crea una sola vez y se comparte entre llamadas; hay que usar lista=None y crear la lista dentro de la función si es None."
+    },
+    {
+      "id": "coder_08",
+      "title": "Decorator — medir tiempo de ejecución",
+      "prompt": "Escribí un decorator Python llamado @medir_tiempo que imprima cuánto tardó en ejecutarse la función decorada, en milisegundos. Debe funcionar con funciones que reciben argumentos posicionales y keyword.",
+      "expected_keywords": [
+        "def medir_tiempo",
+        "wraps",
+        "perf_counter",
+        "args",
+        "kwargs"
+      ],
+      "category": "decorator",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "coder_09",
+      "title": "Rate limiter — sliding window",
+      "prompt": "Implementá un rate limiter en Python usando el algoritmo de sliding window log: la clase RateLimiter(max_requests, window_seconds) debe exponer un método allow(client_id) que devuelva True/False según si la request está permitida.",
+      "expected_keywords": [
+        "deque",
+        "time",
+        "window",
+        "allow"
+      ],
+      "category": "algorithm",
+      "difficulty": "hard",
+      "expected_answer": null
+    },
+    {
+      "id": "coder_10",
+      "title": "Parser de CSV sin librerías externas",
+      "prompt": "Escribí una función Python parse_csv(texto) que parsee contenido CSV (separado por comas, con soporte para campos entre comillas dobles que pueden contener comas) sin usar el módulo csv ni ninguna librería externa, devolviendo una lista de listas.",
+      "expected_keywords": [
+        "def parse_csv",
+        "comilla",
+        "split"
+      ],
+      "category": "parsing",
+      "difficulty": "hard",
+      "expected_answer": null
+    }
+  ]
+}

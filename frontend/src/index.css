@@ -1,0 +1,66 @@
+/* Fuentes */
+@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  /* Dark theme — default */
+  --color-glyvex-bg:        #000000;
+  --color-glyvex-bg-2:      #070707;
+  --color-glyvex-card:      #0d0d0f;
+  --color-glyvex-card-hi:   #151518;
+  --color-glyvex-border:    #1c1c20;
+  --color-glyvex-border-hi: #2a2a30;
+  --color-glyvex-text:      #e8edf5;
+  --color-glyvex-muted:     #94a3b8;
+  --color-glyvex-muted-2:   #5b6472;
+  --color-glyvex-accent:    #0d9488;
+  --color-glyvex-cyan:      #06b6d4;
+  --color-glyvex-sky:       #0ea5e9;
+  --color-glyvex-violet:    #7c3aed;
+  --color-glyvex-orange:    #f97316;
+}
+
+/* Light theme */
+.light {
+  --color-glyvex-bg:        #ffffff;
+  --color-glyvex-bg-2:      #f5f7fa;
+  --color-glyvex-card:      #ffffff;
+  --color-glyvex-card-hi:   #f0f3f7;
+  --color-glyvex-border:    #e2e8f0;
+  --color-glyvex-border-hi: #cbd5e1;
+  --color-glyvex-text:      #0f172a;
+  --color-glyvex-muted:     #475569;
+  --color-glyvex-muted-2:   #94a3b8;
+  --color-glyvex-accent:    #0f766e;  /* teal más oscuro para mejor contraste en light */
+  --color-glyvex-cyan:      #0891b2;
+  --color-glyvex-sky:       #0284c7;
+  --color-glyvex-violet:    #6d28d9;
+  --color-glyvex-orange:    #ea6c00;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: 'Exo 2', system-ui, sans-serif;
+}
+
+body {
+  background-color: var(--color-glyvex-bg);
+  color: var(--color-glyvex-text);
+  transition: background-color 0.3s ease, color 0.3s ease;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* JetBrains Mono para código, métricas y logs */
+code, pre, .font-mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Scrollbar personalizado */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-glyvex-border-hi); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-glyvex-muted-2); }
+
+/* Selección de texto */
+::selection { background: rgba(13,148,136,0.25); color: var(--color-glyvex-text); }

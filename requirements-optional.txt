@@ -1,0 +1,14 @@
+# Dependencias pesadas, opt-in. Nada de la app las necesita para arrancar.
+#
+#   pip install -r requirements-optional.txt
+#
+# faster-whisper: transcripción de voz local (motor `whisper` del Bloque 3).
+# Arrastra CTranslate2 y descarga los pesos del modelo la primera vez que se
+# usa (~145 MB para `base`), por eso no va en requirements.txt: empaquetarlo
+# por defecto inflaría el bundle de Tauri de ~10 MB a varios cientos.
+#
+# Hace falta si:
+#   - querés dictado que NO salga a internet, o
+#   - vas a usar la app dentro del bundle de Tauri, donde el WebView no
+#     expone la Web Speech API y este es el único motor que funciona.
+faster-whisper>=1.0

@@ -1,0 +1,138 @@
+{
+  "id": "math",
+  "name": "Matemática",
+  "description": "Aritmética, álgebra, probabilidad, cálculo y estadística",
+  "icon": "🧮",
+  "version": "1.0",
+  "prompts": [
+    {
+      "id": "math_01",
+      "title": "Aritmética multi-paso",
+      "prompt": "Calculá paso a paso: (48376 + 91204) × 3 − 15000 ÷ 4. Mostrá cada paso y el resultado final.",
+      "expected_keywords": [
+        "139580",
+        "418740",
+        "414990"
+      ],
+      "category": "arithmetic",
+      "difficulty": "easy",
+      "expected_answer": "414990"
+    },
+    {
+      "id": "math_02",
+      "title": "Ecuación cuadrática",
+      "prompt": "Resolvé la ecuación cuadrática 2x² − 7x + 3 = 0 usando la fórmula general. Mostrá el discriminante y ambas raíces.",
+      "expected_keywords": [
+        "discriminante",
+        "25",
+        "3",
+        "0.5"
+      ],
+      "category": "algebra",
+      "difficulty": "medium",
+      "expected_answer": "x1 = 3, x2 = 0.5"
+    },
+    {
+      "id": "math_03",
+      "title": "Probabilidad con dados",
+      "prompt": "Si tirás dos dados de 6 caras, ¿cuál es la probabilidad de que la suma sea 7? Mostrá todas las combinaciones posibles y el cálculo.",
+      "expected_keywords": [
+        "36",
+        "1/6"
+      ],
+      "category": "probability",
+      "difficulty": "medium",
+      "expected_answer": "1/6"
+    },
+    {
+      "id": "math_04",
+      "title": "Serie de Taylor — seno(x)",
+      "prompt": "Escribí los primeros dos términos no nulos de la serie de Taylor de sen(x) alrededor de x=0, y usalos para aproximar sen(0.5). Compará con el valor real.",
+      "expected_keywords": [
+        "taylor",
+        "0.479"
+      ],
+      "category": "calculus",
+      "difficulty": "medium",
+      "expected_answer": "≈0.4792 (valor real ≈0.4794)"
+    },
+    {
+      "id": "math_05",
+      "title": "Integral definida — x² de 0 a 3",
+      "prompt": "Calculá la integral definida de x² entre 0 y 3, mostrando el proceso de antiderivada y evaluación en los límites.",
+      "expected_keywords": [
+        "x^3/3",
+        "27",
+        "9"
+      ],
+      "category": "calculus",
+      "difficulty": "easy",
+      "expected_answer": "9"
+    },
+    {
+      "id": "math_06",
+      "title": "Sistema de ecuaciones 2x2",
+      "prompt": "Resolvé el sistema de ecuaciones:\n3x + 2y = 16\nx − y = 2\nMostrá el método usado (sustitución o igualación) y verificá la solución.",
+      "expected_keywords": [
+        "x=4",
+        "y=2",
+        "sustitución"
+      ],
+      "category": "algebra",
+      "difficulty": "medium",
+      "expected_answer": "x = 4, y = 2"
+    },
+    {
+      "id": "math_07",
+      "title": "Estadística — media, mediana, desvío",
+      "prompt": "Dado el dataset [12, 15, 12, 18, 22, 15, 12, 30, 15, 20], calculá la media, la mediana y el desvío estándar poblacional. Mostrá el proceso.",
+      "expected_keywords": [
+        "17.1",
+        "mediana",
+        "15",
+        "desvío"
+      ],
+      "category": "statistics",
+      "difficulty": "medium",
+      "expected_answer": "media = 17.1, mediana = 15, desvío estándar ≈ 5.39"
+    },
+    {
+      "id": "math_08",
+      "title": "Geometría — figura compuesta",
+      "prompt": "Una figura compuesta consiste en un rectángulo de 10cm × 6cm con un semicírculo de diámetro 6cm adosado a uno de sus lados cortos. Calculá el área total de la figura (usá π≈3.1416).",
+      "expected_keywords": [
+        "60",
+        "14.1",
+        "74.1"
+      ],
+      "category": "geometry",
+      "difficulty": "medium",
+      "expected_answer": "≈74.14 cm²"
+    },
+    {
+      "id": "math_09",
+      "title": "Porcentajes y descuentos",
+      "prompt": "Un producto cuesta $8500. Se le aplica un descuento del 15%, y luego sobre ese precio ya rebajado se aplica un recargo del 8% por pago en cuotas. ¿Cuál es el precio final?",
+      "expected_keywords": [
+        "7225",
+        "7803"
+      ],
+      "category": "percentage",
+      "difficulty": "easy",
+      "expected_answer": "$7803"
+    },
+    {
+      "id": "math_10",
+      "title": "Velocidad, tiempo y distancia — dos móviles",
+      "prompt": "Dos autos parten al mismo tiempo desde puntos opuestos de una ruta de 300km, uno hacia el otro. El auto A va a 80 km/h y el auto B a 70 km/h. ¿Cuánto tiempo tardan en encontrarse y a qué distancia del punto de partida de A?",
+      "expected_keywords": [
+        "150",
+        "2 horas",
+        "160"
+      ],
+      "category": "kinematics",
+      "difficulty": "medium",
+      "expected_answer": "2 horas, a 160 km del punto de partida de A"
+    }
+  ]
+}

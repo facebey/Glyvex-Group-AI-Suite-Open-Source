@@ -1,0 +1,139 @@
+{
+  "id": "science",
+  "name": "Ciencias",
+  "description": "Física, química y biología a nivel general",
+  "icon": "🔬",
+  "version": "1.0",
+  "prompts": [
+    {
+      "id": "science_01",
+      "title": "Ley de Ohm",
+      "prompt": "Un circuito tiene una resistencia de 220Ω y está conectado a una fuente de 12V. Calculá la corriente que circula, usando la Ley de Ohm.",
+      "expected_keywords": [
+        "V/R",
+        "0.054",
+        "54.5"
+      ],
+      "category": "physics",
+      "difficulty": "easy",
+      "expected_answer": "≈0.0545 A (54.5 mA)"
+    },
+    {
+      "id": "science_02",
+      "title": "Fisión vs fusión nuclear",
+      "prompt": "Explicá las diferencias clave entre fisión nuclear y fusión nuclear: qué proceso ocurre en cada una, qué elementos suelen usarse, y por qué la fusión libera más energía por unidad de masa.",
+      "expected_keywords": [
+        "fisión",
+        "fusión",
+        "núcleo",
+        "energía"
+      ],
+      "category": "physics",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "science_03",
+      "title": "Energía cinética",
+      "prompt": "Calculá la energía cinética de un objeto de 80kg que se mueve a 20 m/s. Mostrá la fórmula usada.",
+      "expected_keywords": [
+        "16000",
+        "16 kJ"
+      ],
+      "category": "physics",
+      "difficulty": "easy",
+      "expected_answer": "16000 J (16 kJ)"
+    },
+    {
+      "id": "science_04",
+      "title": "Ley de Boyle",
+      "prompt": "Un gas ocupa un volumen de 4 litros a una presión de 2 atm. Si la presión aumenta a 5 atm manteniendo la temperatura constante, ¿cuál será el nuevo volumen? Usá la Ley de Boyle (P1V1=P2V2).",
+      "expected_keywords": [
+        "P1V1",
+        "1.6"
+      ],
+      "category": "physics",
+      "difficulty": "easy",
+      "expected_answer": "1.6 litros"
+    },
+    {
+      "id": "science_05",
+      "title": "Fotosíntesis — ecuación balanceada",
+      "prompt": "Escribí la ecuación química balanceada de la fotosíntesis, indicando reactivos y productos con sus coeficientes correctos.",
+      "expected_keywords": [
+        "CO2",
+        "H2O",
+        "C6H12O6",
+        "O2"
+      ],
+      "category": "biology",
+      "difficulty": "easy",
+      "expected_answer": "6CO2 + 6H2O + luz → C6H12O6 + 6O2"
+    },
+    {
+      "id": "science_06",
+      "title": "Segunda ley de la termodinámica",
+      "prompt": "Enunciá la segunda ley de la termodinámica y dá un ejemplo cotidiano que ilustre el aumento de entropía en un sistema aislado.",
+      "expected_keywords": [
+        "entropía",
+        "sistema aislado"
+      ],
+      "category": "physics",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "science_07",
+      "title": "ADN vs ARN",
+      "prompt": "Explicá las diferencias estructurales y funcionales principales entre el ADN y el ARN (azúcar, bases nitrogenadas, cantidad de cadenas y función biológica).",
+      "expected_keywords": [
+        "desoxirribosa",
+        "ribosa",
+        "uracilo",
+        "timina"
+      ],
+      "category": "biology",
+      "difficulty": "medium",
+      "expected_answer": null
+    },
+    {
+      "id": "science_08",
+      "title": "Velocidad de escape de la Tierra",
+      "prompt": "Calculá la velocidad de escape de la Tierra usando la fórmula v = √(2GM/R), con G=6.674×10⁻¹¹ N·m²/kg², M=5.972×10²⁴ kg y R=6.371×10⁶ m. Mostrá el resultado en km/s.",
+      "expected_keywords": [
+        "11.2",
+        "km/s"
+      ],
+      "category": "physics",
+      "difficulty": "hard",
+      "expected_answer": "≈11.2 km/s"
+    },
+    {
+      "id": "science_09",
+      "title": "Efecto Doppler",
+      "prompt": "Explicá la fórmula del efecto Doppler para ondas sonoras y calculá la frecuencia percibida por un observador estacionario cuando una ambulancia que emite una sirena a 700 Hz se acerca a 30 m/s (velocidad del sonido ≈340 m/s).",
+      "expected_keywords": [
+        "340",
+        "767",
+        "doppler"
+      ],
+      "category": "physics",
+      "difficulty": "medium",
+      "expected_answer": "≈767.7 Hz"
+    },
+    {
+      "id": "science_10",
+      "title": "Neutralización HCl + NaOH",
+      "prompt": "Se mezclan 100 mL de HCl 0.1M con 100 mL de NaOH 0.1M. Calculá el pH de la solución resultante, considerando que es una neutralización completa.",
+      "expected_keywords": [
+        "neutraliza",
+        "pH",
+        "7",
+        "NaCl"
+      ],
+      "category": "chemistry",
+      "difficulty": "medium",
+      "expected_answer": "pH = 7 (neutralización completa, solución de NaCl)"
+    }
+  ]
+}

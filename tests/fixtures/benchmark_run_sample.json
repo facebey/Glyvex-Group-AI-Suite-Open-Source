@@ -1,0 +1,49 @@
+{
+  "run_id": "00000000-0000-4000-8000-000000000001",
+  "started_at": "2026-01-15T10:00:00+00:00",
+  "finished_at": "2026-01-15T10:00:05+00:00",
+  "status": "completed",
+  "config": {
+    "endpoint": "http://127.0.0.1:18080",
+    "api_key": "",
+    "model_name": "test-model",
+    "sets": ["logic"],
+    "thinking_enabled": false,
+    "temperature": 0.0,
+    "max_tokens": 256,
+    "repetitions": 1,
+    "timeout_s": 30
+  },
+  "results": [
+    {
+      "prompt_id": "logic_02",
+      "set_id": "logic",
+      "prompt_title": "Secuencia numérica",
+      "prompt_text": "Continuá la secuencia y explicá la regla: 2, 6, 12, 20, 30, ?",
+      "response": "Hola mundo",
+      "thinking": null,
+      "metrics": {
+        "tps": 45.0,
+        "ttft_ms": 120.0,
+        "tokens_generated": 2,
+        "tokens_thinking": 0,
+        "duration_s": 0.4
+      },
+      "score_auto": 0.0,
+      "score_manual": null,
+      "keywords_found": [],
+      "keywords_missing": ["42"],
+      "error": null
+    }
+  ],
+  "summary": {
+    "total_prompts": 1,
+    "completed": 1,
+    "errors": 0,
+    "avg_tps": 45.0,
+    "avg_ttft_ms": 120.0,
+    "avg_tokens": 2.0,
+    "total_duration_s": 5.0,
+    "keyword_hit_rate": 0.0
+  }
+}

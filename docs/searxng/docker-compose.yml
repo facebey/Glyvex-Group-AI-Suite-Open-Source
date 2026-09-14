@@ -1,0 +1,26 @@
+# SearXNG para la búsqueda web del chat (módulo M3, Bloque 2).
+#
+#   cd docs/searxng
+#   docker compose up -d
+#
+# El contenedor escucha en 8080 adentro, que es el mismo puerto que usa
+# llama-server, de ahí el mapeo a 8888. Si cambiás el puerto, actualizá
+# tools.searxng_url en data/config.json.
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: glyvex-searxng
+    ports:
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID

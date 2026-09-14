@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Glyvex AI Suite</title>
+    <meta name="description" content="Glyvex AI Suite — Gestión, lanzamiento y benchmark de modelos LLM locales" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <script>
+      // Anti-flash: aplica el tema guardado antes de que React monte, así
+      // no se ve un parpadeo del tema dark por defecto al cargar en light.
+      // useLocalStorage guarda el valor con JSON.stringify (así funciona
+      // igual para strings, booleans y objetos), así que acá lo leemos con
+      // JSON.parse en vez de comparar el string crudo — si se comparara
+      // "dark" contra '"dark"' nunca matchea y el anti-flash queda roto.
+      try {
+        var raw = localStorage.getItem('glyvex-theme');
+        var t = 'dark';
+        if (raw) {
+          try { t = JSON.parse(raw); } catch (e) { t = raw; }
+        }
+        if (t !== 'light') t = 'dark';
+        var root = document.documentElement;
+        root.classList.remove('dark', 'light');
+        root.classList.add(t);
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,67 @@
+{
+  "app": {
+    "port": 7860,
+    "theme": "dark",
+    "language": "es"
+  },
+  "hardware": {
+    "gpu_model": "RTX 3090",
+    "vram_gb": 24,
+    "ram_gb": 64,
+    "cpu_model": "i9 12900K",
+    "cpu_cores": 16
+  },
+  "backends": {
+    "llama_server": {
+      "binary_path": "C:\\LLM\\bin\\llama\\llama-server.exe",
+      "default_port": 8080,
+      "enabled": true
+    },
+    "ollama": {
+      "binary_path": "",
+      "default_port": 11434,
+      "enabled": false
+    },
+    "lm_studio": {
+      "binary_path": "",
+      "default_port": 1234,
+      "enabled": false
+    },
+    "unsloth": {
+      "python_env": "",
+      "enabled": false
+    }
+  },
+  "attachments": {
+    "max_file_mb": 16,
+    "max_files_per_message": 10,
+    "max_text_chars": 50000,
+    "image_tokens_estimate": 1024
+  },
+  "tools": {
+    "search_provider": "ddgs",
+    "region": "wt-wt",
+    "searxng_url": "http://127.0.0.1:8888",
+    "brave_api_key": "",
+    "tavily_api_key": "",
+    "max_results": 5,
+    "fetch_max_chars": 8000,
+    "max_rounds": 5,
+    "timeout_s": 20.0,
+    "allow_private_hosts": false,
+    "user_agent": "Glyvex-AI-Suite/0.1"
+  },
+  "stt": {
+    "engine": "auto",
+    "language": "es-AR",
+    "whisper_model": "base",
+    "whisper_device": "auto",
+    "whisper_compute_type": "int8",
+    "whisper_language": ""
+  },
+  "model_dirs": [
+    "C:\\LLM\\gguf"
+  ],
+  "last_used_model": null,
+  "auto_start_last": false
+}

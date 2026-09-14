@@ -1,0 +1,24 @@
+# Configuración mínima de SearXNG para Glyvex-AI-Suite.
+#
+# Lo único indispensable es `json` en search.formats: por defecto SearXNG
+# solo sirve HTML y pedirle format=json devuelve 403 Forbidden. Ese es el
+# error más frecuente al conectar la tool de búsqueda.
+#
+# Antes de levantarlo, reemplazá secret_key por uno propio:
+#   openssl rand -hex 32
+
+use_default_settings: true
+
+server:
+  secret_key: "CAMBIAME-openssl-rand-hex-32"
+  # Instancia privada de un solo usuario: sin limiter no hace falta Valkey
+  # ni un limiter.toml aparte. Si alguna vez la exponés, volvé a activarlo.
+  limiter: false
+  image_proxy: true
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
