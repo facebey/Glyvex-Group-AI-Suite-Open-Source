@@ -11,6 +11,8 @@ Pensada originalmente para una estación de trabajo con **NVIDIA RTX 3090
 de hardware y el launcher degradan de forma segura si no hay GPU NVIDIA
 presente (ver sección de Módulos).
 
+**Sitio de producto:** [ai-suite.glyvexgroup.com](https://ai-suite.glyvexgroup.com/) — [División Glyvex AI](https://ai.glyvexgroup.com/)
+
 ## Screenshots
 
 <!-- Screenshot: Chat.jsx — conversación con streaming, panel de razonamiento colapsado y MetricsBar mostrando t/s en vivo -->
