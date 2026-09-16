@@ -42,7 +42,7 @@ export function ToolActivityLive({ entries }) {
         return (
           <div
             key={entry.id}
-            className="inline-flex items-center gap-2 self-start px-2.5 py-1.5 rounded-md border border-white/10 bg-black/30 text-xs text-glyvex-muted"
+            className="inline-flex items-center gap-2 self-start max-w-full px-2.5 py-1.5 rounded-md border border-white/10 bg-black/30 text-xs text-glyvex-muted"
           >
             {done ? (
               entry.ok ? (
@@ -54,7 +54,7 @@ export function ToolActivityLive({ entries }) {
               <Loader2 size={13} className="animate-spin shrink-0" />
             )}
             <Icon size={13} className="shrink-0" />
-            <span className="truncate max-w-[380px]">
+            <span className="truncate min-w-0">
               {done && entry.summary ? entry.summary : describe(entry)}
             </span>
           </div>

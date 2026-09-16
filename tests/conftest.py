@@ -49,6 +49,7 @@ if str(TESTS_DIR) not in sys.path:
 
 import httpx  # noqa: E402
 import uvicorn  # noqa: E402
+from sqlalchemy import delete as sa_delete  # noqa: E402
 from sqlalchemy.ext.asyncio import (  # noqa: E402
     AsyncSession,
     async_sessionmaker,
@@ -60,6 +61,7 @@ import chat as chat_module  # noqa: E402,F401  (importado para smoke-test de car
 import config as config_module  # noqa: E402
 import database as database_module  # noqa: E402
 import launcher as launcher_module  # noqa: E402
+import llm_metrics as llm_metrics_module  # noqa: E402
 import main as main_module  # noqa: E402
 import metrics as metrics_module  # noqa: E402
 import models as models_module  # noqa: E402
@@ -107,8 +109,18 @@ async def _isolated_state(tmp_path):
         await conn.run_sync(database_module.Base.metadata.create_all)
 
     # Semilla de templates (lee el JSON real en modo solo lectura y los
-    # inserta en la DB en memoria de este test).
+    # inserta en la DB en memoria de este test). _sync_builtin_templates
+    # migra también entradas custom del JSON histórico (comportamiento
+    # productivo); en el test eso importa el estado de runtime del usuario,
+    # así que se quedan solo los predefinidos para que la suite sea
+    # determinística sin importar lo que haya en data/templates/.
     await database_module._sync_builtin_templates()
+    async with test_engine.begin() as conn:
+        await conn.execute(
+            sa_delete(database_module.HWTemplateRow).where(
+                database_module.HWTemplateRow.builtin.is_(False)
+            )
+        )
 
     # -- config.py -----------------------------------------------------
     config_module.config.path = tmp_path / "config.json"
@@ -127,6 +139,14 @@ async def _isolated_state(tmp_path):
     launcher_module.manager._start_monotonic = {}
     launcher_module.manager._stopping = set()
 
+    # -- launcher.py: escritura de logs a tmp -----------------------------
+    # El default de log_file es relativo a BASE_DIR (data/logs/llama-server.log);
+    # los tests de subprocess lanzan fake_llama_binary y _pump_output volca su
+    # stdout a disco, así que con BASE_DIR/LOGS_DIR apuntando a tmp la suite
+    # deja de appendear el data/logs/llama-server.log del proyecto real.
+    launcher_module.BASE_DIR = tmp_path
+    launcher_module.LOGS_DIR = tmp_path / "logs"
+
     # -- launcher.py: templates -> ya no usan disco, van a la DB aislada
     # (self.path se mantiene solo por compatibilidad; lo apuntamos a tmp
     #  para que ningún código legacy pueda escribir sobre el JSON real)
@@ -136,8 +156,18 @@ async def _isolated_state(tmp_path):
     # (prompt_sets NO se toca: apunta a backend/prompts/ real a propósito)
     benchmark_module.RUNS_DIR = tmp_path / "benchmarks"
 
-    # -- metrics.py: historial limpio -------------------------------------
+    # -- metrics.py: historial limpio y store de métricas en tmp ------------
+    # El lifespan no corre con ASGITransport, así que el servicio de fondo no
+    # arranca en los tests; el store se abre acá para probar /series y /query
+    # sin tocar data/metrics.db.
     metrics_module.manager.history.clear()
+    metrics_module.manager.configure_store(tmp_path / "metrics.db")
+
+    # -- llm_metrics.py: sin buffers ni tasas de un test anterior -----------
+    llm_metrics_module.manager.buffers.clear()
+    llm_metrics_module.manager.rates = llm_metrics_module.RateTracker()
+    llm_metrics_module.manager._aggregators.clear()
+    llm_metrics_module.manager._models.clear()
 
     yield
 
@@ -148,6 +178,9 @@ async def _isolated_state(tmp_path):
         except (ProcessLookupError, OSError):
             pass
     await launcher_module.manager.shutdown()
+
+    await llm_metrics_module.manager.stop()
+    await metrics_module.manager.stop()
 
     await test_engine.dispose()
     database_module._engine = None

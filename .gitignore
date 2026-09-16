@@ -16,8 +16,14 @@ vite.config.js.timestamp-*.mjs
 # Build
 frontend/dist/
 
+# Distribucion (clone local del repo open source; la crea sync-oss)
+distribution/oss-clone/
+
 # Data / logs (no commitear datos locales)
+data/config.json
 data/models.json
+data/models_schema_version.json
+data/attachments/
 data/logs/
 data/benchmarks/
 data/*.db

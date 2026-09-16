@@ -25,7 +25,6 @@ import asyncio
 import json
 import logging
 import re
-import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +39,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import delete, select, update
 
 from chat import ThinkingStreamParser
+from stream_metrics import StreamMetrics, reasoning_from_delta
 from database import (
     BenchmarkResultRow,
     BenchmarkRunRow,
@@ -351,6 +351,9 @@ async def _call_model(
         "temperature": temperature,
         "max_tokens": max_tokens,
         "stream": True,
+        # Mismo criterio que chat.py: el usage y los timings exactos llegan en
+        # el último chunk y reemplazan a la cuenta de chunks.
+        "stream_options": {"include_usage": True},
     }
     headers = {"Content-Type": "application/json"}
     if api_key:
@@ -361,10 +364,10 @@ async def _call_model(
 
     response_text = ""
     thinking_text = ""
-    raw_tokens = 0
-    thinking_tokens = 0
-    t_start = time.monotonic()
-    first_token_time: float | None = None
+    # Ver stream_metrics.py: con llama-server el razonamiento llega en
+    # reasoning_content y antes quedaba fuera de TTFT, de t/s y del resultado.
+    stream = StreamMetrics()
+    stream.begin_round()
 
     timeout = httpx.Timeout(connect=5.0, read=float(timeout_s), write=30.0, pool=5.0)
 
@@ -387,24 +390,26 @@ async def _call_model(
                         except json.JSONDecodeError:
                             continue
 
+                        stream.observe_chunk(chunk)
                         choice = (chunk.get("choices") or [{}])[0]
                         delta = choice.get("delta") or {}
+
+                        reasoning = reasoning_from_delta(delta)
+                        if reasoning:
+                            stream.mark_token(thinking=True)
+                            thinking_text += reasoning
+
                         piece = delta.get("content")
                         if not piece:
                             continue
 
-                        now = time.monotonic()
-                        if first_token_time is None:
-                            first_token_time = now
-                        was_thinking = parser.in_thinking
-                        raw_tokens += 1
-                        if was_thinking:
-                            thinking_tokens += 1
-
+                        stream.mark_token(thinking=parser.in_thinking)
                         for kind, text in parser.feed(piece):
                             if kind == "thinking_token":
                                 thinking_text += text
                             else:
+                                if text.strip():
+                                    stream.mark_answer()
                                 response_text += text
 
         for kind, text in parser.flush():
@@ -418,18 +423,14 @@ async def _call_model(
     except (httpx.ConnectError, httpx.HTTPError) as exc:
         return response_text, thinking_text or None, BenchmarkMetrics(), f"Error de conexión: {exc}"
 
-    t_end = time.monotonic()
-    duration_s = round(t_end - t_start, 2)
-    ttft_ms = round((first_token_time - t_start) * 1000, 1) if first_token_time else 0.0
-    tps = (
-        round(raw_tokens / (t_end - first_token_time), 1)
-        if first_token_time and t_end > first_token_time
-        else 0.0
-    )
-
+    stream.end_round()
+    snap = stream.snapshot()
     metrics = BenchmarkMetrics(
-        tps=tps, ttft_ms=ttft_ms, tokens_generated=raw_tokens,
-        tokens_thinking=thinking_tokens, duration_s=duration_s,
+        tps=snap["tps"] or 0.0,
+        ttft_ms=snap["ttft_ms"] or 0.0,
+        tokens_generated=snap["tokens_total"],
+        tokens_thinking=snap["tokens_thinking"],
+        duration_s=snap["duration_s"],
     )
     return response_text, thinking_text or None, metrics, None
 
@@ -693,6 +694,10 @@ class BenchmarkManager:
         self._tasks: dict[str, asyncio.Task] = {}
         self._progress_buffer: dict[str, list[dict[str, Any]]] = {}
         self._subscribers: dict[str, list[asyncio.Queue]] = {}
+        # Total de prompts por run (set cuando se arma la cola): el handler
+        # de cancelación lo necesita para el evento de progreso, y puede
+        # llegar a correr antes de que la cola exista.
+        self._queue_totals: dict[str, int] = {}
 
     def _publish(self, run_id: str, event: dict[str, Any]) -> None:
         buf = self._progress_buffer.setdefault(run_id, [])
@@ -840,10 +845,38 @@ class BenchmarkManager:
         await self._db_create_run(run)
 
         task = asyncio.create_task(self._run(run_id))
+        # Safety net: si el task se cancela ANTES de su primer step, Python
+        # (>= 3.12) nunca le entrega el CancelledError a la coroutine — el
+        # handler de _run jamás corre — y el run quedaría "running" para
+        # siempre. El done callback cubre ese caso.
+        task.add_done_callback(lambda t: self._on_task_done(run_id, t))
         self._tasks[run_id] = task
         return run
 
     async def _run(self, run_id: str) -> None:
+        # El `try` es la PRIMERA línea de la coroutine a propósito: si el
+        # task se cancela antes de su primer step, Python lanza el
+        # CancelledError justo ahí (antes de cualquier otra sentencia), y
+        # sin esto el run quedaría "running" para siempre — el handler no
+        # lo vería.
+        try:
+            await self._run_body(run_id)
+        except asyncio.CancelledError:
+            run = self._runs.get(run_id)
+            if run is not None and run.status == "running":
+                run.status = "cancelled"
+                total = self._queue_totals.get(run_id, 0)
+                self._publish(run_id, {
+                    "type": "cancelled",
+                    "completed": len(run.results),
+                    "total": total,
+                })
+                run.finished_at = datetime.now(timezone.utc).isoformat()
+                await self._db_update_status(run_id, "cancelled", run.finished_at)
+                await self._persist(run)
+            raise
+
+    async def _run_body(self, run_id: str) -> None:
         run = self._runs[run_id]
         cfg = run.config
 
@@ -870,68 +903,59 @@ class BenchmarkManager:
 
         full_queue = prompt_items * max(cfg.repetitions, 1)
         total = len(full_queue)
+        self._queue_totals[run_id] = total
         self._publish(run_id, {"type": "start", "total": total})
 
-        try:
-            for index, item in enumerate(full_queue):
-                set_id = set_lookup[item.id]
-                response_text, thinking_text, metrics, error = await _call_model(
-                    endpoint=cfg.endpoint,
-                    api_key=cfg.api_key,
-                    model_name=cfg.model_name,
-                    prompt_text=item.prompt,
-                    thinking_enabled=cfg.thinking_enabled,
-                    temperature=cfg.temperature,
-                    max_tokens=cfg.max_tokens,
-                    timeout_s=cfg.timeout_s,
-                )
+        for index, item in enumerate(full_queue):
+            set_id = set_lookup[item.id]
+            response_text, thinking_text, metrics, error = await _call_model(
+                endpoint=cfg.endpoint,
+                api_key=cfg.api_key,
+                model_name=cfg.model_name,
+                prompt_text=item.prompt,
+                thinking_enabled=cfg.thinking_enabled,
+                temperature=cfg.temperature,
+                max_tokens=cfg.max_tokens,
+                timeout_s=cfg.timeout_s,
+            )
 
-                found, missing = _check_keywords(response_text, item.expected_keywords)
-                score_auto = (
-                    round(len(found) / len(item.expected_keywords), 2)
-                    if item.expected_keywords
-                    else None
-                )
+            found, missing = _check_keywords(response_text, item.expected_keywords)
+            score_auto = (
+                round(len(found) / len(item.expected_keywords), 2)
+                if item.expected_keywords
+                else None
+            )
 
-                result = BenchmarkResult(
-                    result_id=make_result_id(run_id, index),
-                    prompt_id=item.id,
-                    set_id=set_id,
-                    prompt_title=item.title,
-                    prompt_text=item.prompt,
-                    response=response_text,
-                    thinking=thinking_text,
-                    metrics=metrics if not error else None,
-                    score_auto=score_auto,
-                    keywords_found=found,
-                    keywords_missing=missing,
-                    error=error,
-                )
-                run.results.append(result)
-                await self._db_insert_result(run_id, result)
+            result = BenchmarkResult(
+                result_id=make_result_id(run_id, index),
+                prompt_id=item.id,
+                set_id=set_id,
+                prompt_title=item.title,
+                prompt_text=item.prompt,
+                response=response_text,
+                thinking=thinking_text,
+                metrics=metrics if not error else None,
+                score_auto=score_auto,
+                keywords_found=found,
+                keywords_missing=missing,
+                error=error,
+            )
+            run.results.append(result)
+            await self._db_insert_result(run_id, result)
 
-                self._publish(run_id, {
-                    "type": "result",
-                    "completed": index + 1,
-                    "total": total,
-                    "prompt_id": item.id,
-                    "set_id": set_id,
-                    "prompt_title": item.title,
-                    "ok": error is None,
-                    "tps": metrics.tps if metrics else 0.0,
-                    "error": error,
-                })
+            self._publish(run_id, {
+                "type": "result",
+                "completed": index + 1,
+                "total": total,
+                "prompt_id": item.id,
+                "set_id": set_id,
+                "prompt_title": item.title,
+                "ok": error is None,
+                "tps": metrics.tps if metrics else 0.0,
+                "error": error,
+            })
 
-            run.status = "completed"
-
-        except asyncio.CancelledError:
-            run.status = "cancelled"
-            self._publish(run_id, {"type": "cancelled", "completed": len(run.results), "total": total})
-            run.finished_at = datetime.now(timezone.utc).isoformat()
-            await self._db_update_status(run_id, "cancelled", run.finished_at)
-            await self._persist(run)
-            raise
-
+        run.status = "completed"
         run.finished_at = datetime.now(timezone.utc).isoformat()
         run.summary = self._summarize(run)
         await self._persist(run)
@@ -991,6 +1015,36 @@ class BenchmarkManager:
             return False
         task.cancel()
         return True
+
+    def _on_task_done(self, run_id: str, task: asyncio.Task) -> None:
+        """
+        Corre cuando el task termina. Si terminó cancelado pero el run sigue
+        "running", la coroutine nunca procesó la cancelación (se canceló
+        antes de su primer step: Python >= 3.12 no entrega el CancelledError
+        en ese caso) y hay que completar aquí el finalizado. Si el run ya
+        tiene otro status, el handler de _run ya hizo su trabajo.
+        """
+        run = self._runs.get(run_id)
+        if run is None or run.status != "running" or not task.cancelled():
+            return
+        try:
+            asyncio.get_running_loop().create_task(
+                self._finalize_cancelled(run_id, run)
+            )
+        except RuntimeError:
+            pass  # sin loop activo: el run queda en memoria como cancelled
+
+    async def _finalize_cancelled(self, run_id: str, run: BenchmarkRun) -> None:
+        run.status = "cancelled"
+        total = self._queue_totals.get(run_id, 0)
+        self._publish(run_id, {
+            "type": "cancelled",
+            "completed": len(run.results),
+            "total": total,
+        })
+        run.finished_at = datetime.now(timezone.utc).isoformat()
+        await self._db_update_status(run_id, "cancelled", run.finished_at)
+        await self._persist(run)
 
     @staticmethod
     async def load_from_disk(run_id: str) -> BenchmarkRun | None:

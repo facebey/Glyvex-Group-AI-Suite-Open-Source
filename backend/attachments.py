@@ -598,4 +598,34 @@ def purge_orphans(keep_ids: set[str]) -> int:
     return removed
 
 
-__all__ = ["router", "resolve_image_ref", "purge_orphans", "ATTACHMENTS_DIR"]
+__all__ = [
+    "router",
+    "resolve_image_ref",
+    "purge_orphans",
+    "delete_attachments",
+    "ATTACHMENTS_DIR",
+]
+
+
+def delete_attachments(ids: set[str]) -> int:
+    """
+    Borra los archivos de un conjunto concreto de adjuntos.
+
+    Lo usa el borrado de conversaciones. A diferencia de `purge_orphans`,
+    acá sabemos exactamente qué eliminar, así que no hace falta recorrer la
+    base entera.
+    """
+    if not ids or not ATTACHMENTS_DIR.is_dir():
+        return 0
+    removed = 0
+    for attachment_id in ids:
+        if not attachment_id.isalnum() or len(attachment_id) != 32:
+            continue
+        path = ATTACHMENTS_DIR / attachment_id
+        try:
+            if path.is_file():
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed

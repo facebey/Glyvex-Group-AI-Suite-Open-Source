@@ -24,6 +24,7 @@ Responsabilidades:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -45,6 +46,8 @@ from database import (
 )
 from models import inventory as model_inventory
 
+logger = logging.getLogger("glyvex.launcher")
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 TEMPLATES_PATH = BASE_DIR / "data" / "templates" / "hw_templates.json"
 LOGS_DIR = BASE_DIR / "data" / "logs"
@@ -53,6 +56,41 @@ LOG_BUFFER_MAXLEN = 2000
 HEALTH_CHECK_INTERVAL_S = 2.0
 HEALTH_CHECK_TIMEOUT_TOTAL_S = 30.0
 STOP_GRACE_PERIOD_S = 5.0
+
+# llama-server escribe esta línea cada vez que atiende una tarea sin nada que
+# generar, incluida cada lectura de /metrics que hace llm_metrics.py. Se deja
+# pasar la primera (marca el fin de un request) y se descartan las repetidas.
+IDLE_LOG_MARK = "update_slots: all slots are idle"
+
+
+def should_forward_log_line(line: str, previous_was_idle: bool) -> tuple[bool, bool]:
+    """(reenviar, esta_línea_es_idle). Colapsa idles consecutivos en uno."""
+    is_idle = IDLE_LOG_MARK in line
+    return (not (is_idle and previous_was_idle), is_idle)
+
+
+# Rotación por tamaño de data/logs/*.log: desde que llama-server no recibe
+# --log-file, _pump_output es el único que escribe esos logs, y un proceso
+# que vive mucho tiempo los dejaría crecer sin bound. Se rota a <nombre>.1
+# (se pisa la rotación anterior) al abrir el pump y, durante la escritura,
+# cada LOG_ROTATE_CHECK_BYTES escritos.
+LOG_ROTATE_MAX_BYTES = 10 * 1024 * 1024
+LOG_ROTATE_CHECK_BYTES = 256 * 1024
+
+
+def rotate_log_if_needed(log_path: Path) -> bool:
+    """Rota log -> log.1 si supera el tope. Devuelve True si rotó."""
+    try:
+        if log_path.stat().st_size <= LOG_ROTATE_MAX_BYTES:
+            return False
+        backup = log_path.with_name(log_path.name + ".1")
+        backup.unlink(missing_ok=True)
+        log_path.rename(backup)
+        return True
+    except OSError:
+        logger.warning("no se pudo rotar %s", log_path)
+        return False
+
 
 # Nivel de verbosidad de llama-server. 4 = todo el detalle de carga del modelo,
 # offload de capas y timings por request, que es lo que se ve en el terminal
@@ -108,8 +146,18 @@ class LaunchConfig(BaseModel):
     use_mlock: bool = False
     use_mmap: bool = True
 
+    # -- Speculative decoding (MTP / NextN) ------------------------------
+    # Dos formas de tener MTP:
+    #   - sidecar: un .gguf de draft aparte (mtp-*.gguf) -> mtp_draft_model
+    #   - embebido: el propio modelo trae los tensores blk.N.nextn.*
+    #     (lo detecta el scanner en models.py) -> mtp_embedded=True, sin path
     mtp_draft_model: str | None = None
+    mtp_embedded: bool = False
     n_draft: int = 5
+    # None = no se pasa el flag, llama-server usa su default (f16) para el
+    # draft. Solo tiene efecto si mtp_draft_model o mtp_embedded están activos.
+    cache_type_k_draft: CacheType | None = None
+    cache_type_v_draft: CacheType | None = None
 
     mmproj_path: str | None = None
 
@@ -257,6 +305,24 @@ templates = TemplateStore()
 # --------------------------------------------------------------------------
 
 
+def resolve_log_path(log_file: str, process_id: str) -> Path:
+    # C3: log_file es el archivo donde _pump_output guarda la salida del
+    # proceso (el launcher es el único que lo escribe: ver
+    # build_llama_server_command), así que se valida en start() antes de usarlo. Se resuelve contra BASE_DIR para bloquear path traversal
+    # ("../../etc/x" o absolutos fuera del proyecto) -> 400.
+    if not log_file:
+        return LOGS_DIR / f"{process_id}.log"
+    log_path = (BASE_DIR / log_file).resolve()
+    try:
+        log_path.relative_to(BASE_DIR.resolve())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"log_file debe quedar dentro de {BASE_DIR}: {log_file}",
+        ) from exc
+    return log_path
+
+
 def build_llama_server_command(cfg: LaunchConfig, binary_path: str, model_path: str) -> list[str]:
     cmd: list[str] = [
         binary_path,
@@ -283,8 +349,28 @@ def build_llama_server_command(cfg: LaunchConfig, binary_path: str, model_path: 
         cmd.append("--mlock")
     if not cfg.use_mmap:
         cmd.append("--no-mmap")
-    if cfg.mtp_draft_model:
-        cmd += ["--draft-model", cfg.mtp_draft_model, "--draft", str(cfg.n_draft)]
+    # -- speculative decoding (MTP / NextN) ------------------------------
+    # Nombres de flags según `llama-server --help` (build 2026-09):
+    #   --spec-type draft-mtp     activa el modo de especulación MTP
+    #   --spec-draft-model FNAME  modelo de draft (alias -md / --model-draft);
+    #                             SOLO cuando la cabeza viene en un archivo aparte
+    #   --spec-draft-n-max N      tokens a especular por paso
+    # Ojo: --draft-model nunca existió y --draft/--draft-n/--draft-max fueron
+    # removidos del binario ("use --spec-draft-n-max"), por eso no se usan.
+    if cfg.mtp_draft_model or cfg.mtp_embedded:
+        cmd += ["--spec-type", "draft-mtp"]
+        if cfg.mtp_draft_model:
+            cmd += ["--spec-draft-model", cfg.mtp_draft_model]
+        # Con mtp_embedded y sin path, el propio --model ya trae los tensores
+        # nextn: no se pasa ningún archivo extra.
+        cmd += ["--spec-draft-n-max", str(cfg.n_draft)]
+        # cache_type_k/v del DRAFT son flags distintos de los del modelo
+        # principal (--spec-draft-type-k/-v, alias -ctkd/-ctvd) — por default
+        # llama-server usa f16 para el draft aunque el principal esté en q4_0.
+        if cfg.cache_type_k_draft:
+            cmd += ["--spec-draft-type-k", cfg.cache_type_k_draft]
+        if cfg.cache_type_v_draft:
+            cmd += ["--spec-draft-type-v", cfg.cache_type_v_draft]
     if cfg.mmproj_path:
         cmd += ["--mmproj", cfg.mmproj_path]
     if cfg.lora_path:
@@ -329,10 +415,19 @@ def build_llama_server_command(cfg: LaunchConfig, binary_path: str, model_path: 
 
     if cfg.api_key:
         cmd += ["--api-key", cfg.api_key]
-    if cfg.log_file:
-        cmd += ["--log-file", cfg.log_file]
+    # Sin --log-file a propósito: _pump_output ya guarda la salida en
+    # resolve_log_path(cfg.log_file). Con el flag, llama-server escribía el
+    # mismo archivo en paralelo (líneas duplicadas, sin el filtro de idle) y
+    # además resolvía la ruta relativa contra su propio directorio de trabajo.
 
     cmd += ["--verbosity", str(LLAMA_SERVER_VERBOSITY)]
+
+    # Endpoint Prometheus /metrics: lo lee llm_metrics.py para la tira de
+    # vitales del Launcher y el histórico del Monitor. Ollama y LM Studio no
+    # lo tienen; hoy esta función solo se llama para llama_server, pero la
+    # condición queda explícita por si se reutiliza.
+    if cfg.backend == "llama_server":
+        cmd.append("--metrics")
 
     return cmd
 
@@ -455,15 +550,37 @@ class ModelProcessManager:
 
     async def _pump_output(self, process_id: str, process: asyncio.subprocess.Process, log_path: Path) -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiofiles.open(log_path, "a", encoding="utf-8") as log_fh:
-            assert process.stdout is not None
+        assert process.stdout is not None
+        previous_was_idle = False
+        log_fh = None
+        written_since_check = 0
+        try:
             while True:
+                if log_fh is None:
+                    rotate_log_if_needed(log_path)
+                    log_fh = await aiofiles.open(log_path, "a", encoding="utf-8")
                 raw_line = await process.stdout.readline()
                 if not raw_line:
                     break
                 line = raw_line.decode("utf-8", errors="replace").rstrip("\n")
+                forward, previous_was_idle = should_forward_log_line(line, previous_was_idle)
+                if not forward:
+                    continue
                 self._publish_log_line(process_id, line)
                 await log_fh.write(line + "\n")
+                written_since_check += len(line) + 1
+                if written_since_check >= LOG_ROTATE_CHECK_BYTES:
+                    written_since_check = 0
+                    try:
+                        if log_path.stat().st_size > LOG_ROTATE_MAX_BYTES:
+                            await log_fh.flush()
+                            await log_fh.close()
+                            log_fh = None  # rota y reabre en la siguiente vuelta
+                    except OSError:
+                        pass
+        finally:
+            if log_fh is not None:
+                await log_fh.close()
 
     async def _watch_exit(self, process_id: str, process: asyncio.subprocess.Process) -> None:
         returncode = await process.wait()
@@ -475,12 +592,20 @@ class ModelProcessManager:
             info.state = "stopped"
             info.pid = None
             self._stopping.discard(process_id)
+            logger.info(
+                "proceso detenido: id=%s backend=%s model=%s",
+                process_id, info.backend, info.model_name,
+            )
         else:
             info.state = "error"
             info.pid = None
             info.error_message = f"El proceso terminó inesperadamente (código {returncode})"
             self._publish_log_line(
                 process_id, f"[glyvex] proceso terminado inesperadamente, código {returncode}"
+            )
+            logger.error(
+                "proceso termino inesperadamente: id=%s backend=%s model=%s codigo=%s",
+                process_id, info.backend, info.model_name, returncode,
             )
 
     # -- start / stop / restart ------------------------------------------
@@ -508,9 +633,16 @@ class ModelProcessManager:
                 error_message=None if is_up else "LM Studio no responde en ese host/puerto",
                 launch_config=cfg.model_dump(),
             )
+            logger.info(
+                "start lm_studio: model=%s host=%s port=%s up=%s",
+                model.name, cfg.host, cfg.port, is_up,
+            )
             self._info[process_id] = info
             self._start_monotonic[process_id] = time.monotonic()
             return info
+
+        # C3: validar ANTES de lanzar: _pump_output escribe en log_path.
+        log_path = resolve_log_path(cfg.log_file, process_id)
 
         if cfg.backend == "llama_server":
             binary_path = config.get("backends.llama_server.binary_path")
@@ -537,6 +669,11 @@ class ModelProcessManager:
                 status_code=400, detail=f"No se pudo lanzar el proceso: {exc}"
             ) from exc
 
+        logger.info(
+            "start %s: model=%s pid=%s",
+            cfg.backend, model.name, process.pid,
+        )
+
         info = ProcessInfo(
             process_id=process_id,
             model_id=cfg.model_id,
@@ -555,8 +692,6 @@ class ModelProcessManager:
         self._start_monotonic[process_id] = time.monotonic()
         self._log_buffers[process_id] = deque(maxlen=LOG_BUFFER_MAXLEN)
 
-        log_path = BASE_DIR / cfg.log_file if cfg.log_file else LOGS_DIR / f"{process_id}.log"
-
         self._spawn_background(self._pump_output(process_id, process, log_path))
         self._spawn_background(self._watch_exit(process_id, process))
         self._spawn_background(self._monitor_health(process_id))
@@ -569,6 +704,9 @@ class ModelProcessManager:
             raise HTTPException(status_code=404, detail="Proceso no encontrado")
 
         process = self._handles.get(process_id)
+        logger.info(
+            "stop: id=%s pid=%s", process_id, process.pid if process else None
+        )
         if process is None:
             # lm_studio (no administramos el proceso) u otro ya finalizado.
             info.state = "stopped"
@@ -597,6 +735,7 @@ class ModelProcessManager:
         info = self._info.get(process_id)
         if info is None:
             raise HTTPException(status_code=404, detail="Proceso no encontrado")
+        logger.info("restart: id=%s", process_id)
         cfg = LaunchConfig(**info.launch_config)
         if info.pid is not None:
             await self.stop(process_id)

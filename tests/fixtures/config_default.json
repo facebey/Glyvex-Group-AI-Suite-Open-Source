@@ -1,6 +1,6 @@
 {
   "app": {
-    "port": 7860,
+    "port": 7981,
     "theme": "dark",
     "language": "es"
   },

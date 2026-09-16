@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Trash2,
 } from "lucide-react";
+import { useLlmStream } from "../hooks/useLlmStream.js";
 
 // Espejo de SAMPLING_PRESETS de backend/launcher.py. Vive acá para poder
 // previsualizar los valores sin round-trip; si cambian en el backend, hay
@@ -65,7 +66,10 @@ const DEFAULT_LAUNCH_CONFIG = {
   use_mlock: false,
   use_mmap: true,
   mtp_draft_model: "",
+  mtp_embedded: false,
   n_draft: 5,
+  cache_type_k_draft: "",
+  cache_type_v_draft: "",
   mmproj_path: "",
   lora_path: "",
   lora_scale: 1.0,
@@ -100,7 +104,7 @@ const DEFAULT_LAUNCH_CONFIG = {
 const TEMPLATE_FIELDS = [
   "n_ctx","n_batch","n_ubatch","n_gpu_layers","gpu_mode",
   "cache_type_k","cache_type_v","flash_attn","use_mlock","use_mmap",
-  "n_draft","n_parallel",
+  "n_draft","n_parallel","cache_type_k_draft","cache_type_v_draft",
   // Razonamiento
   "thinking_enabled","budget_tokens",
   // Sampling
@@ -357,23 +361,120 @@ function ModelTable({ modelList, selectedId, onSelect }) {
   );
 }
 
+// Etiqueta que aparece al lado de un checkbox cuando la capacidad la detectó
+// el scanner leyendo el header del GGUF, no el usuario a mano.
+function DetectedBadge({ children }) {
+  return (
+    <span className="px-1.5 py-0.5 rounded text-[10px] bg-glyvex-accent/15 text-glyvex-accent border border-glyvex-accent/30 shrink-0">
+      {children}
+    </span>
+  );
+}
+
+// Selector de origen para una capacidad que puede venir de más de un lado:
+// horneada en el propio modelo, un archivo aparte detectado en la carpeta,
+// o un path manual que el usuario tipea. `options` es una lista de
+// [key, label] — armada por el caller según lo que haya disponible para
+// ESTE modelo puntual (siempre incluye "manual" como salida de emergencia).
+function SourcePicker({ value, options, onChange }) {
+  return (
+    <div className="flex gap-2 mb-1.5 text-xs flex-wrap">
+      {options.map(([key, label]) => (
+        <button key={key} type="button" onClick={() => onChange(key)}
+          className={
+            "px-2 py-1 rounded border " +
+            (value === key
+              ? "border-glyvex-accent text-glyvex-accent bg-glyvex-accent/10"
+              : "border-white/10 text-glyvex-muted hover:text-glyvex-text")
+          }>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function GroupCard({ group, onSelect }) {
   const [expanded, setExpanded] = useState(false);
   const [selectedBaseId, setSelectedBaseId] = useState(group.base_models[0]?.id ?? null);
   const [useMtp, setUseMtp] = useState(false);
+  const [mtpSource, setMtpSource] = useState("none");       // "embedded" | "sidecar" | "manual" | "none"
   const [selectedMtpId, setSelectedMtpId] = useState(group.mtp_models[0]?.id ?? null);
+  const [manualMtpPath, setManualMtpPath] = useState("");
   const [useMmproj, setUseMmproj] = useState(false);
+  const [mmprojSource, setMmprojSource] = useState("none"); // "embedded" | "sidecar" | "manual" | "none"
   const [selectedMmprojId, setSelectedMmprojId] = useState(group.mmproj_models[0]?.id ?? null);
+  const [manualMmprojPath, setManualMmprojPath] = useState("");
+
+  // Apenas el usuario toca un control a mano, el autodetect deja de pisarlo
+  // (incluso si después cambia de cuantización base).
+  const mtpTouchedRef = useRef(false);
+  const mmprojTouchedRef = useRef(false);
+
+  const selectedBase = group.base_models.find((m) => m.id === selectedBaseId) ?? null;
+
+  const hasEmbeddedMtp = Boolean(selectedBase?.mtp_embedded);
+  const hasSidecarMtp = group.mtp_models.length > 0;
+  const hasEmbeddedVision = Boolean(selectedBase?.has_vision_embedded);
+  const hasSidecarVision = group.mmproj_models.length > 0;
+
+  // Opciones del picker: "manual" está SIEMPRE disponible como salida de
+  // emergencia, aunque el scanner haya detectado algo — el detector puede
+  // equivocarse, o el usuario simplemente puede preferir otro archivo.
+  const mtpOptions = [
+    ...(hasEmbeddedMtp ? [["embedded", "Incluido en el modelo"]] : []),
+    ...(hasSidecarMtp ? [["sidecar", "Archivo detectado en la carpeta"]] : []),
+    ["manual", "Path manual"],
+  ];
+  const visionOptions = [
+    ...(hasEmbeddedVision ? [["embedded", "Incluido en el modelo"]] : []),
+    ...(hasSidecarVision ? [["sidecar", "Archivo detectado en la carpeta"]] : []),
+    ["manual", "Path manual"],
+  ];
+
+  // Default sugerido: si el modelo lo trae adentro, esa es la opción; si no,
+  // el archivo aparte; si no hay ninguno, apagado. Se recalcula al cambiar de
+  // cuantización base porque cada .gguf de la carpeta puede diferir.
+  useEffect(() => {
+    if (mtpTouchedRef.current) return;
+    if (hasEmbeddedMtp) { setUseMtp(true); setMtpSource("embedded"); }
+    else if (hasSidecarMtp) { setUseMtp(true); setMtpSource("sidecar"); }
+    else { setUseMtp(false); setMtpSource("none"); }
+  }, [selectedBaseId, hasEmbeddedMtp, hasSidecarMtp]);
+
+  useEffect(() => {
+    if (mmprojTouchedRef.current) return;
+    if (hasEmbeddedVision) { setUseMmproj(true); setMmprojSource("embedded"); }
+    else if (hasSidecarVision) { setUseMmproj(false); setMmprojSource("sidecar"); }
+    else { setUseMmproj(false); setMmprojSource("none"); }
+  }, [selectedBaseId, hasEmbeddedVision, hasSidecarVision]);
 
   if (group.base_models.length === 0) return null;
 
   function handleConfigureClick() {
     if (!selectedBaseId) return;
-    const mtpModel = useMtp ? group.mtp_models.find((m) => m.id === selectedMtpId) : null;
-    const mmprojModel = useMmproj ? group.mmproj_models.find((m) => m.id === selectedMmprojId) : null;
+    const mtpSidecarModel = useMtp && mtpSource === "sidecar"
+      ? group.mtp_models.find((m) => m.id === selectedMtpId)
+      : null;
+    const mtpPath = useMtp
+      ? (mtpSource === "sidecar" ? (mtpSidecarModel?.path ?? "")
+        : mtpSource === "manual" ? manualMtpPath.trim()
+        : "")
+      : "";
+
+    const mmprojSidecarModel = useMmproj && mmprojSource === "sidecar"
+      ? group.mmproj_models.find((m) => m.id === selectedMmprojId)
+      : null;
+    const mmprojPath = useMmproj
+      ? (mmprojSource === "sidecar" ? (mmprojSidecarModel?.path ?? "")
+        : mmprojSource === "manual" ? manualMmprojPath.trim()
+        : "")
+      : "";
+
     onSelect(selectedBaseId, {
-      mtp_draft_model: mtpModel ? mtpModel.path : "",
-      mmproj_path: mmprojModel ? mmprojModel.path : "",
+      mtp_draft_model: mtpPath,
+      mtp_embedded: useMtp && mtpSource === "embedded",
+      mmproj_path: mmprojPath,
     });
   }
 
@@ -405,29 +506,71 @@ function GroupCard({ group, onSelect }) {
               ))}
             </div>
           </div>
-          {group.mtp_models.length > 0 && (
+          {(hasEmbeddedMtp || hasSidecarMtp) && (
             <div>
               <label className="flex items-center gap-2 text-sm cursor-pointer mb-1.5">
-                <input type="checkbox" checked={useMtp} onChange={(e) => setUseMtp(e.target.checked)} className="accent-glyvex-accent" />
+                <input type="checkbox" checked={useMtp}
+                  onChange={(e) => {
+                    mtpTouchedRef.current = true;
+                    setUseMtp(e.target.checked);
+                    if (e.target.checked && mtpSource === "none") {
+                      setMtpSource(hasEmbeddedMtp ? "embedded" : "sidecar");
+                    }
+                  }}
+                  className="accent-glyvex-accent" />
                 MTP draft model
+                {useMtp && mtpSource === "embedded" && <DetectedBadge>detectado · incluido en el modelo</DetectedBadge>}
               </label>
-              {useMtp && group.mtp_models.length > 1 && (
-                <select className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text" value={selectedMtpId ?? ""} onChange={(e) => setSelectedMtpId(e.target.value)}>
+              {useMtp && (
+                <SourcePicker value={mtpSource} options={mtpOptions}
+                  onChange={(v) => { mtpTouchedRef.current = true; setMtpSource(v); }} />
+              )}
+              {useMtp && mtpSource === "sidecar" && group.mtp_models.length > 1 && (
+                <select className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text"
+                  value={selectedMtpId ?? ""}
+                  onChange={(e) => { mtpTouchedRef.current = true; setSelectedMtpId(e.target.value); }}>
                   {group.mtp_models.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.size_gb} GB)</option>)}
                 </select>
               )}
+              {useMtp && mtpSource === "manual" && (
+                <input className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text placeholder:text-glyvex-muted/60"
+                  value={manualMtpPath}
+                  onChange={(e) => { mtpTouchedRef.current = true; setManualMtpPath(e.target.value); }}
+                  placeholder="C:\ruta\a\tu-draft.gguf" />
+              )}
             </div>
           )}
-          {group.mmproj_models.length > 0 && (
+          {(hasEmbeddedVision || hasSidecarVision) && (
             <div>
               <label className="flex items-center gap-2 text-sm cursor-pointer mb-1.5">
-                <input type="checkbox" checked={useMmproj} onChange={(e) => setUseMmproj(e.target.checked)} className="accent-glyvex-accent" />
+                <input type="checkbox" checked={useMmproj}
+                  onChange={(e) => {
+                    mmprojTouchedRef.current = true;
+                    setUseMmproj(e.target.checked);
+                    if (e.target.checked && mmprojSource === "none") {
+                      setMmprojSource(hasEmbeddedVision ? "embedded" : "sidecar");
+                    }
+                  }}
+                  className="accent-glyvex-accent" />
                 Módulo de visión (mmproj)
+                {useMmproj && mmprojSource === "embedded" && <DetectedBadge>detectado · incluido en el modelo</DetectedBadge>}
               </label>
-              {useMmproj && group.mmproj_models.length > 1 && (
-                <select className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text" value={selectedMmprojId ?? ""} onChange={(e) => setSelectedMmprojId(e.target.value)}>
+              {useMmproj && (
+                <SourcePicker value={mmprojSource} options={visionOptions}
+                  onChange={(v) => { mmprojTouchedRef.current = true; setMmprojSource(v); }} />
+              )}
+              {useMmproj && mmprojSource === "sidecar" && group.mmproj_models.length > 1 && (
+                <select className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text"
+                  value={selectedMmprojId ?? ""}
+                  onChange={(e) => { mmprojTouchedRef.current = true; setSelectedMmprojId(e.target.value); }}>
                   {group.mmproj_models.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.size_gb} GB)</option>)}
                 </select>
+              )}
+              {useMmproj && mmprojSource === "manual" && (
+                <input className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text placeholder:text-glyvex-muted/60"
+                  value={manualMmprojPath}
+                  onChange={(e) => { mmprojTouchedRef.current = true; setManualMmprojPath(e.target.value); }}
+                  placeholder="C:\ruta\a\tu-mmproj.gguf" />
               )}
             </div>
           )}
@@ -437,6 +580,201 @@ function GroupCard({ group, onSelect }) {
             <ChevronRight size={14} />
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Vitales del servidor llama-server (WS /api/llm-metrics/{id}/stream)
+// ---------------------------------------------------------------------------
+
+const VITALS_POINTS = 60;
+
+function contextTitle(snap) {
+  if (!snap || snap.ctx_used == null) {
+    return "Este build de llama-server no expone el contexto actual: se muestra el pico observado";
+  }
+  if (snap.ctx_source === "kv_cache") return "Tokens en el KV cache ahora";
+  if (snap.slots_busy === 0) {
+    return "Secuencia de la última conversación, que sigue en el KV cache para reutilizarse (dato de /slots)";
+  }
+  return "Tokens en la secuencia actual: prompt + generados hasta ahora (dato de /slots)";
+}
+
+function vitalsCtxColor(ratio) {
+  if (ratio == null) return "#9ca3af";
+  if (ratio < 0.5) return "#22c55e";
+  if (ratio <= 0.8) return "#f59e0b";
+  return "#ef4444";
+}
+
+/** Sparkline mínima en SVG: sin recharts, para una tira que se actualiza cada segundo. */
+function MiniSpark({ values, color = "#06b6d4", width = 72, height = 20 }) {
+  const points = values.filter((v) => v != null);
+  if (points.length < 2) return <svg width={width} height={height} aria-hidden="true" />;
+  const max = Math.max(...points);
+  const min = Math.min(...points);
+  const span = max - min || 1;
+  const step = width / (values.length - 1 || 1);
+  // Los null cortan la línea: un rato sin generar se ve como hueco, no como caída a 0.
+  const segments = [];
+  let current = [];
+  values.forEach((v, i) => {
+    if (v == null) {
+      if (current.length) segments.push(current);
+      current = [];
+      return;
+    }
+    const y = height - 2 - ((v - min) / span) * (height - 4);
+    current.push(`${(i * step).toFixed(1)},${y.toFixed(1)}`);
+  });
+  if (current.length) segments.push(current);
+  return (
+    <svg width={width} height={height} aria-hidden="true">
+      {segments.map((seg, i) =>
+        seg.length === 1 ? (
+          <circle key={i} cx={seg[0].split(",")[0]} cy={seg[0].split(",")[1]} r="1.5" fill={color} />
+        ) : (
+          <polyline key={i} points={seg.join(" ")} fill="none" stroke={color} strokeWidth="1.5" />
+        )
+      )}
+    </svg>
+  );
+}
+
+/**
+ * Tira de vitales de un proceso llama-server: velocidad de generación,
+ * contexto y cola. Usa useLlmStream (buffer inicial por /history + WS con
+ * reconexión) para no empezar la sparkline vacía ni quedar con datos
+ * obsoletos si cae la conexión.
+ */
+function ServerVitalsStrip({ processId, state }) {
+  const [snaps, setSnaps] = useState([]);
+  const { connected } = useLlmStream({
+    processId,
+    onHistory: (data) => setSnaps(data.slice(-VITALS_POINTS)),
+    onSnap: (snap) =>
+      setSnaps((prev) => {
+        const next = [...prev, snap];
+        return next.length > VITALS_POINTS ? next.slice(next.length - VITALS_POINTS) : next;
+      }),
+  });
+
+  useEffect(() => {
+    setSnaps([]);
+  }, [processId]);
+
+  const last = snaps[snaps.length - 1] || null;
+  const tgValues = snaps.map((s) => s.tg_tps ?? null);
+  const lastTg = [...tgValues].reverse().find((v) => v != null) ?? null;
+  const generatingNow = last?.tg_tps != null;
+
+  if (state !== "running" && !last) {
+    return (
+      <div className="px-3 py-2 rounded-md border border-white/10 bg-black/30 text-xs text-glyvex-muted">
+        Vitales del servidor: disponibles cuando el proceso esté listo.
+      </div>
+    );
+  }
+
+  const ctxTotal = last?.ctx_total ?? null;
+  const ctxUsed = last?.ctx_used ?? null;
+  const ctxRatio = last?.ctx_usage_ratio ?? null;
+  const ctxPeak = last?.ctx_peak ?? null;
+  const processing = last?.requests_processing ?? null;
+  const deferred = last?.requests_deferred ?? null;
+  const cacheTotal = last?.cache_hit_pct_total ?? null;
+  const cacheInterval = last?.cache_hit_pct ?? null;
+  const specTotal = last?.spec_accept_pct_total ?? null;
+  const specInterval = last?.spec_accept_pct ?? null;
+
+  return (
+    <div className="px-3 py-2 rounded-md border border-white/10 bg-black/30 text-xs space-y-1.5" aria-live="off">
+      {state === "running" && !connected && last && (
+        <p className="text-amber-400" title="Los valores mostrados son del último snap recibido">
+          Stream de métricas caído: reconectando… (valores obsoletos)
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <div
+          className="flex items-center gap-2"
+          title={generatingNow ? "Velocidad de generación actual" : "Sin generación ahora: último valor medido"}
+        >
+          <span className="text-glyvex-muted">tg</span>
+          <span className={`font-medium tabular-nums ${generatingNow ? "text-glyvex-text" : "text-glyvex-muted"}`}>
+            {lastTg != null ? `${lastTg.toFixed(1)} t/s` : "—"}
+          </span>
+          <MiniSpark values={tgValues} />
+        </div>
+
+        <div
+          className="flex items-center gap-2"
+          title={contextTitle(last)}
+        >
+          <span className="text-glyvex-muted">ctx</span>
+          {ctxUsed != null ? (
+            <>
+              <span className="font-medium tabular-nums text-glyvex-text">
+                {ctxUsed.toLocaleString()}{ctxTotal ? ` / ${ctxTotal.toLocaleString()}` : ""}
+              </span>
+              {ctxRatio != null && (
+                <span className="w-16 h-1.5 rounded-full bg-black/40 overflow-hidden">
+                  <span
+                    className="block h-full rounded-full"
+                    style={{ width: `${Math.min(100, ctxRatio * 100)}%`, backgroundColor: vitalsCtxColor(ctxRatio) }}
+                  />
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="font-medium tabular-nums text-glyvex-text">
+              {ctxPeak != null ? `pico ${ctxPeak.toLocaleString()}` : "—"}
+              {ctxTotal ? <span className="text-glyvex-muted font-normal"> / {ctxTotal.toLocaleString()}</span> : null}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2" title="Requests procesándose y esperando un slot libre">
+          <span className="text-glyvex-muted">cola</span>
+          <span className="font-medium tabular-nums text-glyvex-text">
+            {processing ?? "—"}
+            <span className="text-glyvex-muted font-normal"> en curso</span>
+            {deferred ? (
+              <span className="text-amber-400"> · {deferred} en espera</span>
+            ) : null}
+          </span>
+        </div>
+
+        {cacheTotal != null && (
+          <div
+            className="flex items-center gap-2"
+            title={
+              "Tokens de prompt reutilizados del caché desde que arrancó el servidor" +
+              (cacheInterval != null ? `. Último request: ${cacheInterval.toFixed(1)} %` : "")
+            }
+          >
+            <span className="text-glyvex-muted">caché</span>
+            <span className="font-medium tabular-nums text-glyvex-text">{cacheTotal.toFixed(1)} %</span>
+          </div>
+        )}
+
+        {specTotal != null && (
+          <div
+            className="flex items-center gap-2"
+            title={
+              "Tokens propuestos por el draft (MTP) que el modelo aceptó, desde que arrancó" +
+              (specInterval != null ? `. Último intervalo: ${specInterval.toFixed(1)} %` : "")
+            }
+          >
+            <span className="text-glyvex-muted">MTP</span>
+            <span className="font-medium tabular-nums text-glyvex-text">{specTotal.toFixed(1)} % aceptado</span>
+          </div>
+        )}
+      </div>
+
+      {last && !last.scrape_ok && last.scrape_error && (
+        <p className="text-amber-400">{last.scrape_error}</p>
       )}
     </div>
   );
@@ -712,24 +1050,39 @@ export default function Launcher() {
 
   // Seleccionar un modelo desde una GroupCard: NO lanza, solo preselecciona
   // el modelo + los overrides y lleva al panel de configuración.
-  const handleSelectModel = useCallback((modelId, configOverrides = {}) => {
+  const handleSelectModel = useCallback((modelId, configOverrides = null) => {
     setSelectedId(modelId);
-    if (Object.keys(configOverrides).length > 0) {
+    if (configOverrides && Object.keys(configOverrides).length > 0) {
+      // Viene de una GroupCard: trae la decisión explícita del usuario sobre
+      // MTP y visión.
       setLaunchConfig((prev) => ({ ...prev, ...configOverrides }));
+    } else {
+      // Viene de la vista List (sin overrides): se derivan los defaults del
+      // propio modelo, para que no quede pegada la config del modelo anterior.
+      const model = modelList.find((m) => m.id === modelId);
+      setLaunchConfig((prev) => ({
+        ...prev,
+        mtp_draft_model: "",
+        mtp_embedded: Boolean(model?.mtp_embedded),
+      }));
     }
     setActionError(null);
     setScrollTick((tick) => tick + 1);
-  }, []);
+  }, [modelList]);
 
   const handleLaunch = useCallback(async () => {
     if (!selectedModel) return;
     setLaunching(true);
     setActionError(null);
     try {
+      // Los selects opcionales usan "" como "automático"; el backend espera
+      // null (no pasar el flag) — normalizar antes de enviar.
       const payload = {
         ...launchConfig,
         model_id: selectedModel.id,
         mtp_draft_model: launchConfig.mtp_draft_model || null,
+        cache_type_k_draft: launchConfig.cache_type_k_draft || null,
+        cache_type_v_draft: launchConfig.cache_type_v_draft || null,
         mmproj_path: launchConfig.mmproj_path || null,
         lora_path: launchConfig.lora_path || null,
       };
@@ -1024,12 +1377,58 @@ export default function Launcher() {
                 </Panel>
 
                 <Panel icon={Puzzle} title="Módulos opcionales">
+                  {selectedModel.mtp_embedded && (
+                    <Toggle
+                      label={`MTP incluido en el modelo${selectedModel.mtp_embedded_layers ? ` (${selectedModel.mtp_embedded_layers} capa${selectedModel.mtp_embedded_layers !== 1 ? "s" : ""} nextn)` : ""}`}
+                      checked={launchConfig.mtp_embedded}
+                      onChange={(v) => updateConfig({ mtp_embedded: v })}
+                    />
+                  )}
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="MTP draft model (path)"><input className={inputClasses} value={launchConfig.mtp_draft_model || ""} onChange={(e) => updateConfig({ mtp_draft_model: e.target.value })} placeholder="/models/draft.gguf" /></Field>
-                    <Field label="n_draft"><input type="number" className={inputClasses} value={launchConfig.n_draft} onChange={(e) => updateConfig({ n_draft: Number(e.target.value) })} /></Field>
+                    <Field
+                      label="MTP draft model (path)"
+                      hint={launchConfig.mtp_embedded ? "El modelo ya trae la cabeza MTP: no necesita un archivo aparte." : undefined}>
+                      <input className={inputClasses}
+                        value={launchConfig.mtp_draft_model || ""}
+                        onChange={(e) => updateConfig({ mtp_draft_model: e.target.value })}
+                        placeholder={launchConfig.mtp_embedded ? "No requiere path" : "/models/draft.gguf"}
+                        disabled={launchConfig.mtp_embedded} />
+                    </Field>
+                    <Field label="n_draft" hint="Tokens a especular por paso (--spec-draft-n-max).">
+                      <input type="number" className={inputClasses} value={launchConfig.n_draft} onChange={(e) => updateConfig({ n_draft: Number(e.target.value) })} />
+                    </Field>
                   </div>
-                  <Field label="Módulo de visión — mmproj (path)" hint={selectedModel.has_mmproj ? "Este modelo tiene un mmproj detectado en el scan." : undefined}>
-                    <input className={inputClasses} value={launchConfig.mmproj_path || (selectedModel.mmproj_path ?? "")} onChange={(e) => updateConfig({ mmproj_path: e.target.value })} placeholder="/models/mmproj.gguf" />
+                  {(launchConfig.mtp_embedded || launchConfig.mtp_draft_model) && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="cache_type_k (draft)" hint="Default de llama-server: f16, aunque el modelo principal use otro.">
+                        <select className={selectClasses} value={launchConfig.cache_type_k_draft}
+                          onChange={(e) => updateConfig({ cache_type_k_draft: e.target.value })}>
+                          <option value="">Automático (f16)</option>
+                          {CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </Field>
+                      <Field label="cache_type_v (draft)">
+                        <select className={selectClasses} value={launchConfig.cache_type_v_draft}
+                          onChange={(e) => updateConfig({ cache_type_v_draft: e.target.value })}>
+                          <option value="">Automático (f16)</option>
+                          {CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </Field>
+                    </div>
+                  )}
+                  <Field
+                    label="Módulo de visión — mmproj (path)"
+                    hint={
+                      selectedModel.has_vision_embedded
+                        ? "Este modelo trae el encoder de visión adentro: no necesita un mmproj aparte."
+                        : selectedModel.has_mmproj
+                          ? "Este modelo tiene un mmproj detectado en el scan."
+                          : undefined
+                    }>
+                    <input className={inputClasses}
+                      value={launchConfig.mmproj_path || (selectedModel.has_vision_embedded ? "" : (selectedModel.mmproj_path ?? ""))}
+                      onChange={(e) => updateConfig({ mmproj_path: e.target.value })}
+                      placeholder={selectedModel.has_vision_embedded ? "No requiere path" : "/models/mmproj.gguf"} />
                   </Field>
                   <Field label="LoRA (path)"><input className={inputClasses} value={launchConfig.lora_path || ""} onChange={(e) => updateConfig({ lora_path: e.target.value })} placeholder="/models/lora.gguf" /></Field>
                   <Field label={`lora_scale: ${Number(launchConfig.lora_scale).toFixed(2)}`}><input type="range" min={0} max={2} step={0.05} value={launchConfig.lora_scale} onChange={(e) => updateConfig({ lora_scale: Number(e.target.value) })} className="w-full accent-glyvex-accent" /></Field>
@@ -1166,6 +1565,9 @@ export default function Launcher() {
                   {processInfo.state === "running" && <span className="text-sm text-emerald-400">✓ Servidor listo</span>}
                 </div>
                 {processInfo.error_message && <p className="text-sm text-red-400">{processInfo.error_message}</p>}
+                {processInfo.backend === "llama_server" && (
+                  <ServerVitalsStrip processId={processInfo.process_id} state={processInfo.state} />
+                )}
                 <LogTerminal processId={processInfo.process_id} />
               </div>
             )}

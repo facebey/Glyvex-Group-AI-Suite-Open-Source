@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
 from collections.abc import AsyncGenerator
@@ -33,10 +34,29 @@ from pydantic import BaseModel, Field
 
 from config import config
 
+logger = logging.getLogger("glyvex.models")
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODELS_CACHE_PATH = BASE_DIR / "data" / "models.json"
+SCHEMA_VERSION_PATH = BASE_DIR / "data" / "models_schema_version.json"
 
 MAX_SCAN_DEPTH = 3
+
+# Versión del esquema de ModelEntry en lo que respecta a campos DERIVADOS DEL
+# HEADER del .gguf (mtp_embedded, has_vision_embedded, …).
+#
+# Por qué existe: el scan es incremental (si el mtime del archivo no cambió, se
+# reusa la entrada cacheada sin releer el header). Cuando agregamos un campo
+# nuevo que se calcula leyendo el header, las entradas viejas del cache
+# quedarían con el valor default para siempre, porque los archivos en disco no
+# cambiaron. Subir este número invalida el cache una sola vez y fuerza a
+# recalcular todo en el próximo scan, sin que el usuario tenga que borrar
+# data/models.json a mano.
+#
+# SUBIR ESTE NÚMERO cada vez que se agregue/cambie un campo de ModelEntry que
+# dependa de leer el header GGUF (no hace falta para campos derivados solo del
+# nombre de archivo, que se recalculan igual de rápido).
+MODELS_CACHE_SCHEMA_VERSION = 2
 
 # --------------------------------------------------------------------------
 # Schema (Pydantic v2)
@@ -58,6 +78,14 @@ class ModelEntry(BaseModel):
     compatible_backends: list[str] = Field(default_factory=list)
     has_mmproj: bool = False
     mmproj_path: str | None = None
+    # Cabeza MTP / NextN autocontenida dentro del propio .gguf (ej. varios
+    # Qwen3.8): no necesita un archivo de draft aparte para especular.
+    mtp_embedded: bool = False
+    mtp_embedded_layers: int | None = None
+    # Encoder de visión horneado dentro del propio .gguf. Poco común: la
+    # convención dominante sigue siendo un mmproj-*.gguf separado, que ya se
+    # cubre con has_mmproj/mmproj_path.
+    has_vision_embedded: bool = False
     last_seen: str
     tags: list[str] = Field(default_factory=list)
     # Metadata interna usada para el scan incremental (no se expone en docs
@@ -336,6 +364,72 @@ async def read_gguf_metadata_async(path: Path) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
+# Detección de módulos embebidos (MTP / visión) en el propio .gguf
+# --------------------------------------------------------------------------
+#
+# Ambas funciones leen SOLO el header (metadata + lista de nombres de tensores),
+# nunca los datos de los tensores, así que son instantáneas incluso en archivos
+# de 16+ GB. Nunca levantan: ante cualquier problema devuelven "no detectado",
+# que deja el control manual como está hoy.
+
+
+def _detect_embedded_modules(path: Path) -> dict[str, Any]:
+    """
+    ¿El propio .gguf trae MTP/NextN y/o el encoder de visión horneados adentro?
+
+    Una SOLA apertura de GGUFReader para las dos preguntas — antes eran dos
+    funciones separadas, cada una con su propio `GGUFReader(path)`, y cada
+    apertura mapea el archivo completo (mmap). Con modelos de 15-17GB y varios
+    en la misma carpeta, abrir cada archivo dos veces extra durante el scan
+    se nota en Windows (mapeo de archivos grandes + antivirus interceptando
+    cada apertura de un handle nuevo). Fusionarlas en una sola lectura de
+    header corta esa sobrecarga a la mitad.
+
+    Señales, cada una exige metadata KV + tensores reales (no solo la KV
+    sola) para no dar falsos positivos con archivos mal formados:
+      - MTP: `{arch}.nextn_predict_layers` > 0  +  tensores `*.nextn.*`
+      - Visión: KV `clip.*`/`vision.*`  +  tensores `clip.*`/`v.*`
+
+    Devuelve {"mtp_embedded": bool, "mtp_layers": int | None, "vision_embedded": bool}.
+
+    Cualquier excepción se loguea (logger.exception -> models.log) antes de
+    caer al fallback seguro: tragarla en silencio hizo que un bug real (doble
+    apertura de mmap sobre archivos grandes en Windows) pasara invisible
+    durante horas — vale más un log ruidoso que un "no detectado"
+    indistinguible de "no tiene esto".
+    """
+    fallback = {"mtp_embedded": False, "mtp_layers": None, "vision_embedded": False}
+
+    try:
+        from gguf import GGUFReader
+    except ImportError:
+        return fallback
+
+    try:
+        reader = GGUFReader(str(path), "r")
+        fields = {f.name: f for f in reader.fields.values()}
+        tensor_names = [tensor.name for tensor in reader.tensors]  # un solo recorrido
+
+        arch = _field_str(fields.get("general.architecture")) or ""
+        layers = _field_int(fields.get(f"{arch}.nextn_predict_layers")) or 0
+        has_nextn_tensors = any(".nextn." in name for name in tensor_names)
+        mtp_embedded = layers > 0 and has_nextn_tensors
+
+        has_clip_kv = any(name.startswith("clip.") or name.startswith("vision.") for name in fields)
+        has_clip_tensors = any(name.startswith("clip.") or name.startswith("v.") for name in tensor_names)
+        vision_embedded = has_clip_kv and has_clip_tensors
+
+        return {
+            "mtp_embedded": mtp_embedded,
+            "mtp_layers": layers if mtp_embedded else None,
+            "vision_embedded": vision_embedded,
+        }
+    except Exception:
+        logger.exception("excepcion detectando modulos embebidos en %s", path)
+        return fallback
+
+
+# --------------------------------------------------------------------------
 # Scanner
 # --------------------------------------------------------------------------
 
@@ -381,6 +475,7 @@ def _build_gguf_entry(path: Path, existing: dict[str, Any] | None) -> ModelEntry
     stem = path.stem
     family, parameters, quantization = _extract_metadata(stem)
     mmproj = _find_mmproj(path.parent)
+    detected = _detect_embedded_modules(path)
     stat = path.stat()
 
     tags = existing.get("tags", []) if existing else []
@@ -398,6 +493,9 @@ def _build_gguf_entry(path: Path, existing: dict[str, Any] | None) -> ModelEntry
         compatible_backends=_compatible_backends("gguf"),
         has_mmproj=mmproj is not None,
         mmproj_path=str(mmproj.resolve()) if mmproj else None,
+        mtp_embedded=detected["mtp_embedded"],
+        mtp_embedded_layers=detected["mtp_layers"],
+        has_vision_embedded=detected["vision_embedded"],
         last_seen=datetime.now(timezone.utc).isoformat(),
         tags=tags,
         mtime=stat.st_mtime,
@@ -462,6 +560,26 @@ def _build_safetensors_entry(directory: Path, existing: dict[str, Any] | None) -
 # --------------------------------------------------------------------------
 
 
+async def _read_cache_schema_version(path: Path = SCHEMA_VERSION_PATH) -> int:
+    """Versión de esquema con la que se escribió el cache actual (0 = desconocida)."""
+    if not path.exists():
+        return 0
+    try:
+        async with aiofiles.open(path, "r", encoding="utf-8") as f:
+            raw = await f.read()
+        return int(json.loads(raw).get("version", 0))
+    except Exception:
+        return 0
+
+
+async def _write_cache_schema_version(
+    version: int, path: Path = SCHEMA_VERSION_PATH
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    async with aiofiles.open(path, "w", encoding="utf-8") as f:
+        await f.write(json.dumps({"version": version}))
+
+
 class ModelInventory:
     def __init__(self, path: Path = MODELS_CACHE_PATH) -> None:
         self.path = path
@@ -469,6 +587,18 @@ class ModelInventory:
         self._loaded = False
 
     async def load(self) -> None:
+        stored_version = await _read_cache_schema_version()
+        if stored_version != MODELS_CACHE_SCHEMA_VERSION:
+            # El cache se escribió con un esquema anterior: sus entradas no
+            # tienen los campos derivados del header (mtp_embedded, etc.) y el
+            # scan incremental por mtime nunca los recalcularía, porque los
+            # archivos en disco no cambiaron. Se descarta el cache entero: el
+            # próximo scan relee headers (rápido) y reconstruye todo.
+            self._by_id = {}
+            self._loaded = True
+            await _write_cache_schema_version(MODELS_CACHE_SCHEMA_VERSION)
+            return
+
         if not self.path.exists():
             self._by_id = {}
             self._loaded = True
@@ -592,6 +722,11 @@ class ModelInventory:
                 removed += 1
 
         await self.save()
+
+        logger.info(
+            "scan completo: total=%d nuevos=%d removidos=%d duracion_s=%.2f dirs=%s",
+            len(self._by_id), new_count, removed, time.monotonic() - start, model_dirs,
+        )
 
         yield {
             "status": "complete",
@@ -746,7 +881,6 @@ async def patch_model(model_id: str, patch: ModelPatch) -> ModelEntry:
 @router.post("/scan")
 async def scan_models() -> StreamingResponse:
     await inventory.ensure_loaded()
-    await config.load()
     model_dirs = config.get("model_dirs", [])
 
     async def event_stream() -> AsyncGenerator[str, None]:

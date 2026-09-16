@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -58,6 +59,9 @@ from pydantic import BaseModel, Field
 import attachments as attachments_module
 import tools as tools_module
 from config import config
+from stream_metrics import StreamMetrics, reasoning_from_delta
+
+logger = logging.getLogger("glyvex.chat")
 from database import (
     db_create_conversation,
     db_delete_conversation,
@@ -70,7 +74,10 @@ from launcher import manager as launcher_manager
 THINK_OPEN = "<think>"
 THINK_CLOSE = "</think>"
 
-UPSTREAM_TIMEOUT = httpx.Timeout(connect=5.0, read=None, write=30.0, pool=5.0)
+# read=120: httpx reinicia el timer por chunk, así solo corta un stream que
+# se queda totalmente mudo >2 min (un modelo lento que sí emite chunks no
+# se cae). Antes era read=None = sin límite de lectura.
+UPSTREAM_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=30.0, pool=5.0)
 
 TITLE_MAX_CHARS = 50
 
@@ -141,6 +148,15 @@ class Capabilities(BaseModel):
     vision: bool = False
     audio: bool = False
     tools: bool = False
+    # El resto sale de chat_template_caps de /props. Sirven para no mandarle
+    # al upstream parámetros que su plantilla no entiende.
+    parallel_tool_calls: bool = False
+    reasoning_effort: bool = False
+    preserve_reasoning: bool = False
+    # ¿Acepta content como array de partes, o solo string? Decide si un
+    # mensaje con adjuntos se puede mandar como bloques.
+    typed_content: bool = False
+    system_role: bool = True
     context_size: int = 0
     model: str = ""
     build_info: str = ""
@@ -153,13 +169,21 @@ class EstimateRequest(BaseModel):
     system_prompt: str = ""
     draft: str = ""
     max_tokens: int = 4096
+    # Contexto que el servidor midió al terminar la última respuesta
+    # (context_tokens del evento "done"). Si viene > 0, reemplaza al historial:
+    # `messages` debe traer solo lo nuevo (borrador + adjuntos) y el system
+    # prompt no se vuelve a contar porque ya está adentro de esa medición.
+    base_tokens: int = 0
 
 
 class EstimateResponse(BaseModel):
     tokens: int = 0
     image_count: int = 0
     image_tokens: int = 0
-    source: Literal["tokenize", "heuristic"] = "heuristic"
+    # "measured": todo el número salió del servidor (no hay borrador nuevo).
+    source: Literal["measured", "tokenize", "heuristic"] = "heuristic"
+    # Parte del total que salió de base_tokens (0 si no se usó).
+    base_tokens: int = 0
     context_size: int = 0
     # Contexto que queda libre después del envío, descontando max_tokens.
     headroom: int = 0
@@ -505,7 +529,6 @@ def _parse_arguments(raw: str) -> tuple[dict[str, Any], str | None]:
 
 
 async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
-    await config.load()
     max_rounds = int(config.get("tools.max_rounds", 5))
 
     conversation = _apply_thinking_directive(
@@ -519,13 +542,15 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
 
     url = req.endpoint.rstrip("/") + "/v1/chat/completions"
 
-    # Estas métricas son de todo el turno, no de una ronda: TTFT es el tiempo
-    # hasta el primer token de la primera ronda, y los tokens se suman a lo
-    # largo de todas.
-    start_time = time.monotonic()
-    first_token_time: float | None = None
-    tokens_total = 0
-    tokens_thinking = 0
+    logger.info(
+        "turno inicio: model=%s endpoint=%s msgs=%d thinking=%s tools=%s",
+        req.model, req.endpoint, len(req.messages), req.thinking_enabled, req.tools_enabled,
+    )
+
+    # Métricas de todo el turno (todas las rondas de tools). La lógica vive
+    # en stream_metrics.py, compartida con benchmark.py: ahí está explicado
+    # por qué el razonamiento cuenta para TTFT y de dónde sale cada número.
+    turn = StreamMetrics()
     finish_reason: str | None = None
 
     # Mensajes que el loop agregó a la conversación (assistant con tool_calls
@@ -534,11 +559,8 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
     extra_messages: list[dict[str, Any]] = []
     tool_activity: list[dict[str, Any]] = []
 
-    def _tps(now: float) -> float:
-        if first_token_time is None:
-            return 0.0
-        elapsed = now - first_token_time
-        return round(tokens_total / elapsed, 1) if elapsed > 0 else 0.0
+    def _metrics_event() -> str:
+        return _sse({"type": "metrics", **turn.snapshot()})
 
     def _base_payload() -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -552,6 +574,11 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
             "max_tokens": req.max_tokens,
             "seed": req.seed,
             "stream": True,
+            # El contador de chunks del stream no es un contador de tokens:
+            # un chunk puede traer varios tokens o un fragmento de uno. Con
+            # esto el upstream manda el usage exacto en el último chunk, y
+            # las métricas finales dejan de ser una aproximación.
+            "stream_options": {"include_usage": True},
         }
         # Algunos modelos (QwQ, gpt-oss) usan reasoning_effort en vez de
         # budget_tokens; llama-server lo acepta directo en el payload.
@@ -587,8 +614,12 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
                 # Mientras el guard está activo no se emite nada: se junta lo
                 # suficiente para saber si el modelo continuó o reinició.
                 guard_buffer = ""
+                # El razonamiento que llega mientras el guard está abierto se
+                # retiene igual que el texto: si el modelo reinició, se tira.
+                guard_thinking = ""
                 guard_open = guard_active
                 restart_detected = False
+                turn.begin_round()
 
                 async with client.stream(
                     "POST", url, json=_base_payload(), headers=headers
@@ -619,6 +650,10 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
                         except json.JSONDecodeError:
                             continue
 
+                        # usage y timings vienen en el último chunk, con
+                        # choices vacío, así que se leen antes de tocar delta.
+                        turn.observe_chunk(chunk)
+
                         choice = (chunk.get("choices") or [{}])[0]
                         delta = choice.get("delta") or {}
                         if choice.get("finish_reason"):
@@ -626,15 +661,30 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
 
                         if delta.get("tool_calls"):
                             accumulator.feed(delta["tool_calls"])
+                            turn.mark_token(thinking=False)
+
+                        # llama-server (--reasoning-format por defecto), LM
+                        # Studio, vLLM y Ollama mandan el razonamiento en un
+                        # campo aparte, no como <think> dentro de content.
+                        reasoning = reasoning_from_delta(delta)
+                        if reasoning:
+                            turn.mark_token(thinking=True)
+                            if guard_open:
+                                guard_thinking += reasoning
+                            elif req.preserve_thinking:
+                                yield _sse({"type": "thinking_token", "content": reasoning})
 
                         content = delta.get("content")
                         if not content:
+                            if reasoning:
+                                yield _metrics_event()
                             continue
 
-                        now = time.monotonic()
-                        if first_token_time is None:
-                            first_token_time = now
-                        tokens_total += 1
+                        # El conteo de chunks de razonamiento usa el estado
+                        # del parser ANTES de este chunk (mismo criterio que
+                        # antes); el TTFT de respuesta se marca abajo, con el
+                        # primer segmento visible que devuelve el parser.
+                        turn.mark_token(thinking=parser.in_thinking)
 
                         if guard_open:
                             guard_buffer += content
@@ -648,29 +698,24 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
                             guard_open = False
                             content = guard_buffer
                             guard_buffer = ""
+                            if guard_thinking and req.preserve_thinking:
+                                yield _sse({"type": "thinking_token", "content": guard_thinking})
+                            guard_thinking = ""
 
-                        was_thinking = parser.in_thinking
-                        if was_thinking:
-                            tokens_thinking += 1
-                        if not was_thinking:
+                        if not parser.in_thinking:
                             round_text += content
 
                         for kind, text in parser.feed(content):
+                            if kind == "token" and text.strip():
+                                turn.mark_answer()
                             if kind == "thinking_token" and not req.preserve_thinking:
                                 continue
                             yield _sse({"type": kind, "content": text})
 
-                        yield _sse(
-                            {
-                                "type": "metrics",
-                                "tps": _tps(now),
-                                "ttft_ms": round((first_token_time - start_time) * 1000, 1),
-                                "tokens_total": tokens_total,
-                                "tokens_thinking": tokens_thinking,
-                            }
-                        )
+                        yield _metrics_event()
 
                 if restart_detected:
+                    turn.discard_round()
                     if fallback_used:
                         # El plan B también reinició: no hay más que probar,
                         # se lo decimos en vez de duplicar la respuesta.
@@ -696,18 +741,30 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
                     if _looks_like_restart(guard_buffer, partial_text):
                         guard_buffer = ""
                     else:
+                        if guard_thinking and req.preserve_thinking:
+                            yield _sse({"type": "thinking_token", "content": guard_thinking})
                         for kind, text in parser.feed(guard_buffer):
+                            if kind == "token" and text.strip():
+                                turn.mark_answer()
                             if kind == "thinking_token" and not req.preserve_thinking:
                                 continue
                             yield _sse({"type": kind, "content": text})
                         round_text += guard_buffer
                     guard_buffer = ""
+                elif guard_open and guard_thinking and req.preserve_thinking:
+                    # Solo razonamiento, sin texto que comparar: se libera.
+                    yield _sse({"type": "thinking_token", "content": guard_thinking})
+                guard_thinking = ""
                 guard_open = False
 
                 for kind, text in parser.flush():
+                    if kind == "token" and text.strip():
+                        turn.mark_answer()
                     if kind == "thinking_token" and not req.preserve_thinking:
                         continue
                     yield _sse({"type": kind, "content": text})
+
+                turn.end_round()
 
                 calls = accumulator.assemble() if req.tools_enabled else []
 
@@ -805,15 +862,23 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
                     tool_activity.append(entry)
                     yield _sse({"type": "tool_result", **entry})
 
-        now = time.monotonic()
+        final = turn.snapshot()
+        logger.info(
+            "turno fin: model=%s tokens=%d thinking=%d tps=%s pp_tps=%s ttft_ms=%s "
+            "ttft_respuesta_ms=%s contexto=%s fuente=%s tools=%d duracion_s=%.1f",
+            req.model, final["tokens_total"], final["tokens_thinking"], final["tps"],
+            final["pp_tps"], final["ttft_ms"], final["ttft_answer_ms"],
+            final["context_tokens"], final["metrics_source"],
+            len(tool_activity), final["duration_s"],
+        )
         yield _sse(
             {
                 "type": "done",
                 "finish_reason": finish_reason or "stop",
-                "total_tokens": tokens_total,
-                "tokens_thinking": tokens_thinking,
-                "tps": _tps(now),
-                "ttft_ms": round(((first_token_time or now) - start_time) * 1000, 1),
+                **final,
+                # Compatibilidad: el frontend y los tests leían estos nombres.
+                "total_tokens": final["tokens_total"],
+                "tokens_source": "chunks" if final["metrics_source"] == "chunks" else "usage",
                 "tool_messages": extra_messages,
                 "tool_activity": tool_activity,
             }
@@ -821,6 +886,10 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
         yield "data: [DONE]\n\n"
 
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as exc:
+        logger.error(
+            "error de conexion: endpoint=%s model=%s: %s",
+            req.endpoint, req.model, exc,
+        )
         yield _sse({"type": "error", "message": f"No se pudo conectar al endpoint: {exc}"})
         yield "data: [DONE]\n\n"
 
@@ -891,9 +960,25 @@ async def update_conversation(conv_id: str, req: ConversationUpdate) -> Conversa
 
 @router.delete("/conversations/{conv_id}")
 async def delete_conversation(conv_id: str) -> dict[str, Any]:
+    # Se leen los adjuntos antes de borrar la fila: después ya no hay de
+    # dónde sacar los ids y los archivos quedarían en disco para siempre.
+    conversation = await db_get_conversation(conv_id)
+
     if not await db_delete_conversation(conv_id):
         raise HTTPException(status_code=404, detail="La conversación no existe")
-    return {"id": conv_id, "deleted": True}
+
+    removed = 0
+    if conversation:
+        ids: set[str] = set()
+        for node in conversation.get("messages") or []:
+            if not isinstance(node, dict):
+                continue
+            for attachment in node.get("attachments") or []:
+                if isinstance(attachment, dict) and attachment.get("id"):
+                    ids.add(str(attachment["id"]))
+        removed = attachments_module.delete_attachments(ids)
+
+    return {"id": conv_id, "deleted": True, "attachments_removed": removed}
 
 
 # --------------------------------------------------------------------------
@@ -914,17 +999,35 @@ VISION_NAME_HINT = r"(^|[-_\s.])(vl|vision|mmproj|llava|multimodal)([-_\s.]|$)"
 TOOLS_NAME_HINT = r"(qwen|hermes|firefunction|functionary|mistral|command-r|llama-3)"
 
 
+def _cap_flag(props: dict[str, Any], *keys: str, default: bool = False) -> bool:
+    """
+    Lee una bandera de chat_template_caps probando varios nombres.
+
+    Las builds actuales de llama.cpp usan el prefijo supports_ (verificado
+    contra una build real: supports_tools, supports_tool_calls,
+    supports_parallel_tool_calls, supports_reasoning_effort,
+    supports_preserve_reasoning, supports_typed_content, supports_string_content,
+    supports_system_role, supports_object_arguments). Los alias sin prefijo
+    quedan por compatibilidad con builds viejas.
+    """
+    caps = props.get("chat_template_caps")
+    if not isinstance(caps, dict):
+        return default
+    for key in keys:
+        if key in caps:
+            return bool(caps[key])
+    return default
+
+
 def _template_supports_tools(props: dict[str, Any]) -> bool:
     """
-    llama-server publica chat_template_caps en /props; los nombres exactos de
-    las claves cambiaron entre builds, así que probamos varias y, si ninguna
-    está, buscamos el marcador de tools dentro del propio chat_template.
+    Soporte de tool-calling. Si /props no trae chat_template_caps (builds
+    anteriores a que existiera), se busca el marcador dentro del propio
+    chat_template.
     """
     caps = props.get("chat_template_caps")
     if isinstance(caps, dict):
-        for key in ("supports_tools", "tools", "supports_tool_calls", "tool_calls"):
-            if key in caps:
-                return bool(caps[key])
+        return _cap_flag(props, "supports_tools", "tools", "supports_tool_calls", "tool_calls")
 
     template = props.get("chat_template")
     if isinstance(template, str) and template:
@@ -944,11 +1047,14 @@ def _context_from_props(props: dict[str, Any]) -> int:
     return ctx if isinstance(ctx, int) and ctx > 0 else 0
 
 
-@router.get("/capabilities", response_model=Capabilities)
-async def get_capabilities(
-    endpoint: str = Query(..., description="URL base del endpoint OpenAI-compatible"),
-    model: str = Query("", description="Modelo activo, solo para el fallback heurístico"),
-) -> Capabilities:
+# Cache corto de capacidades por endpoint. /estimate se llama cada vez que
+# el usuario deja de escribir, y sin esto cada llamada dispararía dos
+# requests más contra el endpoint de inferencia.
+_CAPS_TTL_S = 30.0
+_caps_cache: dict[str, tuple[float, Capabilities]] = {}
+
+
+async def probe_capabilities(endpoint: str, model: str = "") -> Capabilities:
     """
     Qué soporta de verdad el endpoint activo.
 
@@ -960,6 +1066,11 @@ async def get_capabilities(
     import re
 
     base = endpoint.rstrip("/")
+
+    cached = _caps_cache.get(f"{base}|{model}")
+    if cached and time.monotonic() - cached[0] < _CAPS_TTL_S:
+        return cached[1]
+
     result = Capabilities(endpoint=base, model=model)
 
     async with httpx.AsyncClient(timeout=4.0) as client:
@@ -974,10 +1085,26 @@ async def get_capabilities(
                 result.vision = bool(modalities.get("vision"))
                 result.audio = bool(modalities.get("audio"))
                 result.tools = _template_supports_tools(props)
+                result.parallel_tool_calls = _cap_flag(
+                    props, "supports_parallel_tool_calls", "parallel_tool_calls"
+                )
+                result.reasoning_effort = _cap_flag(
+                    props, "supports_reasoning_effort", "reasoning_effort"
+                )
+                result.preserve_reasoning = _cap_flag(
+                    props, "supports_preserve_reasoning", "preserve_reasoning"
+                )
+                result.typed_content = _cap_flag(
+                    props, "supports_typed_content", "typed_content"
+                )
+                result.system_role = _cap_flag(
+                    props, "supports_system_role", "system_role", default=True
+                )
                 result.context_size = _context_from_props(props)
                 result.model = props.get("model_alias") or props.get("model_path") or model
                 result.build_info = str(props.get("build_info") or "")
                 if result.context_size > 0:
+                    _caps_cache[f"{base}|{model}"] = (time.monotonic(), result)
                     return result
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError):
             pass
@@ -1015,7 +1142,23 @@ async def get_capabilities(
         if name and re.search(TOOLS_NAME_HINT, name, re.IGNORECASE):
             result.tools = True
 
+    _caps_cache[f"{base}|{model}"] = (time.monotonic(), result)
     return result
+
+
+@router.get("/capabilities", response_model=Capabilities)
+async def get_capabilities(
+    endpoint: str = Query(..., description="URL base del endpoint OpenAI-compatible"),
+    model: str = Query("", description="Modelo activo, solo para el fallback heurístico"),
+) -> Capabilities:
+    """
+    Ruta fina sobre probe_capabilities.
+
+    La lógica vive aparte a propósito: /estimate también la necesita, y
+    llamar a una función de ruta desde código normal hace que los defaults
+    de Query lleguen como objetos Query en vez de valores.
+    """
+    return await probe_capabilities(endpoint, model)
 
 
 @router.post("/estimate", response_model=EstimateResponse)
@@ -1028,12 +1171,17 @@ async def estimate_context(req: EstimateRequest) -> EstimateResponse:
     token si no. Las imágenes no pasan por el tokenizer: se estiman con
     attachments.image_tokens_estimate, que es configurable porque el costo
     real varía muchísimo entre modelos de visión.
+
+    Con `base_tokens` (contexto medido por el servidor en la última respuesta)
+    solo se estima lo nuevo: es más exacto que re-tokenizar el historial,
+    porque incluye la plantilla, los schemas de tools y el razonamiento que
+    quedó en el KV.
     """
-    await config.load()
     per_image = int(config.get("attachments.image_tokens_estimate", 1024))
+    base_tokens = max(0, req.base_tokens)
 
     chunks: list[str] = []
-    if req.system_prompt.strip():
+    if req.system_prompt.strip() and not base_tokens:
         chunks.append(req.system_prompt)
     image_count = 0
     for message in req.messages:
@@ -1044,13 +1192,16 @@ async def estimate_context(req: EstimateRequest) -> EstimateResponse:
 
     blob = "\n".join(c for c in chunks if c)
     # ~4 tokens de overhead por mensaje entre delimitadores de rol del template.
-    overhead = 4 * (len(req.messages) + 1)
+    # Con base medida, el overhead del historial ya está contado.
+    overhead = 4 * len(req.messages) if base_tokens else 4 * (len(req.messages) + 1)
 
     base = req.endpoint.rstrip("/")
     text_tokens = 0
-    source: Literal["tokenize", "heuristic"] = "heuristic"
+    source: Literal["measured", "tokenize", "heuristic"] = "heuristic"
 
-    if blob:
+    if base_tokens and not blob and not req.messages:
+        source = "measured"
+    elif blob:
         headers = {"Content-Type": "application/json"}
         if req.api_key:
             headers["Authorization"] = f"Bearer {req.api_key}"
@@ -1071,9 +1222,9 @@ async def estimate_context(req: EstimateRequest) -> EstimateResponse:
             text_tokens = max(1, round(len(blob) / 3.6))
 
     image_tokens = image_count * per_image
-    total = text_tokens + image_tokens + overhead
+    total = base_tokens + text_tokens + image_tokens + overhead
 
-    caps = await get_capabilities(endpoint=req.endpoint)
+    caps = await probe_capabilities(req.endpoint)
     context_size = caps.context_size
     headroom = context_size - total - req.max_tokens if context_size > 0 else 0
 
@@ -1082,6 +1233,7 @@ async def estimate_context(req: EstimateRequest) -> EstimateResponse:
         image_count=image_count,
         image_tokens=image_tokens,
         source=source,
+        base_tokens=base_tokens,
         context_size=context_size,
         headroom=headroom,
         fits=context_size <= 0 or headroom >= 0,
@@ -1095,7 +1247,6 @@ async def tools_status() -> dict[str, Any]:
     toggle del globo lo dice en el tooltip antes de que el usuario lo active
     y se coma un error a mitad de una respuesta.
     """
-    await config.load()
     search = await tools_module.check_search_provider()
     return {
         "search": search,
@@ -1114,7 +1265,6 @@ async def list_endpoints() -> list[EndpointInfo]:
             url = f"http://{proc.host}:{proc.port}"
             candidates[url] = f"{proc.model_name} ({proc.backend})"
 
-    await config.load()
     default_port = config.get("backends.llama_server.default_port", 8080)
     default_url = f"http://127.0.0.1:{default_port}"
     candidates.setdefault(default_url, "Local llama-server")

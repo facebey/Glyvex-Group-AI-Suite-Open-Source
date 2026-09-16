@@ -35,6 +35,7 @@ TTS (texto a voz) queda fuera de esta versión a propósito.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import tempfile
 import time
@@ -45,6 +46,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from config import config
+
+logger = logging.getLogger("glyvex.stt")
 
 router = APIRouter()
 
@@ -169,8 +172,10 @@ async def _get_model() -> Any:
             )
 
         try:
+            started = time.monotonic()
             model = await asyncio.to_thread(_load_model_sync, *key)
         except Exception as exc:  # noqa: BLE001 — descarga fallida, CUDA rota, etc.
+            logger.error("fallo cargando modelo STT %s: %s", key[0], exc)
             raise HTTPException(
                 status_code=500,
                 detail=f"No se pudo cargar el modelo `{key[0]}`: {exc}",
@@ -178,6 +183,10 @@ async def _get_model() -> Any:
 
         _model = model
         _model_key = key
+        logger.info(
+            "modelo STT cargado: model=%s device=%s compute_type=%s duracion_s=%.1f",
+            key[0], key[1], key[2], time.monotonic() - started,
+        )
         return _model
 
 
@@ -192,7 +201,6 @@ async def stt_status() -> dict[str, Any]:
     Qué motores hay disponibles. El frontend combina esto con lo que soporta
     el navegador para decidir si muestra el micrófono y en qué modo.
     """
-    await config.load()
     settings = _settings()
     installed = _faster_whisper_installed()
     cached = _model_is_cached(settings["model"]) if installed else False
@@ -227,7 +235,6 @@ async def stt_warmup() -> dict[str, Any]:
     entera. Es mejor que el usuario dispare eso a propósito desde un botón
     que descubrirlo esperando después de hablar.
     """
-    await config.load()
     started = time.monotonic()
     await _get_model()
     return {
@@ -263,7 +270,6 @@ async def transcribe(
     trae sus propios decoders, así que no hace falta un ffmpeg instalado
     aparte en la máquina del usuario.
     """
-    await config.load()
     settings = _settings()
 
     raw = await audio.read()
@@ -276,6 +282,8 @@ async def transcribe(
         )
 
     model = await _get_model()
+    started = time.monotonic()
+    logger.info("transcripcion inicio: bytes=%d model=%s", len(raw), settings["model"])
 
     suffix = Path(audio.filename or "audio.webm").suffix or ".webm"
     tmp_path: str | None = None
@@ -302,6 +310,11 @@ async def transcribe(
             except OSError:
                 pass
 
+    logger.info(
+        "transcripcion fin: chars=%d lang=%s audio_s=%.1f duracion_s=%.1f",
+        len(text), detected, duration, time.monotonic() - started,
+    )
+
     return TranscriptionResponse(
         text=text,
         language=detected,
@@ -313,6 +326,8 @@ async def transcribe(
 def unload_model() -> None:
     """Libera el modelo. Lo llama el lifespan de main.py al cerrar."""
     global _model, _model_key
+    if _model is not None:
+        logger.info("modelo STT descargado: %s", _model_key[0] if _model_key else "")
     _model = None
     _model_key = None
 

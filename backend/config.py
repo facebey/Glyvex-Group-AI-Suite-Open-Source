@@ -2,7 +2,7 @@
 config.py — Manejo de configuración persistente para Glyvex-AI-Suite.
 
 Usa un modelo Pydantic v2 como esquema/validación y expone acceso por
-dot-notation (config.get("app.port"), config.set("app.port", 7860)) sobre
+dot-notation (config.get("app.port"), config.set("app.port", 7981)) sobre
 un dict interno, con persistencia async en JSON vía aiofiles.
 """
 
@@ -55,7 +55,7 @@ class HardwareConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
-    port: int = 7860
+    port: int = 7981
     theme: str = "dark"
     language: str = "es"
 
@@ -124,6 +124,17 @@ class STTConfig(BaseModel):
     whisper_language: str = ""
 
 
+class MonitorConfig(BaseModel):
+    """Histórico del Monitor (MetricsService, data/metrics.db)."""
+    # Poller en segundo plano desde que arranca la app. En false, el Monitor
+    # en vivo sigue andando pero no se guarda histórico.
+    history_enabled: bool = True
+    # Retención por nivel de resolución: ventanas de 5 s, 1 minuto y 1 hora.
+    retention_raw_h: int = 48
+    retention_1m_d: int = 30
+    retention_1h_d: int = 365
+
+
 class ConfigSchema(BaseModel):
     """Esquema completo de config.json, usado solo para validar/generar defaults."""
 
@@ -133,6 +144,7 @@ class ConfigSchema(BaseModel):
     attachments: AttachmentsConfig = Field(default_factory=AttachmentsConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     stt: STTConfig = Field(default_factory=STTConfig)
+    monitor: MonitorConfig = Field(default_factory=MonitorConfig)
     model_dirs: list[str] = Field(default_factory=list)
     last_used_model: str | None = None
     auto_start_last: bool = False
@@ -156,7 +168,7 @@ class Config:
     Uso:
         config = Config()
         await config.load()
-        config.get("app.port")          # -> 7860
+        config.get("app.port")          # -> 7981
         config.set("app.port", 8000)
         await config.save()
     """
@@ -179,7 +191,10 @@ class Config:
                 node = node[part]
             else:
                 return default
-        return node
+        # Un null guardado (p. ej. un campo numérico que llegó mal por la
+        # API) se trata como "no existe": de lo contrario el default no
+        # aplicaba y un int() en el reader crasheaba con TypeError.
+        return default if node is None else node
 
     def set(self, key: str, value: Any) -> None:
         parts = key.split(".")

@@ -61,23 +61,5 @@
       "flash_attn": true,
       "gpu_mode": "hybrid"
     }
-  },
-  {
-    "name": "Test",
-    "builtin": false,
-    "params": {
-      "n_ctx": 65536,
-      "n_batch": 512,
-      "n_ubatch": 512,
-      "n_gpu_layers": -1,
-      "gpu_mode": "gpu_only",
-      "cache_type_k": "q8_0",
-      "cache_type_v": "q8_0",
-      "flash_attn": true,
-      "use_mlock": false,
-      "use_mmap": true,
-      "n_draft": 5,
-      "n_parallel": 1
-    }
   }
 ]

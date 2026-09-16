@@ -542,3 +542,37 @@ async def _migrate_existing_runs() -> None:
                 continue
     if imported:
         logger.info("Runs históricos importados a la DB: %d", imported)
+
+
+async def db_all_attachment_ids() -> set[str]:
+    """
+    Ids de adjuntos referenciados por alguna conversación guardada.
+
+    Lo usa la limpieza de huérfanos al arrancar: cualquier archivo en
+    data/attachments que no esté acá es basura de un borrador que nunca se
+    envió o de una conversación ya borrada.
+
+    Se leen solo los mensajes, no las filas completas, y se parsea con json
+    en vez de cargar el árbol: acá solo interesan los ids.
+    """
+    ids: set[str] = set()
+
+    async with get_session() as session:
+        result = await session.execute(select(ChatConversationRow.messages))
+        for (raw,) in result.all():
+            if not raw:
+                continue
+            try:
+                nodes = json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(nodes, list):
+                continue
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                for attachment in node.get("attachments") or []:
+                    if isinstance(attachment, dict) and attachment.get("id"):
+                        ids.add(str(attachment["id"]))
+
+    return ids

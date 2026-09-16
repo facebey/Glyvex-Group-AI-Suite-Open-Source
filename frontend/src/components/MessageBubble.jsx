@@ -4,7 +4,8 @@ import {
   X, Check, CornerDownRight,
 } from "lucide-react";
 import ThinkingPanel from "./ThinkingPanel.jsx";
-import ToolSummary from "./ToolActivity.jsx";
+import ToolSummary, { ToolActivityLive } from "./ToolActivity.jsx";
+import StreamStatus from "./StreamStatus.jsx";
 import MarkdownMessage from "./MarkdownMessage.jsx";
 import { CopyButton } from "./CodeBlock.jsx";
 import ReasoningControl from "./ReasoningControl.jsx";
@@ -177,6 +178,10 @@ export default function MessageBubble({
   onContinue,
   reasoning,
   busy = false,
+  // Solo para la respuesta que se está generando: fase actual (ver
+  // StreamStatus.streamPhase) y tools en curso.
+  livePhase = null,
+  liveTools = null,
 }) {
   const [editing, setEditing] = useState(false);
   // Nivel de razonamiento con el que se va a regenerar. Arranca en el de la
@@ -190,10 +195,21 @@ export default function MessageBubble({
   const canContinue =
     !isUser && !streaming && !busy && message.finish_reason === "length" && Boolean(message.content);
 
+  const hasText = Boolean(message.content && message.content.trim());
+  // Duración del razonamiento: desde el primer token hasta la primera palabra
+  // de la respuesta. Si no hubo respuesta (solo pensó), hasta el final.
+  const m = message.metrics;
+  const thinkingSeconds =
+    m?.ttft_ms != null && m?.ttft_answer_ms != null
+      ? (m.ttft_answer_ms - m.ttft_ms) / 1000
+      : m?.ttft_ms != null && m?.duration_s != null
+        ? m.duration_s - m.ttft_ms / 1000
+        : null;
+
   if (isUser && editing) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[75%] w-full flex flex-col items-end">
+        <div className="max-w-[85%] w-full min-w-0 flex flex-col items-end">
           <EditBox
             initial={message.content || ""}
             onCancel={() => setEditing(false)}
@@ -209,15 +225,45 @@ export default function MessageBubble({
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} group`}>
-      <div className={`max-w-[75%] ${isUser ? "items-end" : "items-start"} flex flex-col`}>
+      {/* Las respuestas del asistente usan todo el ancho: al 75% quedaban en
+          ~570 px útiles y cualquier bloque de código o tabla necesitaba barra
+          horizontal. min-w-0 evita que un contenido muy ancho estire la
+          columna por fuera del chat. */}
+      <div
+        className={
+          "min-w-0 flex flex-col " +
+          (isUser ? "max-w-[85%] items-end" : "max-w-full w-full items-start")
+        }
+      >
         {!isUser && <ToolSummary activity={message.tool_activity} />}
-        {!isUser && <ThinkingPanel thinking={message.thinking} />}
+        {!isUser && (
+          <ThinkingPanel
+            thinking={message.thinking}
+            active={streaming && (livePhase === "thinking" || livePhase === "analyzing")}
+            durationSeconds={thinkingSeconds}
+          />
+        )}
+        {!isUser && streaming && liveTools?.length > 0 && (
+          <div className="mb-2 max-w-full">
+            <ToolActivityLive entries={liveTools} />
+          </div>
+        )}
         {isUser && <MessageAttachments attachments={message.attachments} />}
 
-        {(message.content || !hasAttachments) && (
+        {!isUser && streaming && !hasText && <StreamStatus phase={livePhase} />}
+
+        {!isUser && !streaming && !hasText && (
+          <p className="text-xs italic text-glyvex-muted px-1">
+            {message.thinking || message.tool_activity?.length
+              ? "El modelo no escribió texto de respuesta."
+              : "Respuesta detenida antes de empezar."}
+          </p>
+        )}
+
+        {(isUser ? message.content || !hasAttachments : hasText) && (
           <div
             className={
-              "rounded-lg px-4 py-2.5 text-sm break-words " +
+              "rounded-lg px-4 py-2.5 text-sm break-words [overflow-wrap:anywhere] min-w-0 max-w-full " +
               (isUser
                 ? "bg-glyvex-accent text-white whitespace-pre-wrap"
                 : "bg-glyvex-card text-glyvex-text")
@@ -262,6 +308,7 @@ export default function MessageBubble({
 
           {!isUser && message.metrics?.tps ? (
             <span className="text-xs text-glyvex-muted font-mono">
+              {message.metrics.metrics_source === "chunks" ? "~" : ""}
               {message.metrics.tps.toFixed(1)} t/s
               {message.metrics.ttft_ms ? ` · ${Math.round(message.metrics.ttft_ms)}ms TTFT` : ""}
             </span>

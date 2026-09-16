@@ -1,5 +1,7 @@
 """Tests de launcher.py — construcción de comandos, templates en SQLite, ciclo de vida de procesos."""
 
+import pytest
+
 import launcher as launcher_module
 from helpers import scan_and_wait, wait_until
 
@@ -42,21 +44,74 @@ def test_build_command_all_params():
     assert "--flash-attn" in cmd
     assert "--mlock" in cmd
     assert "--no-mmap" in cmd
-    assert "--draft-model" in cmd and cmd[cmd.index("--draft-model") + 1] == "/models/draft.gguf"
-    assert "--draft" in cmd and cmd[cmd.index("--draft") + 1] == "6"
+    assert "--spec-type" in cmd and cmd[cmd.index("--spec-type") + 1] == "draft-mtp"
+    assert "--spec-draft-model" in cmd and cmd[cmd.index("--spec-draft-model") + 1] == "/models/draft.gguf"
+    assert "--spec-draft-n-max" in cmd and cmd[cmd.index("--spec-draft-n-max") + 1] == "6"
     assert "--mmproj" in cmd and cmd[cmd.index("--mmproj") + 1] == "/models/mmproj.gguf"
     assert "--lora" in cmd and cmd[cmd.index("--lora") + 1] == "/models/lora.gguf"
     assert "--lora-scale" in cmd and cmd[cmd.index("--lora-scale") + 1] == "0.8"
     assert "--api-key" in cmd and cmd[cmd.index("--api-key") + 1] == "secret"
-    assert "--log-file" in cmd and cmd[cmd.index("--log-file") + 1] == "data/logs/test.log"
+    # El launcher es el único que escribe el log (_pump_output): llama-server
+    # no recibe --log-file, así no hay líneas duplicadas.
+    assert "--log-file" not in cmd
+
+
+def test_idle_repetidos_se_colapsan():
+    lines = [
+        "slot print_timing: id 0 | task 5 | eval time = 258.52 ms / 6 tokens",
+        "0.10.000.001 I srv update_slots: all slots are idle",
+        "0.11.000.002 I srv update_slots: all slots are idle",
+        "0.12.000.003 I srv update_slots: all slots are idle",
+        "slot launch_slot_: id 0 | task 6 | processing task",
+        "0.20.000.004 I srv update_slots: all slots are idle",
+    ]
+    previous = False
+    forwarded = []
+    for line in lines:
+        forward, previous = launcher_module.should_forward_log_line(line, previous)
+        if forward:
+            forwarded.append(line)
+    # Queda un idle por cada fin de actividad; los repetidos del poller no.
+    assert forwarded == [lines[0], lines[1], lines[4], lines[5]]
+
+
+def test_rotacion_de_log_por_tamano(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher_module, "LOG_ROTATE_MAX_BYTES", 100)
+    log = tmp_path / "proc.log"
+    log.write_text("x" * 150)
+
+    assert launcher_module.rotate_log_if_needed(log) is True
+    assert not log.exists()
+    backup = tmp_path / "proc.log.1"
+    assert backup.read_text() == "x" * 150
+
+    log.write_text("ok")
+    assert launcher_module.rotate_log_if_needed(log) is False
+
+    # Segunda rotación: se pisa la backup anterior.
+    log.write_text("y" * 150)
+    assert launcher_module.rotate_log_if_needed(log) is True
+    assert backup.read_text() == "y" * 150
+
+
+def test_build_command_metrics_flag():
+    cfg = launcher_module.LaunchConfig(model_id="m", backend="llama_server")
+    cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/model.gguf")
+    assert cmd.count("--metrics") == 1
+
+    # Defensivo: si algún día se reutiliza con otro backend, no se agrega.
+    cfg_ollama = launcher_module.LaunchConfig(model_id="m", backend="ollama")
+    cmd_ollama = launcher_module.build_llama_server_command(cfg_ollama, "/opt/x", "/models/model.gguf")
+    assert "--metrics" not in cmd_ollama
 
 
 def test_build_command_no_optional():
     cfg = launcher_module.LaunchConfig(model_id="m", backend="llama_server")
     cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/model.gguf")
 
-    assert "--draft-model" not in cmd
-    assert "--draft" not in cmd
+    assert "--spec-type" not in cmd
+    assert "--spec-draft-model" not in cmd
+    assert "--spec-draft-n-max" not in cmd
     assert "--mmproj" not in cmd
     assert "--lora" not in cmd
     assert "--lora-scale" not in cmd
@@ -69,10 +124,34 @@ def test_build_command_with_mtp():
     cfg = launcher_module.LaunchConfig(model_id="m", mtp_draft_model="/models/draft.gguf", n_draft=8)
     cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/model.gguf")
 
-    assert "--draft-model" in cmd
-    assert cmd[cmd.index("--draft-model") + 1] == "/models/draft.gguf"
-    assert "--draft" in cmd
-    assert cmd[cmd.index("--draft") + 1] == "8"
+    assert "--spec-type" in cmd
+    assert cmd[cmd.index("--spec-type") + 1] == "draft-mtp"
+    assert "--spec-draft-model" in cmd
+    assert cmd[cmd.index("--spec-draft-model") + 1] == "/models/draft.gguf"
+    assert "--spec-draft-n-max" in cmd
+    assert cmd[cmd.index("--spec-draft-n-max") + 1] == "8"
+
+
+def test_build_command_with_mtp_embedded():
+    """MTP embebido en el propio .gguf: activa spec pero sin archivo de draft."""
+    cfg = launcher_module.LaunchConfig(model_id="m", mtp_embedded=True, n_draft=4)
+    cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/model.gguf")
+
+    assert "--spec-type" in cmd and cmd[cmd.index("--spec-type") + 1] == "draft-mtp"
+    assert "--spec-draft-model" not in cmd
+    assert "--spec-draft-n-max" in cmd and cmd[cmd.index("--spec-draft-n-max") + 1] == "4"
+
+
+def test_build_command_with_mtp_embedded_draft_cache():
+    """Los cache types del draft son flags propios (--spec-draft-type-k/-v)."""
+    cfg = launcher_module.LaunchConfig(
+        model_id="m", mtp_embedded=True,
+        cache_type_k_draft="q8_0", cache_type_v_draft="q8_0",
+    )
+    cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/model.gguf")
+
+    assert "--spec-draft-type-k" in cmd and cmd[cmd.index("--spec-draft-type-k") + 1] == "q8_0"
+    assert "--spec-draft-type-v" in cmd and cmd[cmd.index("--spec-draft-type-v") + 1] == "q8_0"
 
 
 def test_build_command_with_mmproj():
@@ -124,6 +203,63 @@ def test_build_command_advanced_params_defaults():
     assert "--defrag-thold" not in cmd
     assert "--grp-attn-n" not in cmd
     assert "--grp-attn-w" not in cmd
+
+
+# --------------------------------------------------------------------------
+# C3: validación de log_file contra path traversal
+#
+# cfg.log_file es donde _pump_output guarda la salida del proceso (llama-server
+# ya no recibe --log-file), así que resolve_log_path() se llama en start()
+# antes de lanzar. Válido => path resuelto dentro de BASE_DIR;
+# vacío => fallback LOGS_DIR/<process_id>.log; traversal => 400.
+# --------------------------------------------------------------------------
+
+
+def test_resolve_log_path_relative_inside():
+    p = launcher_module.resolve_log_path("data/logs/llama-server.log", "abc")
+    assert p == (launcher_module.BASE_DIR / "data" / "logs" / "llama-server.log").resolve()
+
+
+def test_resolve_log_path_empty_falls_back():
+    assert launcher_module.resolve_log_path("", "abc") == launcher_module.LOGS_DIR / "abc.log"
+
+
+@pytest.mark.parametrize(
+    "evil",
+    [
+        "../../outside.log",
+        "data/../../outside.log",
+        "/tmp/outside.log",  # absoluto fuera del proyecto (raíz en el disco actual)
+    ],
+)
+def test_resolve_log_path_traversal_rejected(evil):
+    with pytest.raises(launcher_module.HTTPException) as exc_info:
+        launcher_module.resolve_log_path(evil, "abc")
+    assert exc_info.value.status_code == 400
+    assert "log_file" in exc_info.value.detail
+
+
+async def test_launch_log_file_traversal_rejected(client, sample_model_dir):
+    """POST /api/launcher/launch con log_file fuera de BASE_DIR -> 400, sin proceso."""
+    await client.post("/api/config", json={"model_dirs": [str(sample_model_dir)]})
+    await scan_and_wait(client)
+    model_id = (await client.get("/api/models")).json()[0]["id"]
+
+    res = await client.post(
+        "/api/launcher/launch",
+        json={
+            "model_id": model_id,
+            "backend": "llama_server",
+            "host": "127.0.0.1",
+            "port": 39998,
+            "log_file": "../../outside.log",
+        },
+    )
+    assert res.status_code == 400
+    assert "log_file" in res.json()["detail"]
+    # Ni un proceso quedó registrado ni se escribió nada fuera de BASE_DIR
+    assert (await client.get("/api/launcher/status")).json() == []
+    assert not (launcher_module.BASE_DIR.parent / "outside.log").exists()
 
 
 # --------------------------------------------------------------------------
@@ -257,6 +393,75 @@ async def test_launch_returns_process_id(client, sample_model_dir, mock_llama_se
     data = res.json()
     assert "process_id" in data and data["process_id"]
     assert data["state"] == "running"  # mock_llama_server responde 200 en /health
+
+
+# Réplica del payload que arma el frontend (DEFAULT_LAUNCH_CONFIG de
+# Launcher.jsx + la normalización "" -> null en handleLaunch). Si el backend
+# y el frontend divergen en tipos (p. ej. CacheType | None vs ""), esto explota
+# con 422 en vez de a media de usar la app.
+FRONTEND_LAUNCH_PAYLOAD = {
+    "backend": "llama_server",
+    "n_ctx": 65536,
+    "n_batch": 512,
+    "n_ubatch": 512,
+    "n_gpu_layers": -1,
+    "gpu_mode": "gpu_only",
+    "cache_type_k": "q4_0",
+    "cache_type_v": "q4_0",
+    "flash_attn": True,
+    "use_mlock": False,
+    "use_mmap": True,
+    "mtp_draft_model": None,
+    "mtp_embedded": True,
+    "n_draft": 5,
+    "cache_type_k_draft": None,
+    "cache_type_v_draft": None,
+    "mmproj_path": None,
+    "lora_path": None,
+    "lora_scale": 1.0,
+    "thinking_enabled": False,
+    "budget_tokens": 8192,
+    "sampling_preset": "instruct",
+    "temperature": 0.7,
+    "top_p": 0.80,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repeat_penalty": 1.5,
+    "rope_freq_base": 0,
+    "rope_scaling_type": "none",
+    "yarn_ext_factor": -1,
+    "numa": False,
+    "no_kv_offload": False,
+    "cache_reuse": 0,
+    "defrag_thold": -1,
+    "grp_attn_n": 1,
+    "grp_attn_w": 512,
+    "jinja": True,
+    "reasoning_effort": "none",
+    "host": "127.0.0.1",
+    "port": 18080,
+    "n_threads": -1,
+    "n_parallel": 1,
+    "api_key": "",
+    "log_file": "data/logs/llama-server.log",
+}
+
+
+async def test_launch_accepts_frontend_payload(client, sample_model_dir, mock_llama_server):
+    await client.post("/api/config", json={"model_dirs": [str(sample_model_dir)]})
+    await scan_and_wait(client)
+    model_id = (await client.get("/api/models")).json()[0]["id"]
+
+    res = await client.post(
+        "/api/launcher/launch",
+        json={**FRONTEND_LAUNCH_PAYLOAD, "model_id": model_id, "backend": "lm_studio"},
+    )
+    assert res.status_code == 200, f"422: el payload del frontend ya no valida ({res.json()})"
+    data = res.json()
+    assert data["state"] == "running"
+
+    await client.post(f"/api/launcher/stop/{data['process_id']}")
 
 
 async def test_stop_process(client, sample_model_dir, mock_llama_server):

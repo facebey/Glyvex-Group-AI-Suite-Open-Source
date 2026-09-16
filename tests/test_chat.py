@@ -129,3 +129,61 @@ async def test_endpoints_list(client):
     assert isinstance(data, list)
     assert len(data) >= 1
     assert "url" in data[0] and "status" in data[0]
+
+
+async def test_reasoning_content_llega_como_thinking(client, mock_llama_server):
+    payload = {
+        "endpoint": mock_llama_server,
+        "messages": [{"role": "user", "content": "__REASONING_TEST__ hola"}],
+        "model": "test-model",
+        "preserve_thinking": True,
+    }
+    async with client.stream("POST", "/api/chat/completions", json=payload) as res:
+        raw = await drain_sse(res)
+
+    events = _parse_events(raw)
+    thinking = "".join(e["content"] for e in events if e["type"] == "thinking_token")
+    answer = "".join(e["content"] for e in events if e["type"] == "token")
+    assert thinking == "pensando un poco"
+    assert answer == "listo"
+
+
+async def test_metricas_con_razonamiento_usan_timings(client, mock_llama_server):
+    """Regresión: con reasoning_content, t/s daba miles y TTFT incluía el razonamiento."""
+    payload = {
+        "endpoint": mock_llama_server,
+        "messages": [{"role": "user", "content": "__REASONING_TEST__ hola"}],
+        "model": "test-model",
+    }
+    async with client.stream("POST", "/api/chat/completions", json=payload) as res:
+        raw = await drain_sse(res)
+
+    events = _parse_events(raw)
+    done = next(e for e in events if e["type"] == "done")
+    assert done["metrics_source"] == "timings"
+    assert done["tps"] == 50.0                 # 4 tokens / 80 ms
+    assert done["pp_tps"] == 400.0             # 12 tokens / 30 ms
+    assert done["tokens_total"] == 4
+    assert done["total_tokens"] == 4           # nombre viejo, compatibilidad
+    assert done["context_tokens"] == 16
+    # TTFT es el primer token de razonamiento; la respuesta llega después.
+    assert done["ttft_ms"] < done["ttft_answer_ms"]
+
+    # Hay métricas en vivo mientras razona, no solo cuando llega content.
+    live = [e for e in events if e["type"] == "metrics"]
+    assert len(live) >= 3
+
+
+async def test_estimate_con_contexto_medido(client, mock_llama_server):
+    payload = {
+        "endpoint": mock_llama_server,
+        "messages": [],
+        "system_prompt": "sos un asistente",
+        "base_tokens": 1500,
+    }
+    res = await client.post("/api/chat/estimate", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["source"] == "measured"
+    assert data["base_tokens"] == 1500
+    assert data["tokens"] == 1500              # sin re-contar el system prompt

@@ -37,7 +37,7 @@ const components = {
     // envuelve el `pre` de arriba.
     if (!className) {
       return (
-        <code className="px-1 py-0.5 rounded bg-black/40 text-[0.9em] font-mono">
+        <code className="px-1 py-0.5 rounded bg-black/40 text-[0.9em] font-mono [overflow-wrap:anywhere]">
           {children}
         </code>
       );
@@ -64,8 +64,10 @@ const components = {
 
   table({ children }) {
     return (
-      <div className="my-2 overflow-x-auto">
-        <table className="w-full text-sm border-collapse">{children}</table>
+      <div className="my-2 overflow-x-auto max-w-full">
+        {/* overflow-wrap normal: una tabla ancha se desplaza dentro de su
+            contenedor en vez de partir cada palabra letra por letra. */}
+        <table className="w-full text-sm border-collapse [overflow-wrap:normal]">{children}</table>
       </div>
     );
   },
@@ -108,7 +110,7 @@ const components = {
  */
 function MarkdownMessage({ content }) {
   return (
-    <div className="text-sm break-words">
+    <div className="text-sm break-words [overflow-wrap:anywhere] min-w-0 max-w-full">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}

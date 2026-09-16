@@ -47,14 +47,18 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import os
 import socket
+import time
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
 from config import config
+
+logger = logging.getLogger("glyvex.tools")
 
 # ---------------------------------------------------------------------------
 # Esquemas que se le mandan al modelo
@@ -370,17 +374,27 @@ async def web_search(query: str, max_results: int | None = None) -> dict[str, An
     limit = max(1, min(10, int(max_results or settings["max_results"])))
     provider = settings["provider"]
     label = PROVIDER_LABELS[provider]
+    started = time.monotonic()
 
     try:
         results = await PROVIDERS[provider](query, limit, settings)
     except ProviderError as exc:
+        logger.warning("web_search fallo: provider=%s query=%r: %s", provider, query, exc)
         return _failure("web_search", str(exc))
     except Exception as exc:  # noqa: BLE001 — un proveedor roto no corta el chat
+        logger.warning(
+            "web_search fallo: provider=%s query=%r %s: %s",
+            provider, query, type(exc).__name__, exc,
+        )
         return _failure("web_search", f"{label} falló: {type(exc).__name__}: {exc}")
 
     results = [r for r in results if r["url"]]
 
     if not results:
+        logger.info(
+            "web_search ok: provider=%s query=%r resultados=0 duracion_s=%.2f",
+            provider, query, time.monotonic() - started,
+        )
         return {
             "ok": True,
             "name": "web_search",
@@ -396,6 +410,11 @@ async def web_search(query: str, max_results: int | None = None) -> dict[str, An
         title = item["title"] or "(sin título)"
         lines.append(f"{index}. {title}\n   {item['url']}\n   {item['snippet']}")
         sources.append({"title": title, "url": item["url"]})
+
+    logger.info(
+        "web_search ok: provider=%s query=%r resultados=%d duracion_s=%.2f",
+        provider, query, len(results), time.monotonic() - started,
+    )
 
     return {
         "ok": True,
@@ -504,6 +523,7 @@ async def fetch_url(url: str) -> dict[str, Any]:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return _failure("fetch_url", f"`{url}` no es una URL http(s) válida.")
+    started = time.monotonic()
 
     if not settings["allow_private_hosts"]:
         if await asyncio.to_thread(_host_is_private, parsed.hostname):
@@ -557,6 +577,11 @@ async def fetch_url(url: str) -> dict[str, Any]:
     if truncated:
         header += f" (truncado a {limit:,} caracteres)".replace(",", ".")
 
+    logger.info(
+        "fetch_url ok: host=%s chars=%d engine=%s status=%d duracion_s=%.2f",
+        parsed.hostname, len(text), engine, res.status_code, time.monotonic() - started,
+    )
+
     return {
         "ok": True,
         "name": "fetch_url",
@@ -588,8 +613,6 @@ def _failure(name: str, message: str) -> dict[str, Any]:
 
 
 async def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    await config.load()
-
     if name == "web_search":
         return await web_search(
             query=str(arguments.get("query") or ""),

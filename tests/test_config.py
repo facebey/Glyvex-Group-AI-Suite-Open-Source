@@ -9,7 +9,7 @@ async def test_load_default_config(client):
     res = await client.get("/api/config")
     assert res.status_code == 200
     data = res.json()
-    assert data["app"]["port"] == 7860
+    assert data["app"]["port"] == 7981
     assert data["app"]["theme"] == "dark"
     assert data["app"]["language"] == "es"
     assert data["model_dirs"] == []
@@ -33,7 +33,7 @@ async def test_save_partial_config(client):
 
 def test_dot_notation_get():
     # El fixture autouse _isolated_state ya reseteó config a los defaults.
-    assert config_module.config.get("app.port") == 7860
+    assert config_module.config.get("app.port") == 7981
     assert config_module.config.get("backends.ollama.default_port") == 11434
 
 
@@ -51,7 +51,7 @@ async def test_reset_config(client):
     assert res.status_code == 200
     data = res.json()
 
-    assert data["app"]["port"] == 7860
+    assert data["app"]["port"] == 7981
     assert data["model_dirs"] == []
     assert data["backends"]["ollama"]["default_port"] == 11434
 

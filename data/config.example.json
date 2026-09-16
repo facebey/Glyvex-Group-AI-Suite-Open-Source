@@ -1,19 +1,19 @@
 {
   "app": {
-    "port": 7860,
+    "port": 7981,
     "theme": "dark",
     "language": "es"
   },
   "hardware": {
-    "gpu_model": "RTX 3090",
-    "vram_gb": 24,
-    "ram_gb": 64,
-    "cpu_model": "i9 12900K",
-    "cpu_cores": 16
+    "gpu_model": "",
+    "vram_gb": 0,
+    "ram_gb": 0,
+    "cpu_model": "",
+    "cpu_cores": 0
   },
   "backends": {
     "llama_server": {
-      "binary_path": "C:\\LLM\\bin\\llama\\llama-server.exe",
+      "binary_path": "",
       "default_port": 8080,
       "enabled": true
     },
@@ -46,8 +46,8 @@
     "tavily_api_key": "",
     "max_results": 5,
     "fetch_max_chars": 8000,
-    "max_rounds": 5,
-    "timeout_s": 20.0,
+    "max_rounds": 10,
+    "timeout_s": 20,
     "allow_private_hosts": false,
     "user_agent": "Glyvex-AI-Suite/0.1"
   },
@@ -59,9 +59,13 @@
     "whisper_compute_type": "int8",
     "whisper_language": ""
   },
-  "model_dirs": [
-    "C:\\LLM\\gguf"
-  ],
+  "monitor": {
+    "history_enabled": true,
+    "retention_raw_h": 48,
+    "retention_1m_d": 30,
+    "retention_1h_d": 365
+  },
+  "model_dirs": [],
   "last_used_model": null,
   "auto_start_last": false
 }

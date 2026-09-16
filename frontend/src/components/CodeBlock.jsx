@@ -1,13 +1,14 @@
 import { useCallback, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, WrapText } from "lucide-react";
 
 /**
  * Copia al portapapeles con fallback.
  *
- * navigator.clipboard solo existe en contexto seguro (https o localhost), y
- * main.py escucha en 0.0.0.0 — si el usuario entra por IP desde otra
- * máquina, la API no está. El fallback con execCommand está deprecado pero
- * sigue funcionando en todos los navegadores actuales.
+ * navigator.clipboard solo existe en contexto seguro (https o localhost).
+ * main.py escucha en 127.0.0.1 por defecto, pero si se expone a la red con
+ * GLYVEX_HOST y el usuario entra por IP desde otra máquina, la API no está.
+ * El fallback con execCommand está deprecado pero sigue funcionando en todos
+ * los navegadores actuales.
  */
 export async function copyText(text) {
   if (navigator.clipboard?.writeText) {
@@ -77,19 +78,53 @@ function labelFor(language) {
   return LANGUAGE_LABELS[language.toLowerCase()] || language;
 }
 
+// Fences donde lo que viene es texto (logs, salidas de comandos, prosa) y
+// no código: ahí conviene ajustar líneas por defecto. Sin lenguaje también.
+const WRAP_BY_DEFAULT = new Set(["text", "txt", "plaintext", "plain", "log", "md", "markdown", "output", "console"]);
+
 /**
- * Envoltorio de un bloque de código: header con el lenguaje detectado y
- * botón de copiar, y debajo el <pre> que ya viene resaltado por
- * rehype-highlight.
+ * Envoltorio de un bloque de código: header con el lenguaje detectado,
+ * ajuste de líneas y botón de copiar; debajo el <pre> que ya viene resaltado
+ * por rehype-highlight.
+ *
+ * Ajuste de líneas: con el chat angosto, una línea larga dejaba el bloque con
+ * barra de desplazamiento horizontal. El código conserva sus líneas por
+ * defecto (la indentación importa) y se puede ajustar con un clic; el texto
+ * plano se ajusta solo.
  */
 export default function CodeBlock({ language, code, children }) {
+  const [wrap, setWrap] = useState(() => !language || WRAP_BY_DEFAULT.has(language.toLowerCase()));
+
   return (
-    <div className="my-2 rounded-md border border-white/10 overflow-hidden bg-black/40">
+    <div className="my-2 rounded-md border border-white/10 overflow-hidden bg-black/40 max-w-full min-w-0">
       <div className="flex items-center justify-between px-3 py-1 border-b border-white/10 bg-black/30">
         <span className="text-xs text-glyvex-muted font-mono">{labelFor(language)}</span>
-        <CopyButton text={code} label="Copiar bloque" className="p-1" />
+        <span className="inline-flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => setWrap((v) => !v)}
+            aria-pressed={wrap}
+            title={wrap ? "Mostrar líneas completas" : "Ajustar líneas al ancho"}
+            className={
+              "p-1 rounded hover:bg-white/10 " +
+              (wrap ? "text-glyvex-accent" : "text-glyvex-muted hover:text-glyvex-text")
+            }
+          >
+            <WrapText size={13} />
+          </button>
+          <CopyButton text={code} label="Copiar bloque" className="p-1" />
+        </span>
       </div>
-      <div className="overflow-x-auto text-sm [&>pre]:p-3 [&>pre]:m-0 [&>pre]:bg-transparent">
+      {/* Sin ajuste, el scroll horizontal queda adentro del bloque. highlight.js
+          le pone overflow-x al <code>, por eso el ajuste se aplica a los dos. */}
+      <div
+        className={
+          "overflow-x-auto max-w-full text-sm [&>pre]:p-3 [&>pre]:m-0 [&>pre]:bg-transparent " +
+          (wrap
+            ? "[&>pre]:whitespace-pre-wrap [&_code]:whitespace-pre-wrap [&_code]:[overflow-wrap:anywhere] [&_code]:overflow-x-visible"
+            : "[&_code]:[overflow-wrap:normal]")
+        }
+      >
         {children}
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { createBrowserRouter, RouterProvider, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   MessageSquare, Rocket, Gauge, Activity, FileBarChart, Settings,
   CheckCircle2, Circle, Sun, Moon,
@@ -168,7 +168,14 @@ function OnboardingScreen({ onDismiss }) {
   );
 }
 
+// Páginas que son un espacio de trabajo y aprovechan todo el ancho de la
+// pantalla. En 6xl (1152 px) el chat quedaba en ~800 px al restarle el panel
+// de configuración, y las respuestas con código o tablas se veían angostas.
+const WIDE_ROUTES = new Set(["/"]);
+
 function Layout() {
+  const { pathname } = useLocation();
+  const mainWidth = WIDE_ROUTES.has(pathname) ? "max-w-[1800px]" : "max-w-6xl";
   const [shouldShowOnboarding, setShouldShowOnboarding] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [theme, setTheme] = useLocalStorage("glyvex-theme", "dark");
@@ -238,7 +245,7 @@ function Layout() {
         >
           <GlyvexAiWatermark size={400} />
         </div>
-        <main className="relative z-10 flex-1 max-w-6xl w-full mx-auto px-4 py-6">
+        <main className={`relative z-10 flex-1 ${mainWidth} w-full mx-auto px-4 py-6`}>
           <Outlet />
         </main>
       </div>

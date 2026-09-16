@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, Save, RotateCcw, ScanSearch } from "lucide-react";
+import Section from "../components/ui/Section.jsx";
+import Field from "../components/ui/Field.jsx";
+import ChatSettings from "../components/ChatSettings.jsx";
+import { formInputClasses as inputClasses } from "../lib/styles.js";
 
 const EMPTY_CONFIG = {
-  app: { port: 7860, theme: "dark", language: "es" },
+  app: { port: 7981, theme: "dark", language: "es" },
   hardware: { gpu_model: "", vram_gb: 0, ram_gb: 0, cpu_model: "", cpu_cores: 0 },
   backends: {
     llama_server: { binary_path: "", default_port: 8080, enabled: true },
@@ -13,32 +17,30 @@ const EMPTY_CONFIG = {
   model_dirs: [],
   last_used_model: null,
   auto_start_last: false,
+  attachments: {
+    max_file_mb: 16,
+    max_files_per_message: 10,
+    max_text_chars: 50000,
+    image_tokens_estimate: 1024,
+  },
+  tools: {
+    search_provider: "ddgs",
+    region: "wt-wt",
+    searxng_url: "http://127.0.0.1:8888",
+    max_results: 5,
+    fetch_max_chars: 8000,
+    max_rounds: 5,
+    allow_private_hosts: false,
+  },
+  stt: {
+    engine: "auto",
+    language: "es-AR",
+    whisper_model: "base",
+    whisper_device: "auto",
+    whisper_compute_type: "int8",
+    whisper_language: "",
+  },
 };
-
-function Section({ title, children }) {
-  return (
-    <div className="bg-glyvex-card rounded-lg border border-white/10 p-5">
-      <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide mb-4">
-        {title}
-      </h2>
-      <div className="space-y-4">{children}</div>
-    </div>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <label className="block">
-      <span className="block text-sm text-glyvex-muted mb-1">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-const inputClasses =
-  "w-full bg-black/30 border border-white/10 rounded-md px-3 py-2 text-sm " +
-  "text-glyvex-text placeholder:text-glyvex-muted/60 focus:outline-none " +
-  "focus:ring-2 focus:ring-glyvex-accent/60";
 
 /**
  * Lee un stream SSE emitido por POST /api/models/scan.
@@ -346,6 +348,8 @@ export default function Config() {
           )}
         </div>
       </Section>
+
+      <ChatSettings config={config} onChange={setConfig} />
 
       <Section title="Perfil de hardware">
         <div className="grid grid-cols-2 gap-4">
