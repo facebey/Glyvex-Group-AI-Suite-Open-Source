@@ -3,7 +3,23 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
-## [0.4.0] — 2026-09-20
+## [0.4.1] — 2026-09-20
+
+### Agregado
+- **README público bilingue**: `README.md` en inglés (principal, el que
+  renderiza GitHub) + `README.es.md` en español, con línea de idiomas en
+  ambos.
+- **Docs nuevas**: `docs/modulos.md` (detalle técnico M0–M8),
+  `docs/launcher-params.md` (referencia de parámetros de lanzamiento),
+  `docs/TROUBLESHOOTING.md` (problemas frecuentes verificados contra el
+  source de llama.cpp), `CONTRIBUTING.md` y `screenshots/` (10 capturas en
+  el README).
+- Mejoras al README: requisitos (NVIDIA/CPU-only, faster-whisper), seguridad
+  (exposición de red opt-in), sección Docs, 296 tests.
+
+### Corregido
+- Datos desactualizados del README (tests, versionado, hardware).
+
 
 ### Agregado
 - **Licencia Apache 2.0** (Glyvex Group): LICENSE oficial + READMEs.
