@@ -32,6 +32,7 @@ data/benchmarks/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+backend-prod.log
 
 # OS
 .DS_Store

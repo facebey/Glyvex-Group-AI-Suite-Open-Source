@@ -1,41 +1,57 @@
 # Glyvex-AI-Suite
 
-**Glyvex-AI-Suite** es una aplicación local — parte de **Glyvex Group** — para
-gestionar, lanzar, chatear con, y evaluar modelos LLM locales (GGUF/GGML vía
-llama-server, Ollama, LM Studio) sin depender de ningún servicio en la nube.
-Todo corre en tu propia máquina: el inventario de modelos, los procesos, las
-conversaciones y los benchmarks quedan en tu disco.
+🌐 *Languages / Idiomas:* **English** | [Español](README.es.md)
 
-Pensada originalmente para una estación de trabajo con **NVIDIA RTX 3090
-(24GB) + Intel i9-12900K (16 cores) + 64GB RAM sobre Linux**, pero el monitor
-de hardware y el launcher degradan de forma segura si no hay GPU NVIDIA
-presente (ver sección de Módulos).
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Node.js 20](https://img.shields.io/badge/Node.js-20%20LTS-green.svg)](https://nodejs.org/)
+
+**Glyvex-AI-Suite** is a local application — part of **Glyvex Group** — to
+manage, launch, chat with, and evaluate local LLM models (GGUF/GGML via
+llama-server, Ollama, LM Studio) without relying on any cloud service.
+Everything runs on your own machine: the model inventory, the processes, the
+conversations and the benchmarks stay on your disk.
+
+Optimized for **NVIDIA GPUs (CUDA)** — it was developed on a workstation with
+an RTX 3090 (24GB) + Intel i9-12900K (16 cores) + 64GB RAM on Linux — but
+that's not a requirement: it runs on pure CPU on any modern machine, the GPU
+only speeds up large models, and the Launcher's hardware templates adapt the
+load to what the machine has. Without an NVIDIA GPU, the Monitor and the
+Launcher degrade gracefully (see the Modules section).
+
+**Product site:** [ai-suite.glyvexgroup.com](https://ai-suite.glyvexgroup.com/) — [Glyvex AI Division](https://ai.glyvexgroup.com/)
 
 ## Screenshots
 
-<!-- Screenshot: Chat.jsx — conversación con streaming, panel de razonamiento colapsado y MetricsBar mostrando t/s en vivo -->
-<!-- Screenshot: Launcher.jsx en vista Group — cards colapsables por carpeta con selector de cuantización, MTP y mmproj -->
-<!-- Screenshot: Benchmark.jsx post-run — tabla de resultados expandible junto a los gráficos de Recharts (t/s por prompt y TTFT vs tokens) -->
-<!-- Screenshot: Monitor.jsx — card de GPU con barra de VRAM, heatmap de cores y sparklines de los últimos 60s -->
+| | |
+|---|---|
+| ![Chat — conversation with streaming and live metrics](screenshots/chat.png)<br><sub>Chat: streaming, reasoning and live metrics (t/s, TTFT)</sub> | ![Launcher — detected models](screenshots/launcher-modelos-detectados.png)<br><sub>Launcher: model inventory grouped by folder</sub> |
+| ![Launcher — launch options](screenshots/launcher-opciones.png)<br><sub>Launcher: launch options</sub> | ![Launcher — advanced options](screenshots/launcher-opciones-avanzadas.png)<br><sub>Launcher: advanced options</sub> |
+| ![Launcher — advanced options (2)](screenshots/launcher-opciones-avanzadas-2.png)<br><sub>Launcher: advanced options (MTP, context)</sub> | ![Launcher — online backends](screenshots/launcher-online.png)<br><sub>Launcher: online backends</sub> |
+| ![Benchmark — results](screenshots/benchmark.png)<br><sub>Benchmark: run results</sub> | ![Monitor — GPU and vitals](screenshots/monitor.png)<br><sub>Monitor: GPU, CPU and LLM server vitals</sub> |
+| ![Reports — history](screenshots/reports.png)<br><sub>Reports: benchmark history</sub> | ![Config — settings](screenshots/config.png)<br><sub>Config: general settings</sub> |
 
-## Requisitos
+## Requirements
 
 - **Python 3.11+**
-- **Node.js 20 LTS+** (para el frontend Vite/React)
-- **NVIDIA drivers + CUDA** — *opcional*. Sin GPU NVIDIA, el Monitor (M5)
-  muestra "GPU NVIDIA no detectada" en vez de crashear, y el resto de la
-  suite funciona igual (podés correr modelos 100% en CPU).
-- Al menos uno de estos backends de inferencia instalado aparte, según qué
-  vayas a usar: [`llama-server`](https://github.com/ggml-org/llama.cpp)
-  (de llama.cpp), [Ollama](https://ollama.com), o [LM Studio](https://lmstudio.ai)
-  corriendo en modo servidor.
+- **Node.js 20 LTS+** (for the Vite/React frontend)
+- **NVIDIA drivers + CUDA** — *optional*. Without an NVIDIA GPU, the Monitor
+  (M5) shows "GPU NVIDIA no detectada" instead of crashing, and the rest of
+  the suite works the same (you can run models 100% on CPU).
+- `faster-whisper` — *optional*, for local voice transcription of the chat
+  microphone: `pip install -r requirements-optional.txt`
+  (see [`docs/voz-a-texto.md`](docs/voz-a-texto.md), in Spanish).
+- At least one of these inference backends, installed separately, depending
+  on what you'll use: [`llama-server`](https://github.com/ggml-org/llama.cpp)
+  (from llama.cpp), [Ollama](https://ollama.com), or [LM Studio](https://lmstudio.ai)
+  running in server mode.
 
-## Instalación
+## Installation
 
 ### 1. Backend
 
 ```bash
-# Desde la raíz del repositorio
+# From the repository root
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -48,13 +64,13 @@ cd frontend
 npm install
 ```
 
-### 3. Arranque en desarrollo (2 procesos, con hot-reload)
+### 3. Development start (2 processes, with hot-reload)
 
 Terminal 1 — backend:
 
 ```bash
 cd backend
-uvicorn main:app --reload --port 7860
+uvicorn main:app --reload --port 7981
 ```
 
 Terminal 2 — frontend:
@@ -64,91 +80,260 @@ cd frontend
 npm run dev
 ```
 
-Abrí `http://localhost:5173`.
+Open `http://localhost:5173`.
 
-### 4. Arranque todo-en-uno (producción local)
+### 4. All-in-one start (local production)
+
+Linux/macOS:
 
 ```bash
 ./start.sh
 ```
 
-Compila el frontend a `frontend/dist` (si no existe) y levanta `uvicorn` en
-`:7860`, sirviendo la SPA compilada desde `/`.
+Windows (CMD or PowerShell):
 
-## Uso básico (4 pasos)
+```bat
+start.cmd
+```
+```powershell
+.\start.ps1
+```
 
-Si es la primera vez que abrís la app con `config.json` vacío, vas a ver una
-pantalla de onboarding con estos mismos pasos y checkmarks en vivo.
+They compile the frontend to `frontend/dist` (if it doesn't exist) and start
+`uvicorn` on `127.0.0.1:7981`, serving the compiled SPA from `/`. All three
+scripts honor `GLYVEX_PORT` and `GLYVEX_HOST` (the default bind is
+`127.0.0.1`; exposing it to the network is deliberately opt-in, with
+`GLYVEX_HOST=0.0.0.0`, and requires authentication — see the Security
+section).
 
-1. **Configurar** — en `/config`, indicá el `binary_path` de `llama-server`
-   (y/o Ollama/LM Studio) y agregá al menos un directorio donde tengas
-   modelos `.gguf`/`.safetensors`.
-2. **Escanear** — en la misma pantalla, tocá "Escanear ahora". El inventario
-   se guarda en `data/models.json` y queda disponible en el Launcher.
-3. **Lanzar** — en `/launcher`, elegí un modelo (vista Group agrupa por
-   carpeta con sus variantes MTP/mmproj, o cambiá a vista List), ajustá los
-   parámetros de contexto/GPU si hace falta, y tocá **LAUNCH**.
-4. **Chatear** — en `/` (Chat), el endpoint del modelo recién lanzado
-   aparece automático en el selector. Escribí y listo — la respuesta llega
-   en streaming token a token.
+### 5. Multiple instances on the same machine
 
-Desde ahí también podés correr un benchmark completo (`/benchmark`) contra
-el modelo activo, o ver su consumo de HW en vivo (`/monitor`).
+You can run a second instance (e.g. to test changes without touching the real
+data) with the `--env` flag:
 
-## Módulos
+```bash
+./start.sh --env testing        # Linux/macOS
+start.cmd --env testing         # Windows CMD
+.\start.ps1 -Env testing        # PowerShell
+```
 
-| Módulo | Qué hace |
-|--------|----------|
-| **M0 — Skeleton** | Base del proyecto: FastAPI + React + config persistida en `data/config.json` con dot-notation. |
-| **M1 — Inventario** | Escanea los `model_dirs` configurados (GGUF/GGML/safetensors), extrae familia/parámetros/cuantización del nombre de archivo, cachea en `data/models.json`. Scan incremental por `path+mtime`, progreso vía SSE. |
-| **M2 — Launcher** | Lanza `llama-server`/Ollama/LM Studio con `asyncio.subprocess`, templates de hardware predefinidos, logs en vivo por WebSocket, health check async, stop/restart limpios (SIGTERM→SIGKILL). |
-| **M3 — Chat** | Interfaz de chat OpenAI-compatible con streaming (SSE), separación de bloques `<think>` (razonamiento) del contenido de respuesta, métricas de t/s y TTFT en vivo, export a JSON/Markdown. |
-| **M4 — Benchmark** | Suite de 58 prompts en 6 categorías (programación, matemática, ciencias, lógica, español, infraestructura de redes) corridos como `asyncio.Task` cancelable, con progreso por WebSocket, reporte HTML autónomo y comparación de runs. |
-| **M5 — Monitor** | GPU (pynvml)/CPU/RAM (psutil) en tiempo real vía WebSocket con buffer circular de 300 muestras, degrada a `null` sin crashear si no hay GPU NVIDIA o falta psutil. Incluye agrupación de modelos por carpeta en el Launcher (cuantización base + MTP + mmproj). |
-| **M6 — Integración final** | Widget de estado en la navbar (modelo activo + mini GPU), sistema de toasts (Context + `useReducer`), shortcuts de teclado en Chat, estado persistido en `localStorage`, onboarding para instalaciones nuevas, `/api/info` + `/api/state`. |
+Each environment is defined in a file under `environments/`:
 
-## Shortcuts de teclado (Chat)
+| | `production.env` | `testing.env` |
+|---|---|---|
+| Backend | `127.0.0.1:7981` | `127.0.0.1:22222` |
+| Dev server (Vite) | `:5173` | `:25173` |
+| Data | `./data` | `./data-testing` |
 
-| Atajo | Acción |
-|-------|--------|
-| `Enter` | Enviar mensaje |
-| `Shift+Enter` | Nueva línea |
-| `Ctrl+Enter` (o `Cmd+Enter`) | Enviar mensaje (alternativa global) |
-| `Esc` | Cancelar la generación en curso |
-| `Ctrl+L` | Limpiar la conversación (pide confirmación) |
-| `Ctrl+E` | Mostrar/ocultar el panel de exportar |
+**To move an instance to a different port, you touch a single file.**
+`vite.config.js` reads the same `environments/<name>.env`, so changing
+`GLYVEX_PORT` and `GLYVEX_DEV_PORT` there aligns the backend, the dev server
+`/api` proxy and the CORS. (Remember to also update `GLYVEX_CORS_ORIGINS`,
+which must list that instance's `GLYVEX_DEV_PORT`.)
+
+Variables that define each environment:
+
+| Variable | Purpose |
+|---|---|
+| `GLYVEX_ENV` | Environment name. Informational: it appears in the startup log. |
+| `GLYVEX_HOST` / `GLYVEX_PORT` | uvicorn bind. |
+| `GLYVEX_DEV_PORT` | Vite dev server port. Not used by the backend. |
+| `GLYVEX_DATA_DIR` | Where the instance's state lives (relative to the repo root, or absolute). |
+| `GLYVEX_CORS_ORIGINS` | Allowed origins, comma-separated. |
+
+All of an instance's state hangs off its `GLYVEX_DATA_DIR`: `config.json`,
+`glyvex.db`, `metrics.db`, `attachments/`, `logs/`, `benchmarks/`. The only
+things shared between instances are the read-only files versioned in the
+repo: the prompt sets (`backend/prompts/`) and the hardware template seed
+(`data/templates/hw_templates.json`).
+
+In development mode, the testing instance's frontend starts with Vite's mode
+system:
+
+```bash
+cd frontend && npm run dev -- --mode testing
+```
+
+With no `GLYVEX_*` variable defined, everything behaves as before:
+`DATA_DIR` is `./data` and the port is 7981.
+
+## Quick start (4 steps)
+
+If it's the first time you open the app with an empty `config.json` (or with
+no file at all, which is generated with the defaults; see
+`data/config.example.json` for the full reference), you'll see an onboarding
+screen with these same steps and live checkmarks.
+
+1. **Configure** — in `/config`, set the `binary_path` of `llama-server`
+   (and/or Ollama/LM Studio) and add at least one directory with your
+   `.gguf`/`.safetensors` models.
+2. **Scan** — on the same screen, click "Escanear ahora". The inventory is
+   saved to `data/models.json` and becomes available in the Launcher.
+3. **Launch** — in `/launcher`, pick a model (Group view groups by folder
+   with its MTP/mmproj variants, or switch to List view), tune the
+   context/GPU parameters if needed, and click **LAUNCH**.
+4. **Chat** — in `/` (Chat), the endpoint of the just-launched model appears
+   automatically in the selector. Type and go — the response arrives in
+   streaming, token by token.
+
+From there you can also run a full benchmark (`/benchmark`) against the
+active model, or watch its HW usage live (`/monitor`).
+
+The Launcher manages the full lifecycle of the process: it starts, monitors
+and stops `llama-server` for you. It does not attach to servers running
+outside the app yet.
+
+## Views
+
+| Route | View | Content |
+|-------|------|---------|
+| `/` | Chat | Streaming, branches (regenerations), attachments, mic, reasoning, metrics, export, history |
+| `/launcher` | Launcher | Group/List views, hardware templates, sampling presets, launch/stop, live logs, process vitals strip (t/s, context, queue) |
+| `/benchmark` | Benchmark | Set selection (including your own), cancellable run, WS progress, results |
+| `/monitor` | Monitor | GPU card, core heatmap, 60 s sparklines, **LLM Server** section (live vitals + per-process history of t/s, context and queue), HW history chart with retention, WS connection indicator |
+| `/reports` | Reports | Benchmark history, Recharts charts (t/s per prompt, TTFT vs tokens), comparison, HTML reports |
+| `/config` | Config | Backend, model_dirs, scan, tools, STT, attachments, templates, monitor (history and retention) |
+
+## Modules
+
+| Module | What it does |
+|--------|--------------|
+| **M0 — Skeleton** | Project base: FastAPI + React + persisted config. |
+| **M1 — Inventory** | Scans your `.gguf` files, extracts family/quantization, reads GGUF metadata, detects embedded modules (MTP/vision), groups by folder. |
+| **M2 — Launcher** | Launches `llama-server`/Ollama/LM Studio with hardware templates, live logs, MTP/draft and clean stop/restart. |
+| **M3 — Chat** | Streaming with separate reasoning, live metrics, branches, attachments, tool calling, voice to text. |
+| **M4 — Benchmark** | 58 prompts in 6 categories + your own sets, scoring, HTML reports, run comparison. |
+| **M5 — Monitor** | Real-time GPU/CPU/RAM + persistent history with configurable retention. |
+| **M6 — Integration** | Status widget in the navbar, toasts, shortcuts, onboarding. |
+| **M7 — Database** | Async SQLite: conversations (tree), benchmarks, templates, sets. |
+| **M8 — LLM server vitals** | t/s, prompt processing, cache, MTP acceptance % from `llama-server`'s `/metrics`. |
+
+Per-module technical detail: [`docs/modulos.md`](docs/modulos.md) (Spanish) ·
+Launch parameters: [`docs/launcher-params.md`](docs/launcher-params.md)
+(Spanish)
+
+## Keyboard shortcuts (Chat)
+
+| Shortcut | Action |
+|----------|--------|
+| `Enter` | Send message |
+| `Shift+Enter` | New line |
+| `Ctrl+Enter` (or `Cmd+Enter`) | Send message (global alternative) |
+| `Esc` | Cancel the in-progress generation |
+| `Ctrl+L` | Clear the conversation (asks for confirmation) |
+| `Ctrl+E` | Show/hide the export panel |
+
+## Model tools (chat)
+
+The chat exposes two tools to the model, invoked natively via `tool_calls`
+(rounds limited by `tools.max_rounds` in `/config`):
+
+- **Web search** — default provider **DuckDuckGo (ddgs)**: no server, no API
+  key, no Docker. Optional providers: **SearXNG** (local, via HTTP), **Brave**
+  and **Tavily** (API keys via env var `BRAVE_API_KEY`/`TAVILY_API_KEY` or
+  via config).
+- **URL fetch** — configurable character limits, timeout and user-agent,
+  content extraction with trafilatura/readability, and **private hosts
+  blocked by default** (`tools.allow_private_hosts`).
+- `GET /api/chat/tools/status` tells the frontend which providers are active.
+
+## Docs
+
+> Note: the detailed docs below are currently in **Spanish**.
+
+- [`docs/modulos.md`](docs/modulos.md) — per-module technical detail (M0–M8).
+- [`docs/launcher-params.md`](docs/launcher-params.md) — reference of the
+  `llama-server` launch parameters the Launcher manages.
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — common problems and
+  how to solve them.
+- [`docs/voz-a-texto.md`](docs/voz-a-texto.md) — chat microphone: Web Speech
+  API vs local Whisper, available models, security and packaging with Tauri.
+- [`docs/searxng/README.md`](docs/searxng/README.md) — web search providers
+  (DuckDuckGo, SearXNG, Brave, Tavily), `tools.*` configuration and
+  diagnostics.
+
+## Security
+
+- **100% local by design**: conversations, inventory and benchmarks never
+  leave the machine; the only network egress is the web search/fetch of the
+  model tools.
+- CORS is restricted to whatever you list in `GLYVEX_CORS_ORIGINS` in the
+  active environment (default `http://localhost:5173`). With
+  `allow_credentials=True`, a `*` doesn't work: browsers reject that
+  combination, so origins must be listed one by one.
+- `fetch_url` blocks private hosts by default.
+- `data/config.json` is **not committed** (it's in `.gitignore`); the
+  template is in `data/config.example.json`. API keys (`brave_api_key`,
+  `tavily_api_key`) are read from the environment variables
+  `BRAVE_API_KEY`/`TAVILY_API_KEY` first; if you write them in
+  `config.json` they stay only on your machine.
+- The server listens on `127.0.0.1` by default (local app, no
+  authentication). To expose it to the network you have to do it
+  deliberately: `GLYVEX_HOST=0.0.0.0 ./start.sh` — and in that case, **don't
+  do it without authentication**.
+- The launcher's `log_file` is validated against path traversal (400 if it
+  ends up outside `BASE_DIR`).
 
 ## Roadmap
 
-- [x] **M0** — Skeleton del proyecto
-- [x] **M1** — Gestión de modelos (scanner e inventario)
-- [x] **M2** — Lanzador de modelos
-- [x] **M3** — Interfaz de chat
+- [x] **M0** — Project skeleton
+- [x] **M1** — Model management (scanner and inventory)
+- [x] **M2** — Model launcher
+- [x] **M3** — Chat interface
 - [x] **M4** — Benchmark suite
-- [x] **M5** — Monitor de recursos de hardware
-- [x] **M6** — Integración final y pulido
+- [x] **M5** — Hardware resources monitor
+- [x] **M6** — Final integration and polish
+- [x] **M7** — SQLite database (conversations, benchmarks, templates, sets)
+- [x] **M8** — LLM server vitals (Prometheus `/metrics`, history in `metrics.db`)
+- [ ] AMD GPU support (the stack is today optimized for NVIDIA/CUDA)
 
 ## Tests
 
-Suite de tests automatizados (pytest + pytest-asyncio + httpx, sin unittest,
-sin requests, sin GPU/modelos/red real — todo mockeado):
+Automated test suite (pytest + pytest-asyncio + httpx, 296 tests, no
+unittest, no requests, no GPU/models/real network — everything mocked: mock
+LLM server uvicorn on `:18080`, fake binaries, in-memory SQLite):
 
 ```bash
-# Instalar dependencias de test
+# Install test dependencies
 pip install pytest>=8.0 pytest-asyncio>=0.24 pytest-mock>=3.14 httpx>=0.27 anyio>=4.0 pytest-cov
 
-# Correr todos los tests
+# Run all tests (from the repository root)
 pytest tests/ -v
 
-# Un módulo específico
+# A specific module
 pytest tests/test_models.py -v
 
-# Con coverage
+# With coverage
 pytest tests/ --cov=backend --cov-report=term-missing --cov-report=html
 ```
 
-## Licencia
+## Versioning
 
-Apache License 2.0 — ver [LICENSE](LICENSE).
+The suite uses [SemVer](https://semver.org/lang/en/). The version lives in
+`backend/main.py` (`APP_VERSION`, exposed on `/api/health` and `/api/info`)
+and is kept in sync with annotated git tags `vX.Y.Z`:
+
+- **MAJOR** — breaking changes in data schemas (`config.json`, `glyvex.db`, `metrics.db`) or the internal API.
+- **MINOR** — new modules/features (M8, tools, backends).
+- **PATCH** — fixes and polish.
+
+To make a release:
+
+```bash
+# 1. Bump APP_VERSION in backend/main.py and commit
+# 2. Full suite green
+pytest tests/ -q
+# 3. Annotated tag + push
+git tag -a vX.Y.Z -m "<release summary>"
+git push origin main vX.Y.Z
+```
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
 
 Copyright (c) 2026 Glyvex Group
+
+The suite is distributed under **Apache 2.0** for the community. The
+**Enterprise** editions (Glyvex Suite) are separately licensed under a
+commercial agreement with Glyvex Group.

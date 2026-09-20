@@ -639,31 +639,43 @@ function GroupCard({ group, onSelect }) {
 
   if (group.base_models.length === 0) return null;
 
-  function handleConfigureClick() {
+  // Propagación en vivo: cada cambio en los controles de módulos re-emite la
+  // decisión actual para que los toggles del panel no esperen a "Configurar".
+  // `next` pasa el valor que el estado VA A tener (las updates de useState
+  // son asíncronas).
+  function emitSelection(next = {}, announce = false) {
     if (!selectedBaseId) return;
-    const mtpSidecarModel = useMtp && mtpSource === "sidecar"
-      ? group.mtp_models.find((m) => m.id === selectedMtpId)
-      : null;
-    const mtpPath = useMtp
-      ? (mtpSource === "sidecar" ? (mtpSidecarModel?.path ?? "")
-        : mtpSource === "manual" ? manualMtpPath.trim()
-        : "")
-      : "";
+    const m = next.mtp ?? useMtp;
+    const ms = next.mtpSource ?? mtpSource;
+    const mtpId = next.mtpId ?? selectedMtpId;
+    const mtpManual = next.mtpManual ?? manualMtpPath;
+    const v = next.vision ?? useMmproj;
+    const vs = next.visionSource ?? mmprojSource;
+    const mmprojId = next.mmprojId ?? selectedMmprojId;
+    const mmprojManual = next.mmprojManual ?? manualMmprojPath;
 
-    const mmprojSidecarModel = useMmproj && mmprojSource === "sidecar"
-      ? group.mmproj_models.find((m) => m.id === selectedMmprojId)
-      : null;
-    const mmprojPath = useMmproj
-      ? (mmprojSource === "sidecar" ? (mmprojSidecarModel?.path ?? "")
-        : mmprojSource === "manual" ? manualMmprojPath.trim()
-        : "")
+    const mtpPath = m
+      ? (ms === "sidecar"
+          ? (group.mtp_models.find((x) => x.id === mtpId)?.path ?? "")
+          : ms === "manual" ? mtpManual.trim()
+          : "")
+      : "";
+    const mmprojPath = v
+      ? (vs === "sidecar"
+          ? (group.mmproj_models.find((x) => x.id === mmprojId)?.path ?? "")
+          : vs === "manual" ? mmprojManual.trim()
+          : "")
       : "";
 
     onSelect(selectedBaseId, {
       mtp_draft_model: mtpPath,
-      mtp_embedded: useMtp && mtpSource === "embedded",
+      mtp_embedded: m && ms === "embedded",
       mmproj_path: mmprojPath,
-    });
+    }, announce);
+  }
+
+  function handleConfigureClick() {
+    emitSelection({}, true);
   }
 
   return (
@@ -700,10 +712,13 @@ function GroupCard({ group, onSelect }) {
                 <input type="checkbox" checked={useMtp}
                   onChange={(e) => {
                     mtpTouchedRef.current = true;
-                    setUseMtp(e.target.checked);
-                    if (e.target.checked && mtpSource === "none") {
-                      setMtpSource(hasEmbeddedMtp ? "embedded" : "sidecar");
-                    }
+                    const checked = e.target.checked;
+                    const src = checked && mtpSource === "none"
+                      ? (hasEmbeddedMtp ? "embedded" : "sidecar")
+                      : mtpSource;
+                    setUseMtp(checked);
+                    if (src !== mtpSource) setMtpSource(src);
+                    emitSelection({ mtp: checked, mtpSource: src });
                   }}
                   className="accent-glyvex-accent" />
                 MTP draft model
@@ -711,19 +726,19 @@ function GroupCard({ group, onSelect }) {
               </label>
               {useMtp && (
                 <SourcePicker value={mtpSource} options={mtpOptions}
-                  onChange={(v) => { mtpTouchedRef.current = true; setMtpSource(v); }} />
+                  onChange={(v) => { mtpTouchedRef.current = true; setMtpSource(v); emitSelection({ mtpSource: v }); }} />
               )}
               {useMtp && mtpSource === "sidecar" && group.mtp_models.length > 1 && (
                 <select className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text"
                   value={selectedMtpId ?? ""}
-                  onChange={(e) => { mtpTouchedRef.current = true; setSelectedMtpId(e.target.value); }}>
+                  onChange={(e) => { mtpTouchedRef.current = true; setSelectedMtpId(e.target.value); emitSelection({ mtpId: e.target.value }); }}>
                   {group.mtp_models.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.size_gb} GB)</option>)}
                 </select>
               )}
               {useMtp && mtpSource === "manual" && (
                 <input className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text placeholder:text-glyvex-muted/60"
                   value={manualMtpPath}
-                  onChange={(e) => { mtpTouchedRef.current = true; setManualMtpPath(e.target.value); }}
+                  onChange={(e) => { mtpTouchedRef.current = true; setManualMtpPath(e.target.value); emitSelection({ mtpManual: e.target.value }); }}
                   placeholder="C:\ruta\a\tu-draft.gguf" />
               )}
             </div>
@@ -734,10 +749,13 @@ function GroupCard({ group, onSelect }) {
                 <input type="checkbox" checked={useMmproj}
                   onChange={(e) => {
                     mmprojTouchedRef.current = true;
-                    setUseMmproj(e.target.checked);
-                    if (e.target.checked && mmprojSource === "none") {
-                      setMmprojSource(hasEmbeddedVision ? "embedded" : "sidecar");
-                    }
+                    const checked = e.target.checked;
+                    const src = checked && mmprojSource === "none"
+                      ? (hasEmbeddedVision ? "embedded" : "sidecar")
+                      : mmprojSource;
+                    setUseMmproj(checked);
+                    if (src !== mmprojSource) setMmprojSource(src);
+                    emitSelection({ vision: checked, visionSource: src });
                   }}
                   className="accent-glyvex-accent" />
                 Módulo de visión (mmproj)
@@ -745,19 +763,19 @@ function GroupCard({ group, onSelect }) {
               </label>
               {useMmproj && (
                 <SourcePicker value={mmprojSource} options={visionOptions}
-                  onChange={(v) => { mmprojTouchedRef.current = true; setMmprojSource(v); }} />
+                  onChange={(v) => { mmprojTouchedRef.current = true; setMmprojSource(v); emitSelection({ visionSource: v }); }} />
               )}
               {useMmproj && mmprojSource === "sidecar" && group.mmproj_models.length > 1 && (
                 <select className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text"
                   value={selectedMmprojId ?? ""}
-                  onChange={(e) => { mmprojTouchedRef.current = true; setSelectedMmprojId(e.target.value); }}>
+                  onChange={(e) => { mmprojTouchedRef.current = true; setSelectedMmprojId(e.target.value); emitSelection({ mmprojId: e.target.value }); }}>
                   {group.mmproj_models.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.size_gb} GB)</option>)}
                 </select>
               )}
               {useMmproj && mmprojSource === "manual" && (
                 <input className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text placeholder:text-glyvex-muted/60"
                   value={manualMmprojPath}
-                  onChange={(e) => { mmprojTouchedRef.current = true; setManualMmprojPath(e.target.value); }}
+                  onChange={(e) => { mmprojTouchedRef.current = true; setManualMmprojPath(e.target.value); emitSelection({ mmprojManual: e.target.value }); }}
                   placeholder="C:\ruta\a\tu-mmproj.gguf" />
               )}
             </div>
@@ -1397,12 +1415,15 @@ export default function Launcher() {
 
   // Seleccionar un modelo desde una GroupCard: NO lanza, solo preselecciona
   // el modelo + los overrides y lleva al panel de configuración.
-  const handleSelectModel = useCallback((modelId, configOverrides = null) => {
+  const handleSelectModel = useCallback((modelId, configOverrides = null, announce = true) => {
     setSelectedId(modelId);
     if (configOverrides && Object.keys(configOverrides).length > 0) {
       // Viene de una GroupCard: trae la decisión explícita del usuario sobre
       // MTP y visión.
       setLaunchConfig((prev) => ({ ...prev, ...configOverrides }));
+      // Link: el toggle de visión sigue al checkbox de la GroupCard
+      // (sin path, OFF).
+      setToggles((prev) => ({ ...prev, mmproj: Boolean(configOverrides.mmproj_path) }));
     } else {
       // Viene de la vista List (sin overrides): se derivan los defaults del
       // propio modelo, para que no quede pegada la config del modelo anterior.
@@ -1411,10 +1432,14 @@ export default function Launcher() {
         ...prev,
         mtp_draft_model: "",
         mtp_embedded: Boolean(model?.mtp_embedded),
+        // El mmproj del modelo anterior no viaja: se re-liga al nuevo modelo.
+        mmproj_path: "",
       }));
+      setToggles((prev) => ({ ...prev, mmproj: false }));
     }
     setActionError(null);
-    setScrollTick((tick) => tick + 1);
+    // Las emiciones en vivo de la card no arrastran la página al panel.
+    if (announce) setScrollTick((tick) => tick + 1);
   }, [modelList]);
 
   const handleLaunch = useCallback(async () => {
@@ -1938,7 +1963,14 @@ export default function Launcher() {
                       </p>
                     )}
                   <Toggle label="mmproj (--mmproj)" checked={toggles.mmproj}
-                    onChange={(v) => setToggle("mmproj", v)}
+                    onChange={(v) => {
+                      setToggle("mmproj", v);
+                      // Al activarlo se liga el archivo detectado si no hay
+                      // path: lo que se ve en el campo es lo que se envía.
+                      if (v && !launchConfig.mmproj_path && selectedModel?.mmproj_path) {
+                        updateConfig({ mmproj_path: selectedModel.mmproj_path });
+                      }
+                    }}
                     disabled={isToggleUnavailable("mmproj")} title={toggleTitle("mmproj")} />
                   <Field
                     label="Módulo de visión — mmproj (path)"
