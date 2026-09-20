@@ -46,12 +46,12 @@ Dos conceptos que se repiten:
 
 | Campo | Cómo viaja | Default app | Notas |
 |-------|-----------|-------------|-------|
-| `thinking_enabled` | `--chat-template-kwargs` `{"enable_thinking": bool}` | `False` | **Best-effort**: solo lo respetan templates Jinja que lo lean; los kwargs desconocidos se ignoran silenciosamente. El otro lever es el prefijo `/think` del chat. |
-| `budget_tokens` | `"thinking_budget"` dentro de `chat_template_kwargs` | 8192 | `-1` = sin límite (no se envía). |
+| `thinking_enabled` | `--reasoning` `on\|off` | `False` | Flag nativo: el kwarg `enable_thinking` en `--chat-template-kwargs` quedó deprecado en llama.cpp (warning en el log del server). Solo se emite si el modelo lee `enable_thinking` y con `--jinja` activado. El otro lever es el prefijo `/think` del chat. |
+| `budget_tokens` | `--reasoning-budget` | 8192 | Solo con thinking enabled y si `reasoning_budget` es -1 (ese campo, al ser explícito, tiene prioridad). `-1` = sin límite (no se envía). |
 | `jinja` | `--jinja` | `True` | |
 | `reasoning_effort` | — | `none` | `none` \| `low` \| `medium` \| `high` \| `xhigh`. |
 | `no_reasoning_preserve` | — | `False` | b11003 activa el preservado por defecto y gasta tokens re-emitiendo el razonamiento cada turno; esto lo apaga. |
-| `reasoning_budget` | `--reasoning-budget` | -1 | Token budget nativo del server (b11009). `-1` = sin límite (no se emite), `0` = fin inmediato del thinking. Es el control por flag, distinto de `budget_tokens`. |
+| `reasoning_budget` | `--reasoning-budget` | -1 | Token budget nativo del server (b11009). `-1` = sin límite (no se emite), `0` = fin inmediato del thinking. Tiene prioridad sobre `budget_tokens`. |
 
 ## Sampling (defaults del servidor)
 

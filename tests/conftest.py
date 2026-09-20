@@ -394,12 +394,12 @@ def probeable_binary(make_probeable_binary):
     """
     "Build b11009 clásica": trae los flags siempre presentes del comando
     (model, host, port, ctx-size, batch, gpu-layers, cache-type-k/v,
-    flash-attn, metrics, jinja, chat-template-kwargs, sampling, parallel,
-    mlock, no-mmap, api-key, verbosity, fit) pero NO los de memoria de la
-    11003 (--ctx-checkpoints, --checkpoint-min-step, --cache-ram,
-    --fit-target, --kv-unified, --no-reasoning-preserve). El probe real la
-    detecta y el filtrado debe descartar esos flags nuevos en vez de lanzar un
-    comando que la build vieja rechazaría.
+    flash-attn, metrics, jinja, chat-template-kwargs, reasoning, sampling,
+    parallel, mlock, no-mmap, api-key, verbosity, fit) pero NO los de
+    memoria de la 11003 (--ctx-checkpoints, --checkpoint-min-step,
+    --cache-ram, --fit-target, --kv-unified, --no-reasoning-preserve).
+    El probe real la detecta y el filtrado debe descartar esos flags nuevos
+    en vez de lanzar un comando que la build vieja rechazaría.
     """
     # Algunas líneas llevan la ayuda oficial tras un salto de 2+ espacios
     # (formato llama-gen-docs) para probar el parseo de flag_help; el resto
@@ -421,6 +421,9 @@ def probeable_binary(make_probeable_binary):
         "--metrics",
         "--jinja",
         "--chat-template-kwargs JSON",
+        "--reasoning on",
+        "--reasoning-effort medium",
+        "--reasoning-budget 8192",
         "--mlock",
         "--no-mmap",
         "--temp 0.7",

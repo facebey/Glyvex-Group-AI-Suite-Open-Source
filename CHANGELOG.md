@@ -3,6 +3,26 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
+## [0.4.2] — 2026-09-20
+
+### Corregido
+- **Thinking/reasoning por flag nativo** (D8): `thinking_enabled` ahora se
+  cablea con `--reasoning on|off` en vez del kwarg `enable_thinking` en
+  `--chat-template-kwargs`, deprecado en llama.cpp (warning en el log del
+  server). `budget_tokens` pasa a `--reasoning-budget` nativo (solo con
+  thinking on y si `reasoning_budget` no está explícito, que tiene
+  prioridad); se eliminó el kwarg `thinking_budget` (no-op en templates
+  como Qwen3).
+
+### Actualizado
+- `docs/TROUBLESHOOTING.md`: caso "contexto excedido" alineado al código
+  real (aviso previo de la UI, chequeo `prompt + max_tokens > n_ctx`,
+  default de `max_tokens` 4096 y fix "bajar max_tokens").
+
+### Baseline
+- 297 tests en verde.
+
+
 ## [0.4.1] — 2026-09-20
 
 ### Agregado

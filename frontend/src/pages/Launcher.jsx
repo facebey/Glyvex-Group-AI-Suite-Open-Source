@@ -2019,6 +2019,10 @@ export default function Launcher() {
                       <option value={-1}>∞ (sin límite)</option>
                     </select>
                   </Field>
+                  <p className="text-xs text-glyvex-muted -mt-2">
+                    Se envía como --reasoning-budget (solo con thinking enabled;
+                    si reasoning_budget está explícito, ese gana).
+                  </p>
                   <Toggle
                     label="--jinja (requerido para reasoning_effort)"
                     checked={launchConfig.jinja}

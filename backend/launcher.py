@@ -45,7 +45,6 @@ Notas de compatibilidad verificadas contra las builds b11003-b11009 (2026):
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import time
@@ -223,13 +222,14 @@ class LaunchConfig(BaseModel):
     lora_scale: float = 1.0
 
     # -- Reasoning / thinking --------------------------------------------
-    # thinking_enabled se cablea vía chat_template_kwargs {"enable_thinking":
-    # bool} (best-effort: solo lo respetan templates Jinja que lo lean; los
-    # kwargs desconocidos se ignoran silenciosamente). El prefijo "/think"
-    # del chat/benchmark es el otro lever, a nivel de prompt.
+    # thinking_enabled se cablea vía el flag nativo --reasoning on/off.
+    # El viejo kwarg enable_thinking en --chat-template-kwargs quedó deprecado
+    # en llama.cpp (warning en el log del server) y hacía lo mismo.
+    # El prefijo "/think" del chat/benchmark es el otro lever, a nivel de prompt.
     thinking_enabled: bool = False
-    # -1 = sin límite (no se envía el kwarg). >0 se pasa como
-    # "thinking_budget" en chat_template_kwargs (best-effort por template).
+    # -1 = sin límite (no se envía). >0 se pasa al flag nativo
+    # --reasoning-budget (solo con thinking enabled y si reasoning_budget
+    # es -1: ese campo, al ser explícito, tiene prioridad).
     budget_tokens: int = 8192
     jinja: bool = True
     reasoning_effort: str = "none"   # "none"|"low"|"medium"|"high"|"xhigh"
@@ -791,21 +791,24 @@ def build_llama_server_command(
         cmd += ["--reasoning-effort", cfg.reasoning_effort]
     if cfg.reasoning_budget != -1:
         cmd += ["--reasoning-budget", str(cfg.reasoning_budget)]
-    # -- chat_template_kwargs (thinking) ---------------------------------
+    # -- reasoning (thinking) --------------------------------------------
+    # --reasoning on/off es el flag nativo: el kwarg enable_thinking en
+    # --chat-template-kwargs quedó deprecado en llama.cpp y hacía lo mismo.
     # Solo si el chat_template del modelo lee enable_thinking (detectado del
-    # header GGUF por read_gguf_metadata): si no lo lee, el kwarg es ruido
-    # muerto en el comando y en el preview.
-    template_kwargs: dict[str, Any] = {}
+    # header GGUF por read_gguf_metadata): si no lo lee, no hay qué togglear
+    # y --reasoning on solo mutaría el parseo (reasoning_content) sin motivo.
     if enable_thinking_supported:
-        template_kwargs["enable_thinking"] = bool(cfg.thinking_enabled)
-        if cfg.thinking_enabled and cfg.budget_tokens > 0:
-            template_kwargs["thinking_budget"] = cfg.budget_tokens
-    if template_kwargs and cfg.jinja:
-        cmd += ["--chat-template-kwargs", json.dumps(template_kwargs, ensure_ascii=False)]
-    elif template_kwargs and not cfg.jinja:
-        logger.warning(
-            "thinking_enabled/budget_tokens requieren --jinja: los kwargs no se envían"
-        )
+        if cfg.jinja:
+            cmd += ["--reasoning", "on" if cfg.thinking_enabled else "off"]
+            # budget_tokens → --reasoning-budget nativo: el viejo kwarg
+            # "thinking_budget" era no-op en templates como Qwen3. El campo
+            # explícito reasoning_budget se emitió arriba y tiene prioridad.
+            if cfg.thinking_enabled and cfg.budget_tokens > 0 and cfg.reasoning_budget == -1:
+                cmd += ["--reasoning-budget", str(cfg.budget_tokens)]
+        else:
+            logger.warning(
+                "thinking_enabled/budget_tokens requieren --jinja: --reasoning no se envía"
+            )
     if cfg.no_reasoning_preserve:
         cmd.append("--no-reasoning-preserve")
     # --mlock/--no-mmap/--mmap ya no existen en builds recientes; se

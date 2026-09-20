@@ -1,7 +1,6 @@
 """Tests de launcher.py — construcción de comandos, templates en SQLite, ciclo de vida de procesos."""
 
 import asyncio
-import json
 
 import pytest
 from pydantic import ValidationError
@@ -1003,11 +1002,7 @@ def test_build_command_vram_multi_modelo_defaults():
     assert "--lazy-mode" not in cmd
 
 
-def _template_kwargs(cmd) -> dict:
-    return json.loads(cmd[cmd.index("--chat-template-kwargs") + 1])
-
-
-def test_build_command_thinking_kwargs_full():
+def test_build_command_thinking_flag_full():
     cfg = launcher_module.LaunchConfig(
         model_id="m", thinking_enabled=True, budget_tokens=4096, reasoning_effort="medium",
     )
@@ -1015,10 +1010,22 @@ def test_build_command_thinking_kwargs_full():
     # reasoning_effort va por el flag nativo --reasoning-effort (b11009), ya no
     # por chat_template_kwargs: el flag es la versión server-level del mismo.
     assert cmd[cmd.index("--reasoning-effort") + 1] == "medium"
-    assert _template_kwargs(cmd) == {
-        "enable_thinking": True,
-        "thinking_budget": 4096,
-    }
+    # thinking_enabled va por el flag nativo --reasoning: el kwarg
+    # enable_thinking en --chat-template-kwargs quedó deprecado en llama.cpp.
+    assert cmd[cmd.index("--reasoning") + 1] == "on"
+    # budget_tokens → --reasoning-budget nativo (reasoning_budget=-1).
+    assert cmd[cmd.index("--reasoning-budget") + 1] == "4096"
+    assert "--chat-template-kwargs" not in cmd
+
+
+def test_build_command_reasoning_budget_precedence():
+    # reasoning_budget explícito tiene prioridad sobre budget_tokens:
+    # --reasoning-budget se emite una sola vez, con el valor explícito.
+    cfg = launcher_module.LaunchConfig(
+        model_id="m", thinking_enabled=True, budget_tokens=8192, reasoning_budget=4096)
+    cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/m.gguf")
+    assert cmd.count("--reasoning-budget") == 1
+    assert cmd[cmd.index("--reasoning-budget") + 1] == "4096"
 
 
 def test_build_command_reasoning_effort_none_not_sent():
@@ -1039,24 +1046,26 @@ def test_build_command_reasoning_budget_native():
     assert "--reasoning-budget" not in cmd_default
 
 
-def test_build_command_thinking_kwargs_defaults():
+def test_build_command_thinking_flag_defaults():
     cfg = launcher_module.LaunchConfig(model_id="m")
     cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/m.gguf")
-    # reasoning_effort="none" no agrega su clave, pero enable_thinking va
-    # siempre (con --jinja) para que el template pueda leerla.
-    assert _template_kwargs(cmd) == {"enable_thinking": False}
+    # --reasoning va siempre (con --jinja) para que el template tenga el valor
+    # explícito: off por default, on con thinking_enabled.
+    assert cmd[cmd.index("--reasoning") + 1] == "off"
+    assert "--chat-template-kwargs" not in cmd
 
 
 def test_build_command_thinking_budget_negative_not_sent():
     cfg = launcher_module.LaunchConfig(model_id="m", thinking_enabled=True, budget_tokens=-1)
     cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/m.gguf")
-    assert _template_kwargs(cmd) == {"enable_thinking": True}
+    assert cmd[cmd.index("--reasoning") + 1] == "on"
+    assert "--reasoning-budget" not in cmd
 
 
 def test_build_command_thinking_without_jinja_not_sent():
     cfg = launcher_module.LaunchConfig(model_id="m", thinking_enabled=True, jinja=False)
     cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/m.gguf")
-    assert "--chat-template-kwargs" not in cmd
+    assert "--reasoning" not in cmd
     assert "--jinja" not in cmd
 
 
@@ -1213,7 +1222,8 @@ def test_auto_mode_ignores_every_tuning_field():
     tuning_flags = (
         "--ctx-size", "--batch-size", "--ubatch-size", "--n-gpu-layers",
         "--cache-type-k", "--cache-type-v", "--flash-attn", "--temp", "--top-p",
-        "--jinja", "--no-jinja", "--reasoning-effort", "--reasoning-budget",
+        "--jinja", "--no-jinja", "--reasoning", "--reasoning-effort",
+        "--reasoning-budget",
         "--spec-type", "--mmproj", "--lora", "--no-warmup", "--sleep-idle-seconds",
         "--ctx-checkpoints", "--checkpoint-min-step", "--cache-ram", "--fit",
         "--fit-target", "--parallel", "--threads", "--chat-template-kwargs",
@@ -1400,12 +1410,12 @@ async def test_launch_rejects_binary_missing_critical_flag(client, sample_model_
 
 
 # --------------------------------------------------------------------------
-# thinking-kwarg-aware: el builder solo envía --chat-template-kwargs si el
-# chat_template del modelo lee enable_thinking (detectado del header GGUF).
+# thinking-aware: el builder solo envía --reasoning si el chat_template del
+# modelo lee enable_thinking (detectado del header GGUF).
 # --------------------------------------------------------------------------
 
 
-def test_build_command_thinking_kwarg_gate():
+def test_build_command_thinking_flag_gate():
     cfg = launcher_module.LaunchConfig(
         model_id="m",
         backend="llama_server",
@@ -1413,16 +1423,17 @@ def test_build_command_thinking_kwarg_gate():
         thinking_enabled=True,
         budget_tokens=4096,
     )
-    with_kwarg = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/m.gguf")
-    assert "--chat-template-kwargs" in with_kwarg
+    with_flag = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/m.gguf")
+    assert "--reasoning" in with_flag
 
-    without_kwarg = launcher_module.build_llama_server_command(
+    without_flag = launcher_module.build_llama_server_command(
         cfg, "/opt/llama-server", "/models/m.gguf", enable_thinking_supported=False
     )
-    assert "--chat-template-kwargs" not in without_kwarg
+    assert "--reasoning" not in without_flag
+    assert "--reasoning-budget" not in without_flag
 
 
-async def test_preview_command_skips_thinking_kwargs_for_plain_template(client, probeable_binary, tmp_path):
+async def test_preview_command_skips_reasoning_for_plain_template(client, probeable_binary, tmp_path):
     model_dir = tmp_path / "m"
     model_dir.mkdir()
     write_gguf(model_dir / "Plain-8B-Q4_K_M.gguf", "llama", "{{ messages | join(' ') }}")
@@ -1437,10 +1448,10 @@ async def test_preview_command_skips_thinking_kwargs_for_plain_template(client, 
     )
     assert res.status_code == 200
     cmd = res.json()["command"]
-    assert "--chat-template-kwargs" not in cmd
+    assert "--reasoning" not in cmd
 
 
-async def test_preview_command_sends_thinking_kwargs_for_thinking_template(client, probeable_binary, tmp_path):
+async def test_preview_command_sends_reasoning_for_thinking_template(client, probeable_binary, tmp_path):
     model_dir = tmp_path / "m"
     model_dir.mkdir()
     write_gguf(model_dir / "Thinker-8B-Q4_K_M.gguf", "qwen3", "{% if enable_thinking %}<|think|>{% endif %}")
@@ -1455,4 +1466,5 @@ async def test_preview_command_sends_thinking_kwargs_for_thinking_template(clien
     )
     assert res.status_code == 200
     cmd = res.json()["command"]
-    assert "--chat-template-kwargs" in cmd
+    assert cmd[cmd.index("--reasoning") + 1] == "on"
+    assert cmd[cmd.index("--reasoning-budget") + 1] == "4096"
