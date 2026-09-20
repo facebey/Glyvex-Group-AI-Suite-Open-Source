@@ -16,12 +16,18 @@ def _store(tmp_path, retention=None) -> MetricsStore:
     return store
 
 
-def _fill_raw(store: MetricsStore, key: str, start: int, seconds: int, value_at=lambda ts: 50.0):
+def _fill_raw(store: MetricsStore, key: str, start: int, seconds: int, process_id: str = "",
+              value_at=lambda ts: 50.0):
     windows = [
         SampleWindow(key=key, ts=ts, avg=value_at(ts), min=value_at(ts) - 1, max=value_at(ts) + 1)
         for ts in range(start, start + seconds, 5)
     ]
-    store.write_raw(windows, units={key: "°C"})
+    store.write_raw(
+        windows,
+        scope="llm" if process_id else "hw",
+        process_id=process_id,
+        units={key: "" if process_id else "°C"},
+    )
 
 
 def test_series_hw_no_se_duplican(tmp_path):
@@ -158,4 +164,29 @@ def test_series_por_proceso_separadas(tmp_path):
     assert a["series"]["llm.tg_tps"][0]["avg"] == 100.0
     assert b["series"]["llm.tg_tps"][0]["avg"] == 40.0
     assert len(store.list_series(scope="llm")) == 2
+
+
+def test_delete_process_borra_todos_los_niveles(tmp_path):
+    store = _store(tmp_path)
+    _fill_raw(store, "gpu.0.temp_c", T0, 300)
+    for pid in ("proc-a", "proc-b"):
+        _fill_raw(store, "llm.tg_tps", T0, 300, process_id=pid)
+    store.rollup(now=T0 + 2 * 3600)
+    store.rollup(now=T0 + 24 * 3600)
+
+    assert store.delete_process("proc-inexistente") == 0
+    assert store.delete_process("") == 0
+    assert store.delete_process("proc-a") == 1
+
+    # Ni rastro en ningún nivel, ni en list_series.
+    res = store.query(["llm.tg_tps"], T0, T0 + 300, now=T0 + 300, process_id="proc-a")
+    assert res["series"]["llm.tg_tps"] == []
+    llm_series = store.list_series(scope="llm")
+    assert [s["process_id"] for s in llm_series] == ["proc-b"]
+    # Lo del otro proceso y el hardware siguen intactos.
+    b = store.query(["llm.tg_tps"], T0, T0 + 300, now=T0 + 300, process_id="proc-b")
+    assert b["series"]["llm.tg_tps"]
+    hw = store.query(["gpu.0.temp_c"], T0, T0 + 300, now=T0 + 300)
+    assert hw["series"]["gpu.0.temp_c"]
+    store.close()
     store.close()

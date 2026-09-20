@@ -149,4 +149,6 @@ pytest tests/ --cov=backend --cov-report=term-missing --cov-report=html
 
 ## Licencia
 
-Por definir (se agregará próximamente).
+Apache License 2.0 — ver [LICENSE](LICENSE).
+
+Copyright (c) 2026 Glyvex Group

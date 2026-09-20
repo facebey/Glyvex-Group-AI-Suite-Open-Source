@@ -40,6 +40,7 @@ from sqlalchemy import delete, select, update
 
 from chat import ThinkingStreamParser
 from stream_metrics import StreamMetrics, reasoning_from_delta
+from paths import BASE_DIR, DATA_DIR
 from database import (
     BenchmarkResultRow,
     BenchmarkRunRow,
@@ -51,9 +52,10 @@ from database import (
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# PROMPTS_DIR es código (los 6 sets versionados viven en el repo), no estado:
+# sigue colgando de BASE_DIR y es COMPARTIDO entre instancias a propósito.
 PROMPTS_DIR = BASE_DIR / "backend" / "prompts"
-RUNS_DIR = BASE_DIR / "data" / "benchmarks"
+RUNS_DIR = DATA_DIR / "benchmarks"
 
 PROGRESS_BUFFER_MAXLEN = 500
 
@@ -1013,8 +1015,27 @@ class BenchmarkManager:
         task = self._tasks.get(run_id)
         if task is None or task.done():
             return False
+        # Un run ya terminado (completed/error) puede seguir vivo en su cola
+        # final de persistencia en DB: cancelarlo ahí interrumpe los merges
+        # y el DELETE termina sin borrar nada. Solo se cancela si el run
+        # sigue corriendo prompts.
+        run = self._runs.get(run_id)
+        if run is None or run.status != "running":
+            return False
         task.cancel()
         return True
+
+    async def wait_finished(self, run_id: str) -> None:
+        """Espera a que el task del run termine, incluida la persistencia
+        final que corre DESPUÉS de marcar el status (si el task ya terminó
+        es un no-op)."""
+        task = self._tasks.get(run_id)
+        if task is None:
+            return
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     def _on_task_done(self, run_id: str, task: asyncio.Task) -> None:
         """
@@ -1337,6 +1358,11 @@ async def judge_run(run_id: str, req: JudgeRequest) -> StreamingResponse:
 async def delete_or_cancel_run(run_id: str) -> dict[str, bool]:
     if manager.cancel(run_id):
         return {"cancelled": True}
+
+    # Si el run ya terminó, su task puede estar en la cola final de
+    # persistencia: esperarla evita que los merges reinserten las filas
+    # que estamos por borrar.
+    await manager.wait_finished(run_id)
 
     json_path = RUNS_DIR / f"{run_id}.json"
     html_path = RUNS_DIR / f"{run_id}.html"

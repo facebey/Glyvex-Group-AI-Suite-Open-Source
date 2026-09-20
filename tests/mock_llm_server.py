@@ -23,7 +23,7 @@ import asyncio
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 
@@ -88,6 +88,28 @@ async def _slots(request: Request) -> JSONResponse:
     }])
 
 
+# Receptor de escrituras de InfluxDB (v1 /write y v2 /api/v2/write). Los tests
+# leen lo recibido y cambian "status" para simular un destino caído.
+INFLUX_STATE: dict = {"status": 204, "writes": []}
+
+
+def reset_influx() -> None:
+    INFLUX_STATE["status"] = 204
+    INFLUX_STATE["writes"] = []
+
+
+async def _influx_write(request: Request) -> Response:
+    body = (await request.body()).decode("utf-8")
+    INFLUX_STATE["writes"].append({
+        "path": request.url.path,
+        "params": dict(request.query_params),
+        "authorization": request.headers.get("authorization"),
+        "lines": body.splitlines(),
+    })
+    status = INFLUX_STATE["status"]
+    return Response(status_code=status, content=b"" if status < 300 else b'{"message":"simulated failure"}')
+
+
 async def _chat_completions(request: Request) -> StreamingResponse:
     body = await request.json()
     messages = body.get("messages", [])
@@ -145,6 +167,8 @@ def build_mock_app() -> Starlette:
             Route("/v1/models", _v1_models),
             Route("/metrics", _metrics),
             Route("/slots", _slots),
+            Route("/api/v2/write", _influx_write, methods=["POST"]),
+            Route("/write", _influx_write, methods=["POST"]),
             Route("/v1/chat/completions", _chat_completions, methods=["POST"]),
         ]
     )

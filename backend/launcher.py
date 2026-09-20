@@ -3,15 +3,19 @@ launcher.py — Lanzamiento y control de modelos LLM locales (módulo M2).
 
 Responsabilidades:
 - Schema Pydantic v2 de parámetros de lanzamiento (LaunchConfig) con
-  validación cruzada (gpu_mode <-> n_gpu_layers, rangos de lora_scale/n_parallel)
-  y parámetros avanzados (rope scaling, NUMA, cache reuse, group attention).
+  validación cruzada (gpu_mode <-> n_gpu_layers, rangos de lora_scale/n_parallel,
+  combinaciones de KV cache válidas con Flash Attention) y parámetros
+  avanzados (rope scaling, NUMA, cache reuse, checkpoints de contexto).
 - Sampling parameters de arranque (temp, top_p, top_k, min_p, penalties) con
   presets "thinking" / "instruct": llama-server los usa como defaults para
   todo cliente que no mande los suyos en el request.
 - Templates de hardware predefinidos + custom, persistidos en SQLite
   (tabla hw_templates, ver database.py). El JSON data/templates/hw_templates.json
   queda solo como semilla de la primera carga.
-- Construcción del comando de llama-server / ollama a partir de LaunchConfig.
+- Construcción del comando de llama-server / ollama a partir de LaunchConfig,
+  con PROBE de capacidades del binario: se lee `--help` una vez por build y se
+  descartan los flags que esa build no conoce (con warning), para que la app
+  funcione contra builds distintas sin romperse.
 - Gestión de procesos con asyncio.create_subprocess_exec (NUNCA
   subprocess.Popen dentro de código async), incluyendo:
     - captura de stdout/stderr combinados hacia un log en disco + buffer
@@ -19,12 +23,31 @@ Responsabilidades:
     - health check async (httpx) con polling cada 2s / timeout total 30s.
     - stop con SIGTERM y escalamiento a SIGKILL si no responde en 5s.
     - detección de caída inesperada del proceso -> estado "error".
+
+Notas de compatibilidad verificadas contra las builds b11003-b11009 (2026):
+- --flash-attn acepta on|off|auto (NO 1/0).
+- Con Flash Attention, el KV cache solo admite pares simétricos:
+  q4_0-q4_0, q8_0-q8_0, f16-f16, bf16-bf16 (línea FA_QUANTS del log).
+- --numa EXIGE valor: distribute|isolate|numactl.
+- Checkpoints de contexto: -ctxcp/--ctx-checkpoints (default 32) y
+  -cms/--checkpoint-min-step (default 8192). Cada checkpoint cuesta
+  ~150 MiB de VRAM en arquitecturas híbridas (estado recurrente SSM);
+  en ctx largos son el componente que domina el consumo post-carga.
+- --cache-ram <MiB> limita el prompt cache en RAM (0 lo desactiva).
+- --fit-target <MiB> reserva margen de VRAM y auto-ajusta el ctx.
+- b11007 arregla la recaptura de CUDA graph en speculative decoding MTP
+  (~4-5% en decode con --spec-type draft-mtp). Es un fix interno: no cambia
+  ni agrega flags, así que basta con actualizar el binario.
+- El puerto default del server migrará de 8080 a 9931 en el futuro:
+  nunca hardcodear, siempre salir de cfg.port / config de backends.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -38,19 +61,23 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, model_validator
 
 from config import config
+from paths import BASE_DIR, DATA_DIR
 from database import (
     db_delete_template,
     db_get_template,
     db_list_templates,
     db_upsert_template,
 )
-from models import inventory as model_inventory
+from models import get_entry_metadata, inventory as model_inventory
 
 logger = logging.getLogger("glyvex.launcher")
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Semilla versionada en el repo (no está en .gitignore): son los templates
+# predefinidos que init_db() inserta en la DB de CADA instancia al arrancar.
+# Es código, no estado, así que cuelga de BASE_DIR y se comparte. Si colgara
+# de DATA_DIR, una instancia nueva arrancaría sin ningún template predefinido.
 TEMPLATES_PATH = BASE_DIR / "data" / "templates" / "hw_templates.json"
-LOGS_DIR = BASE_DIR / "data" / "logs"
+LOGS_DIR = DATA_DIR / "logs"
 
 LOG_BUFFER_MAXLEN = 2000
 HEALTH_CHECK_INTERVAL_S = 2.0
@@ -99,6 +126,8 @@ LLAMA_SERVER_VERBOSITY = 4
 
 # Presets de sampling. Son la fuente de verdad del backend; el frontend tiene
 # una copia con los mismos valores para poder previsualizarlos sin round-trip.
+# "instruct" usa penalties moderados: repeat_penalty 1.5 / presence 1.5
+# degeneran la salida en la familia Qwen (especialmente código).
 SAMPLING_PRESETS: dict[str, dict[str, float | int]] = {
     "thinking": {
         "temperature": 1.0,
@@ -113,38 +142,68 @@ SAMPLING_PRESETS: dict[str, dict[str, float | int]] = {
         "top_p": 0.80,
         "top_k": 20,
         "min_p": 0.0,
-        "presence_penalty": 1.5,
-        "repeat_penalty": 1.5,
+        "presence_penalty": 0.3,
+        "repeat_penalty": 1.1,
     },
 }
 
-# --------------------------------------------------------------------------
+# Combinaciones de KV cache que el kernel de Flash Attention acepta en las
+# builds recientes (FA_QUANTS del log de arranque). Con flash_attn=on, K y V
+# deben ser simétricos y estar en esta lista; cualquier otra combinación
+# termina en crash o fallback silencioso a f16.
+FA_KV_WHITELIST = frozenset({
+    ("q4_0", "q4_0"),
+    ("q8_0", "q8_0"),
+    ("f16", "f16"),
+    ("bf16", "bf16"),
+})
+
+# ---------------------------------------------------------------------------
 # Schema (Pydantic v2)
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 BackendName = Literal["llama_server", "ollama", "lm_studio"]
 GpuMode = Literal["gpu_only", "cpu_only", "hybrid"]
-CacheType = Literal["f16", "q8_0", "q4_0", "q4_1"]
+# bf16 agregado: está en FA_QUANTS. q4_1 NO: con Flash Attention rechazado.
+CacheType = Literal["f16", "bf16", "q8_0", "q4_0"]
 RopeScalingType = Literal["none", "linear", "yarn"]
 ProcessState = Literal["starting", "running", "stopped", "error"]
+# Reemplaza a los viejos flags --mlock/--no-mmap/--mmap, que ya no existen
+# como tales en builds recientes (unificados en --load-mode, ver
+# build_llama_server_command). Valores tal cual los acepta el binario.
+LoadMode = Literal["auto", "none", "mmap", "mlock", "mmap+mlock", "dio"]
+# Lectura bajo demanda de ciertos tensores (p. ej. embeddings por capa) para
+# ahorrar VRAM residente. auto = solo tensores >4GiB (default del binario).
+LazyMode = Literal["auto", "on", "off"]
+
+# Migración de configs/templates guardados con tipos de KV que ya no existen
+# en el schema. Sin esto, un hw_template viejo en SQLite con cache_type_k
+# "q4_1" hace fallar el POST /launch con un 422 de Pydantic que el usuario no
+# puede arreglar desde la UI. Se corrige en silencio (con warning) en vez de
+# romper. OJO: debe vivir a nivel de módulo — como atributo de clase con
+# guion bajo Pydantic lo convierte en ModelPrivateAttr y no es indexable.
+LEGACY_CACHE_TYPES: dict[str, str] = {"q4_1": "q4_0", "q5_0": "q8_0", "q5_1": "q8_0"}
 
 
 class LaunchConfig(BaseModel):
     model_id: str
     backend: BackendName = "llama_server"
-
-    n_ctx: int = 65536
-    n_batch: int = 512
-    n_ubatch: int = 512
-
+    # P1.5: campos con toggle. None = toggle OFF -> el builder no emite el
+    # flag -> llama-server usa el default de la build (para benchmarks finos).
+    n_ctx: int | None = 65536
+    # 2048 (default de llama.cpp) rinde bastante más en prompt processing que
+    # 512 en GPUs anchas (medido: pp2048 ~1400 t/s con batch 2048). El ubatch
+    # se queda en 512 para no inflar el compute buffer.
+    n_batch: int | None = 2048
+    # Extensión del alcance P1.5 (2026-09-20): también con toggle. None = no
+    # se emite --ubatch-size -> default de la build.
+    n_ubatch: int | None = 512
     n_gpu_layers: int = -1
     gpu_mode: GpuMode = "gpu_only"
-
-    cache_type_k: CacheType = "q4_0"
-    cache_type_v: CacheType = "q4_0"
+    cache_type_k: CacheType | None = "q4_0"
+    cache_type_v: CacheType | None = "q4_0"
     flash_attn: bool = True
-    use_mlock: bool = False
-    use_mmap: bool = True
+    load_mode: LoadMode = "auto"
 
     # -- Speculative decoding (MTP / NextN) ------------------------------
     # Dos formas de tener MTP:
@@ -154,22 +213,35 @@ class LaunchConfig(BaseModel):
     mtp_draft_model: str | None = None
     mtp_embedded: bool = False
     n_draft: int = 5
-    # None = no se pasa el flag, llama-server usa su default (f16) para el
-    # draft. Solo tiene efecto si mtp_draft_model o mtp_embedded están activos.
-    cache_type_k_draft: CacheType | None = None
-    cache_type_v_draft: CacheType | None = None
-
+    # KV cache del DRAFT. None = no se pasa el flag (llama-server usa f16,
+    # que quema VRAM sin necesidad). Default q8_0: mitad de VRAM que f16 con
+    # aceptación prácticamente idéntica. Solo aplica con MTP activo.
+    cache_type_k_draft: CacheType | None = "q8_0"
+    cache_type_v_draft: CacheType | None = "q8_0"
     mmproj_path: str | None = None
-
     lora_path: str | None = None
     lora_scale: float = 1.0
 
+    # -- Reasoning / thinking --------------------------------------------
+    # thinking_enabled se cablea vía chat_template_kwargs {"enable_thinking":
+    # bool} (best-effort: solo lo respetan templates Jinja que lo lean; los
+    # kwargs desconocidos se ignoran silenciosamente). El prefijo "/think"
+    # del chat/benchmark es el otro lever, a nivel de prompt.
     thinking_enabled: bool = False
+    # -1 = sin límite (no se envía el kwarg). >0 se pasa como
+    # "thinking_budget" en chat_template_kwargs (best-effort por template).
     budget_tokens: int = 8192
-    
-    # -- Jinja + reasoning effort ---------------------------------------
     jinja: bool = True
     reasoning_effort: str = "none"   # "none"|"low"|"medium"|"high"|"xhigh"
+    # Si el template soporta reasoning preservado, la build 11003 lo activa
+    # por defecto y gasta tokens extra re-emitiendo el razonamiento en cada
+    # turno. Este flag lo apaga.
+    no_reasoning_preserve: bool = False
+    # Token budget nativo del server para el razonamiento (b11009).
+    # -1 = sin límite (no se envía el flag), 0 = fin inmediato del thinking.
+    # Es el control por flag, distinto de budget_tokens (que va por
+    # chat_template_kwargs solo con thinking enabled).
+    reasoning_budget: int = -1           # --reasoning-budget
 
     # -- Sampling parameters (defaults del servidor) --------------------
     # Cuando se pasan como flags de arranque, llama-server los usa como
@@ -179,31 +251,123 @@ class LaunchConfig(BaseModel):
     top_p: float = 0.80
     top_k: int = 20
     min_p: float = 0.0
-    presence_penalty: float = 0.0
-    repeat_penalty: float = 1.5
+    presence_penalty: float = 0.3
+    repeat_penalty: float = 1.1
 
     # -- Rope scaling ---------------------------------------------------
-    rope_freq_base: float = 0.0          # 0 = auto
-    rope_scaling_type: RopeScalingType = "none"
-    yarn_ext_factor: float = -1.0        # -1 = auto
+    # Toggle agrupado (subsistema RoPE): OFF = los tres None -> ni un solo
+    # flag --rope-*/--yarn-*.
+    rope_freq_base: float | None = 0.0          # 0 = auto
+    rope_scaling_type: RopeScalingType | None = "none"
+    yarn_ext_factor: float | None = -1.0        # -1 = auto
+
+    # -- Checkpoints de contexto (VRAM en arquitecturas híbridas/SSM) ----
+    # Cada checkpoint = ~150 MiB de VRAM (copia del estado recurrente).
+    # Defaults de la build 11003: 32 / 8192 -> hasta 16 checkpoints en un
+    # ctx de 128k (~2.4 GiB). Estos defaults los acotan: con -cms 16384 el
+    # reproceso máximo al regenerar un mensaje viejo es de ~16k tokens
+    # (~12-16 s a pp ~1300 t/s), casi nunca perceptible.
+    ctx_checkpoints: int | None = 8      # -ctxcp / --ctx-checkpoints
+    checkpoint_min_step: int | None = 16384     # -cms  / --checkpoint-min-step
+
+    # -- Prompt cache (RAM del sistema, no VRAM) -------------------------
+    # Límite del caché de prompts ociosos en RAM. 0 lo desactiva. Con 64 GB
+    # de RAM sobra para subirlo y acelerar el switch entre conversaciones.
+    cache_ram_mib: int | None = 8192     # --cache-ram
+
+    # -- Ajuste automático de VRAM ----------------------------------------
+    # >0: le pide a llama.cpp reservar ese margen de VRAM por dispositivo y
+    # auto-reducir lo que haga falta (ctx incluido). Ideal para una app que
+    # carga modelos arbitrarios sin conocer su tamaño de antemano.
+    fit_target_mib: int | None = 0       # --fit-target (0 = off)
+    # --fit on: llama.cpp ajusta los argumentos que el usuario NO fijó para
+    # caber en la memoria del dispositivo (default de b11009: on). None = no
+    # se emite el flag (default de la build).
+    fit: bool | None = True              # --fit on
 
     # -- Optimizaciones avanzadas ---------------------------------------
     numa: bool = False
     no_kv_offload: bool = False
-    cache_reuse: int = 0                 # 0-256
-    defrag_thold: float = -1.0           # -1 = deshabilitado
+    cache_reuse: int | None = 0          # 0-256
+    defrag_thold: float | None = -1.0    # -1 = deshabilitado
+    # Unifica el KV cache entre slots. Con n_parallel > 1 y kv_unified en
+    # false, CADA slot reserva su propio ctx completo (x N de VRAM de KV).
+    kv_unified: bool = False             # --kv-unified
+    # Límite de contexto por slot paralelo cuando kv_unified está activo.
+    # 0 = sin límite (comportamiento previo, cada slot usa el n_ctx global).
+    kv_unified_per_slot: int = 0         # --kv-unified-per-slot
+    # El server se "duerme" (libera VRAM) tras N segundos de inactividad.
+    # 0 = deshabilitado. Útil para soltar VRAM y cargar otro modelo.
+    sleep_idle_seconds: int = 0          # --sleep-idle-seconds
+    # Warmup con una corrida vacía al arrancar (default del binario: on).
+    warmup: bool = True                  # --warmup / --no-warmup
+    # Lectura bajo demanda de tensores grandes (ver LazyMode). auto = default.
+    lazy_mode: LazyMode = "auto"         # --lazy-mode
 
     # -- Group attention (sliding window) -------------------------------
-    grp_attn_n: int = 1                  # 1 = deshabilitado
-    grp_attn_w: int = 512
-
+    # Ojo: flag deprecado/removido en varias builds. El probe de flags lo
+    # descarta con warning si el binario no lo conoce.
+    grp_attn_n: int | None = 1           # 1 = deshabilitado (agrupado con w)
+    grp_attn_w: int | None = 512
+    # -- Modo automático (P1.5 F4) ----------------------------------------
+    # Comando estricto: solo modelo + puerto (+ host si difiere de
+    # 127.0.0.1). Todo lo demás usa el default de la build. Se conserva la
+    # infra de la app: --verbosity (logs) y --metrics (Monitor).
+    auto_mode: bool = False
     host: str = "127.0.0.1"
     port: int = 8080
-    n_threads: int = -1
-    n_parallel: int = 1
+    n_threads: int | None = -1           # -1 o 0 = auto (no se pasa el flag)
+    n_parallel: int | None = 1
     api_key: str = ""
     log_file: str = "data/logs/llama-server.log"
     template_name: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_cache_types(cls, data: Any) -> Any:
+        """Migra tipos de KV que ya no existen en el schema (ver
+        LEGACY_CACHE_TYPES): un template viejo no debe romper el lanzamiento."""
+        if not isinstance(data, dict):
+            return data
+        for field in ("cache_type_k", "cache_type_v",
+                      "cache_type_k_draft", "cache_type_v_draft"):
+            value = data.get(field)
+            replacement = LEGACY_CACHE_TYPES.get(value) if isinstance(value, str) else None
+            if replacement:
+                logger.warning(
+                    "config guardada con %s=%s (ya no soportado con Flash "
+                    "Attention): se migra a %s", field, value, replacement,
+                )
+                data[field] = replacement
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_load_mode(cls, data: Any) -> Any:
+        """Migra use_mlock/use_mmap (campos removidos, ver LoadMode) a un
+        único load_mode: un template guardado antes de este cambio no debe
+        romper el lanzamiento ni perder silenciosamente la intención del
+        usuario (ej. alguien que había activado mlock a propósito)."""
+        if not isinstance(data, dict):
+            return data
+        if "use_mlock" in data or "use_mmap" in data:
+            use_mlock = bool(data.pop("use_mlock", False))
+            use_mmap = bool(data.pop("use_mmap", True))
+            if use_mlock and use_mmap:
+                load_mode = "mmap+mlock"
+            elif use_mlock and not use_mmap:
+                load_mode = "mlock"
+            elif not use_mlock and not use_mmap:
+                load_mode = "none"
+            else:
+                load_mode = "auto"
+            logger.warning(
+                "config guardada con use_mlock=%s/use_mmap=%s (flags "
+                "removidos del binario): se migra a load_mode=%s",
+                use_mlock, use_mmap, load_mode,
+            )
+            data.setdefault("load_mode", load_mode)
+        return data
 
     @model_validator(mode="after")
     def _validate_cross_fields(self) -> "LaunchConfig":
@@ -218,16 +382,47 @@ class LaunchConfig(BaseModel):
             )
         if not (0.0 <= self.lora_scale <= 2.0):
             raise ValueError("lora_scale debe estar entre 0.0 y 2.0")
-        if not (1 <= self.n_parallel <= 8):
+        # Los campos con toggle pueden ser None (OFF -> default de build):
+        # solo se valida el rango cuando hay valor.
+        if self.n_parallel is not None and not (1 <= self.n_parallel <= 8):
             raise ValueError("n_parallel debe estar entre 1 y 8")
-        if self.lora_path and self.lora_scale is None:
-            raise ValueError("lora_scale es obligatorio si se especifica lora_path")
-        if not (0 <= self.cache_reuse <= 256):
+        if self.cache_reuse is not None and not (0 <= self.cache_reuse <= 256):
             raise ValueError("cache_reuse debe estar entre 0 y 256")
-        if self.grp_attn_n < 1:
-            raise ValueError("grp_attn_n debe ser >= 1 (1 = deshabilitado)")
-        if self.grp_attn_n > 1 and self.grp_attn_w < 1:
-            raise ValueError("grp_attn_w debe ser >= 1 cuando grp_attn_n > 1")
+        if self.grp_attn_n is not None:
+            if self.grp_attn_n < 1:
+                raise ValueError("grp_attn_n debe ser >= 1 (1 = deshabilitado)")
+            if self.grp_attn_n > 1 and (self.grp_attn_w is None or self.grp_attn_w < 1):
+                raise ValueError("grp_attn_w debe ser >= 1 cuando grp_attn_n > 1")
+        # -- KV cache vs Flash Attention (FA_QUANTS de la build) ---------
+        # Con FA on solo existen los pares simétricos de FA_KV_WHITELIST.
+        # Si algún tipo es None (toggle OFF) la build usa f16, que es
+        # FA-compatible: solo se valida con ambos fijados.
+        if (self.flash_attn and self.cache_type_k is not None
+                and self.cache_type_v is not None
+                and (self.cache_type_k, self.cache_type_v) not in FA_KV_WHITELIST):
+            raise ValueError(
+                f"Con flash_attn=on el KV cache debe ser simétrico y estar en "
+                f"{sorted(FA_KV_WHITELIST)}; recibiste k={self.cache_type_k} "
+                f"v={self.cache_type_v}. Desactivá flash_attn o igualá los tipos."
+            )
+        # El KV del draft cae bajo la misma restricción (None = f16 default).
+        draft_pair = (self.cache_type_k_draft or "f16", self.cache_type_v_draft or "f16")
+        if self.flash_attn and draft_pair not in FA_KV_WHITELIST:
+            raise ValueError(
+                f"Con flash_attn=on el KV del draft debe ser simétrico y estar "
+                f"en {sorted(FA_KV_WHITELIST)}; recibiste k={draft_pair[0]} v={draft_pair[1]}"
+            )
+        # -- rangos de los flags nuevos ----------------------------------
+        if self.ctx_checkpoints is not None and self.ctx_checkpoints < 0:
+            raise ValueError("ctx_checkpoints debe ser >= 0 (0 = sin checkpoints)")
+        if self.checkpoint_min_step is not None and self.checkpoint_min_step < 512:
+            raise ValueError("checkpoint_min_step debe ser >= 512 tokens")
+        if self.cache_ram_mib is not None and self.cache_ram_mib < 0:
+            raise ValueError("cache_ram_mib debe ser >= 0 (0 = desactivado)")
+        if self.fit_target_mib is not None and self.fit_target_mib < 0:
+            raise ValueError("fit_target_mib debe ser >= 0 (0 = off)")
+        if self.budget_tokens < -1:
+            raise ValueError("budget_tokens debe ser >= -1 (-1 = sin límite)")
         # -- rangos de sampling (los mismos que expone la UI) ------------
         if not (0.0 <= self.temperature <= 2.0):
             raise ValueError("temperature debe estar entre 0.0 y 2.0")
@@ -258,11 +453,19 @@ class ProcessInfo(BaseModel):
     started_at: str | None = None
     error_message: str | None = None
     launch_config: dict[str, Any]
+    # argv realmente ejecutado, YA filtrado por el probe y con la api-key
+    # enmascarada (ver mask_command). Es lo que la UI muestra en "Estado del
+    # proceso": sirve para reproducir el lanzamiento a mano en una terminal.
+    command: list[str] | None = None
+    # Aviso de pre-vuelo: el puerto de destino ya estaba ocupado por algo
+    # que esta instancia no lanzó (otra instancia, huérfano de un --reload).
+    # El proceso igual se crea; la UI muestra esto junto al estado.
+    warning: str | None = None
 
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Templates (persistidos en SQLite, tabla hw_templates)
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 
 class TemplateStore:
@@ -300,57 +503,319 @@ class TemplateStore:
 
 templates = TemplateStore()
 
-# --------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # Construcción de comandos
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 
 def resolve_log_path(log_file: str, process_id: str) -> Path:
     # C3: log_file es el archivo donde _pump_output guarda la salida del
     # proceso (el launcher es el único que lo escribe: ver
-    # build_llama_server_command), así que se valida en start() antes de usarlo. Se resuelve contra BASE_DIR para bloquear path traversal
-    # ("../../etc/x" o absolutos fuera del proyecto) -> 400.
+    # build_llama_server_command), así que se valida en start() antes de
+    # usarlo, para bloquear path traversal ("../../etc/x" o absolutos fuera
+    # del proyecto) -> 400.
+    #
+    # Se ancla a DATA_DIR, NO a BASE_DIR. Los logs de llama-server son estado
+    # de la instancia: con GLYVEX_DATA_DIR apuntando afuera del repo, anclar a
+    # BASE_DIR mandaría los logs de la instancia de testing al data/ de
+    # producción (se pisarían), y además rechazaría con 400 cualquier ruta
+    # dentro del DATA_DIR nuevo por quedar fuera de BASE_DIR.
+    #
+    # log_file se acepta relativo al DATA_DIR ("logs/llama-server.log") y
+    # también con el prefijo histórico "data/" para no romper los templates y
+    # las configs ya guardadas de instalaciones previas.
     if not log_file:
         return LOGS_DIR / f"{process_id}.log"
-    log_path = (BASE_DIR / log_file).resolve()
+
+    candidate = Path(log_file)
+    if not candidate.is_absolute():
+        parts = candidate.parts
+        if parts and parts[0] == "data":
+            candidate = Path(*parts[1:]) if len(parts) > 1 else Path()
+        candidate = DATA_DIR / candidate
+
+    log_path = candidate.resolve()
     try:
-        log_path.relative_to(BASE_DIR.resolve())
+        log_path.relative_to(DATA_DIR.resolve())
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
-            detail=f"log_file debe quedar dentro de {BASE_DIR}: {log_file}",
+            detail=f"log_file debe quedar dentro de {DATA_DIR}: {log_file}",
         ) from exc
     return log_path
 
 
-def build_llama_server_command(cfg: LaunchConfig, binary_path: str, model_path: str) -> list[str]:
+# Flags que, si el binario no los conoce, indican que estamos ante un
+# llama.cpp incompatible: mejor error claro que un comando mutilado.
+CRITICAL_FLAGS = frozenset({"--model", "--host", "--port", "--ctx-size"})
+
+# Long-flags que NO llevan valor. filter_command los necesita para poder
+# descartar un flag desconocido sin comerse por error el token siguiente:
+# la heurística "el próximo token no empieza con -- => es su valor" falla
+# justo en los booleanos (p. ej. --kv-unified seguido de --metrics estaría
+# bien, pero --no-jinja seguido de un valor posicional no).
+# OJO: --load-mode SÍ lleva valor (auto|none|mmap|mlock|mmap+mlock|dio), no
+# va acá — reemplaza a los viejos --mlock/--no-mmap que eran booleanos.
+BOOLEAN_FLAGS = frozenset({
+    "--jinja", "--no-jinja", "--metrics", "--kv-unified",
+    "--no-kv-offload", "--no-reasoning-preserve", "--spec-type-mtp",
+    "--warmup", "--no-warmup",
+})
+
+
+class BinaryInfo(BaseModel):
+    """Capacidades detectadas de un binario de llama-server."""
+    path: str
+    build: str | None = None          # p. ej. "b11009"
+    version_line: str | None = None   # primera línea cruda de --version
+    flags: list[str] = []
+    flag_help: dict[str, str] = {}    # P1.5: ayuda oficial de cada long-flag
+    probed: bool = False              # False = el probe falló (no se filtra nada)
+
+
+# Cache del probe. La clave incluye mtime+size del archivo, no solo la ruta:
+# con auto-update/rollback del llama.cpp embebido el binario se reemplaza
+# EN LA MISMA RUTA, y cachear por ruta dejaría filtrando contra los flags de
+# la build vieja hasta reiniciar la app.
+_BINARY_CACHE: dict[tuple[str, int, int], BinaryInfo] = {}
+
+_BUILD_RE = re.compile(r"\bb?(\d{4,6})\b")
+
+
+def _binary_cache_key(binary_path: str) -> tuple[str, int, int]:
+    try:
+        st = Path(binary_path).stat()
+        return (binary_path, int(st.st_mtime), st.st_size)
+    except OSError:
+        return (binary_path, 0, 0)
+
+
+async def _run_capture(binary_path: str, arg: str, timeout: float = 15.0) -> str | None:
+    """Corre `binary --<arg>` y devuelve su salida combinada, o None si falla."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary_path, arg,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except (OSError, asyncio.TimeoutError, NotImplementedError) as exc:
+        logger.warning("no se pudo ejecutar %s %s: %s", binary_path, arg, exc)
+        return None
+    return out.decode("utf-8", errors="replace")
+
+
+def _parse_flag_help(help_text: str) -> dict[str, str]:
+    """
+    Parsea la salida de --help (formato llama-gen-docs) a {long-flag: ayuda
+    oficial}. Cada línea de opción: spec de la opción, un salto de 2+
+    espacios y la descripción; los aliases (-m, --model) apuntan a la misma
+    ayuda. Una opción sin salto ancho (sin descripción) queda con "".
+    """
+    help_map: dict[str, str] = {}
+    for line in help_text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("-"):
+            continue
+        parts = re.split(r"\s{2,}", stripped, maxsplit=1)
+        desc = parts[1].strip() if len(parts) == 2 else ""
+        for flag in re.findall(r"--[a-z0-9][a-z0-9-]*", parts[0]):
+            help_map.setdefault(flag, desc)
+    return help_map
+
+
+async def probe_binary(binary_path: str) -> BinaryInfo:
+    """
+    Lee `--help` y `--version` una vez por build (cache invalidada por
+    mtime+size) y devuelve los long-flags soportados más el número de build.
+    Si el probe falla, `probed` queda en False: en ese caso NO se filtra nada
+    y el error lo dará el propio llama-server con su mensaje en el log.
+    """
+    key = _binary_cache_key(binary_path)
+    cached = _BINARY_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    help_text = await _run_capture(binary_path, "--help")
+    if help_text is None:
+        return BinaryInfo(path=binary_path, probed=False)
+
+    flags = sorted(set(re.findall(r"--[a-z0-9][a-z0-9-]*", help_text)))
+    flag_help = _parse_flag_help(help_text)
+
+    build = None
+    version_line = None
+    version_text = await _run_capture(binary_path, "--version", timeout=10.0)
+    if version_text:
+        version_line = version_text.strip().splitlines()[0] if version_text.strip() else None
+        if version_line:
+            m = _BUILD_RE.search(version_line)
+            if m:
+                build = f"b{m.group(1)}"
+
+    info = BinaryInfo(
+        path=binary_path,
+        build=build,
+        version_line=version_line,
+        flags=flags,
+        flag_help=flag_help,
+        probed=True,
+    )
+    _BINARY_CACHE[key] = info
+    logger.info(
+        "probe de binario %s: build=%s, %d long-flags soportados",
+        binary_path, build or "desconocida", len(flags),
+    )
+    return info
+
+
+async def probe_supported_flags(binary_path: str) -> set[str]:
+    """Compatibilidad hacia atrás: solo el set de flags. Set vacío = sin probe."""
+    info = await probe_binary(binary_path)
+    return set(info.flags) if info.probed else set()
+
+
+def filter_command(cmd: list[str], supported: set[str]) -> tuple[list[str], list[str]]:
+    """
+    Devuelve (comando_filtrado, flags_descartados). Descarta los long-flags
+    opcionales que el binario no conoce, junto con su valor si lo llevan.
+    Un flag de BOOLEAN_FLAGS nunca consume el token siguiente; para el resto
+    se toma como valor el próximo token que no empiece con '--' (así siguen
+    cubiertos los negativos como -1 y el JSON de --chat-template-kwargs).
+    Con `supported` vacío no se toca nada.
+    """
+    if not supported:
+        return cmd, []
+    out: list[str] = [cmd[0]]  # el binario nunca se filtra
+    dropped: list[str] = []
+    i = 1
+    while i < len(cmd):
+        arg = cmd[i]
+        if arg.startswith("--") and arg not in supported:
+            dropped.append(arg)
+            takes_value = (
+                arg not in BOOLEAN_FLAGS
+                and i + 1 < len(cmd)
+                and not cmd[i + 1].startswith("--")
+            )
+            i += 2 if takes_value else 1
+            continue
+        out.append(arg)
+        i += 1
+    return out, dropped
+
+
+SECRET_FLAGS = frozenset({"--api-key"})
+
+
+def mask_command(cmd: list[str]) -> list[str]:
+    """
+    Copia del argv con los valores sensibles reemplazados. El comando se
+    expone por la API y se escribe en el log, así que la api-key nunca debe
+    salir en claro de acá.
+    """
+    out = list(cmd)
+    for i, arg in enumerate(out):
+        if arg in SECRET_FLAGS and i + 1 < len(out) and out[i + 1]:
+            out[i + 1] = "********"
+    return out
+
+
+def build_llama_server_command(
+    cfg: LaunchConfig,
+    binary_path: str,
+    model_path: str,
+    enable_thinking_supported: bool = True,
+) -> list[str]:
+    # P1.5: solo --model y --port van siempre. Todo lo que tiene toggle es
+    # Optional: None (toggle OFF) -> no se emite el flag -> default de build.
     cmd: list[str] = [
         binary_path,
         "--model", model_path,
-        "--ctx-size", str(cfg.n_ctx),
-        "--batch-size", str(cfg.n_batch),
-        "--ubatch-size", str(cfg.n_ubatch),
-        "--n-gpu-layers", str(cfg.n_gpu_layers),
-        "--cache-type-k", cfg.cache_type_k,
-        "--cache-type-v", cfg.cache_type_v,
     ]
-
+    if cfg.auto_mode:
+        # Modo automático: ningún flag de tuning — mandarlo sería pisar el
+        # default de la build, que es justo lo que este modo quiere probar.
+        # host/port son el mínimo para llegar al server; verbosity y metrics
+        # son infra de la app (logs del _pump_output y el Monitor).
+        if cfg.host != "127.0.0.1":
+            cmd += ["--host", cfg.host]
+        cmd += ["--port", str(cfg.port), "--verbosity", str(LLAMA_SERVER_VERBOSITY)]
+        if cfg.backend == "llama_server":
+            cmd.append("--metrics")
+        return cmd
+    if cfg.n_ctx is not None:
+        cmd += ["--ctx-size", str(cfg.n_ctx)]
+    if cfg.n_batch is not None:
+        cmd += ["--batch-size", str(cfg.n_batch)]
+    if cfg.n_ubatch is not None:
+        cmd += ["--ubatch-size", str(cfg.n_ubatch)]
+    cmd += ["--n-gpu-layers", str(cfg.n_gpu_layers)]
+    if cfg.cache_type_k is not None:
+        cmd += ["--cache-type-k", cfg.cache_type_k]
+    if cfg.cache_type_v is not None:
+        cmd += ["--cache-type-v", cfg.cache_type_v]
     if cfg.flash_attn:
         cmd.extend(["--flash-attn", "on"])
     else:
         cmd.extend(["--flash-attn", "off"])
-    if cfg.jinja:
-        cmd.append("--jinja")
+    # -- Checkpoints de contexto y prompt cache (build 11003+) -----------
+    # Van siempre: son los dos grandes consumidores de VRAM/RAM que la UI
+    # ahora permite acotar. El probe los descarta en builds viejas.
+    if cfg.ctx_checkpoints is not None:
+        cmd += ["--ctx-checkpoints", str(cfg.ctx_checkpoints)]
+    if cfg.checkpoint_min_step is not None:
+        cmd += ["--checkpoint-min-step", str(cfg.checkpoint_min_step)]
+    if cfg.cache_ram_mib is not None:
+        cmd += ["--cache-ram", str(cfg.cache_ram_mib)]
+    if cfg.fit is True:
+        cmd += ["--fit", "on"]
+    if cfg.fit_target_mib is not None and cfg.fit_target_mib > 0:
+        cmd += ["--fit-target", str(cfg.fit_target_mib)]
+    if cfg.kv_unified:
+        # En algunas builds pide valor explícito; si el probe lo deja pasar
+        # y el server lo rechaza, el log lo muestra al instante.
+        cmd.append("--kv-unified")
+    # El binario trae --jinja en 'enabled' por default: si no mandamos nada
+    # cuando cfg.jinja=False, el toggle de la UI en "apagado" no hace nada
+    # (el server sigue con Jinja prendido). Por eso las dos ramas, no solo
+    # el append condicional.
+    cmd.append("--jinja" if cfg.jinja else "--no-jinja")
+    # -- reasoning effort / budget: flags nativos del server (b11009) ----
+    # --reasoning-effort pasa "reasoning effort level given to the chat
+    # template": es la versión nativa del server del viejo kwarg
+    # reasoning_effort (no depende de que el template lea un kwarg concreto).
+    # 'default'/'none' no se envía (mantiene el default del template).
     if cfg.reasoning_effort != "none":
-        import json
-        cmd += ["--chat-template-kwargs",
-            json.dumps({"reasoning_effort": cfg.reasoning_effort})]
-    if cfg.use_mlock:
-        cmd.append("--mlock")
-    if not cfg.use_mmap:
-        cmd.append("--no-mmap")
+        cmd += ["--reasoning-effort", cfg.reasoning_effort]
+    if cfg.reasoning_budget != -1:
+        cmd += ["--reasoning-budget", str(cfg.reasoning_budget)]
+    # -- chat_template_kwargs (thinking) ---------------------------------
+    # Solo si el chat_template del modelo lee enable_thinking (detectado del
+    # header GGUF por read_gguf_metadata): si no lo lee, el kwarg es ruido
+    # muerto en el comando y en el preview.
+    template_kwargs: dict[str, Any] = {}
+    if enable_thinking_supported:
+        template_kwargs["enable_thinking"] = bool(cfg.thinking_enabled)
+        if cfg.thinking_enabled and cfg.budget_tokens > 0:
+            template_kwargs["thinking_budget"] = cfg.budget_tokens
+    if template_kwargs and cfg.jinja:
+        cmd += ["--chat-template-kwargs", json.dumps(template_kwargs, ensure_ascii=False)]
+    elif template_kwargs and not cfg.jinja:
+        logger.warning(
+            "thinking_enabled/budget_tokens requieren --jinja: los kwargs no se envían"
+        )
+    if cfg.no_reasoning_preserve:
+        cmd.append("--no-reasoning-preserve")
+    # --mlock/--no-mmap/--mmap ya no existen en builds recientes; se
+    # unificaron en --load-mode (confirmado contra --help real: auto es el
+    # default del binario, así que no hace falta mandarlo salvo que el
+    # usuario haya elegido otra cosa).
+    if cfg.load_mode != "auto":
+        cmd += ["--load-mode", cfg.load_mode]
     # -- speculative decoding (MTP / NextN) ------------------------------
-    # Nombres de flags según `llama-server --help` (build 2026-09):
+    # Nombres de flags según `llama-server --help` (build 11003):
     #   --spec-type draft-mtp     activa el modo de especulación MTP
     #   --spec-draft-model FNAME  modelo de draft (alias -md / --model-draft);
     #                             SOLO cuando la cabeza viene en un archivo aparte
@@ -375,7 +840,6 @@ def build_llama_server_command(cfg: LaunchConfig, binary_path: str, model_path: 
         cmd += ["--mmproj", cfg.mmproj_path]
     if cfg.lora_path:
         cmd += ["--lora", cfg.lora_path, "--lora-scale", str(cfg.lora_scale)]
-
     # -- sampling defaults del servidor ---------------------------------
     # Van siempre: son los valores que llama-server aplica a cualquier
     # request que no traiga los suyos (el Chat sí manda los propios).
@@ -388,47 +852,74 @@ def build_llama_server_command(cfg: LaunchConfig, binary_path: str, model_path: 
     cmd += ["--repeat-penalty", str(cfg.repeat_penalty)]
 
     # -- parámetros avanzados (solo si difieren del default "apagado") ---
-    if cfg.rope_freq_base > 0:
-        cmd += ["--rope-freq-base", str(cfg.rope_freq_base)]
-    if cfg.rope_scaling_type != "none":
-        cmd += ["--rope-scaling", cfg.rope_scaling_type]
-    if cfg.rope_scaling_type == "yarn" and cfg.yarn_ext_factor >= 0:
-        cmd += ["--yarn-ext-factor", str(cfg.yarn_ext_factor)]
+    # Grupo RoPE: toggle OFF = rope_scaling_type None -> nada del subsistema,
+    # aunque freq_base/yarn traigan valores.
+    if cfg.rope_scaling_type is not None:
+        if cfg.rope_freq_base is not None and cfg.rope_freq_base > 0:
+            cmd += ["--rope-freq-base", str(cfg.rope_freq_base)]
+        if cfg.rope_scaling_type != "none":
+            cmd += ["--rope-scaling", cfg.rope_scaling_type]
+        if (cfg.rope_scaling_type == "yarn" and cfg.yarn_ext_factor is not None
+                and cfg.yarn_ext_factor >= 0):
+            cmd += ["--yarn-ext-factor", str(cfg.yarn_ext_factor)]
     if cfg.numa:
-        cmd.append("--numa")
+        # Build 11003: --numa EXIGE modo (distribute|isolate|numactl).
+        cmd += ["--numa", "distribute"]
     if cfg.no_kv_offload:
         cmd.append("--no-kv-offload")
-    if cfg.cache_reuse > 0:
+    if cfg.cache_reuse is not None and cfg.cache_reuse > 0:
         cmd += ["--cache-reuse", str(cfg.cache_reuse)]
-    if cfg.defrag_thold >= 0:
+    # -- VRAM / multi-modelo (b11009) -----------------------------------
+    # warmup: el default del binario es "on", así que solo se envía
+    # --no-warmup para desactivarlo (coherente con "solo si difiere").
+    if not cfg.warmup:
+        cmd.append("--no-warmup")
+    if cfg.sleep_idle_seconds > 0:
+        cmd += ["--sleep-idle-seconds", str(cfg.sleep_idle_seconds)]
+    if cfg.kv_unified_per_slot > 0:
+        cmd += ["--kv-unified-per-slot", str(cfg.kv_unified_per_slot)]
+    if cfg.lazy_mode != "auto":
+        cmd += ["--lazy-mode", cfg.lazy_mode]
+    # --defrag-thold figura como DEPRECATED en el --help de builds recientes.
+    # Por ahora el binario lo sigue aceptando (no está en la lista de flags
+    # críticos), así que lo dejamos: si algún día lo remueven del todo, el
+    # probe de capacidades lo descarta solo y esto no rompe el arranque.
+    if cfg.defrag_thold is not None and cfg.defrag_thold >= 0:
         cmd += ["--defrag-thold", str(cfg.defrag_thold)]
-    if cfg.grp_attn_n > 1:
+    if cfg.grp_attn_n is not None and cfg.grp_attn_n > 1:
         cmd += ["--grp-attn-n", str(cfg.grp_attn_n)]
-        cmd += ["--grp-attn-w", str(cfg.grp_attn_w)]
-
-    cmd += [
-        "--threads", str(cfg.n_threads),
-        "--parallel", str(cfg.n_parallel),
-        "--host", cfg.host,
-        "--port", str(cfg.port),
-    ]
-
+        if cfg.grp_attn_w is not None:
+            cmd += ["--grp-attn-w", str(cfg.grp_attn_w)]
+    if cfg.n_parallel is not None and cfg.n_parallel > 1 and not cfg.kv_unified:
+        logger.warning(
+            "n_parallel=%d sin kv_unified: cada slot reserva su propio KV cache "
+            "completo (x%d la VRAM de contexto); considerá kv_unified=True o "
+            "reducir n_ctx",
+            cfg.n_parallel, cfg.n_parallel,
+        )
+    # --threads solo con valor positivo: -1/0 significa "auto" y pasarlo
+    # explícitamente depende de cómo lo trate cada build.
+    if cfg.n_threads is not None and cfg.n_threads > 0:
+        cmd += ["--threads", str(cfg.n_threads)]
+    if cfg.n_parallel is not None:
+        cmd += ["--parallel", str(cfg.n_parallel)]
+    # 127.0.0.1 es el default de la build: solo se envía si difiere.
+    if cfg.host != "127.0.0.1":
+        cmd += ["--host", cfg.host]
+    cmd += ["--port", str(cfg.port)]
     if cfg.api_key:
         cmd += ["--api-key", cfg.api_key]
     # Sin --log-file a propósito: _pump_output ya guarda la salida en
     # resolve_log_path(cfg.log_file). Con el flag, llama-server escribía el
     # mismo archivo en paralelo (líneas duplicadas, sin el filtro de idle) y
     # además resolvía la ruta relativa contra su propio directorio de trabajo.
-
     cmd += ["--verbosity", str(LLAMA_SERVER_VERBOSITY)]
-
     # Endpoint Prometheus /metrics: lo lee llm_metrics.py para la tira de
     # vitales del Launcher y el histórico del Monitor. Ollama y LM Studio no
     # lo tienen; hoy esta función solo se llama para llama_server, pero la
     # condición queda explícita por si se reutiliza.
     if cfg.backend == "llama_server":
         cmd.append("--metrics")
-
     return cmd
 
 
@@ -439,9 +930,9 @@ def build_ollama_command(binary_path: str, model_name: str) -> list[str]:
     return [binary_path, "run", model_name]
 
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Gestión de procesos (asyncio nativo)
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 
 class ModelProcessManager:
@@ -538,7 +1029,6 @@ class ModelProcessManager:
                 return
             await asyncio.sleep(HEALTH_CHECK_INTERVAL_S)
             elapsed += HEALTH_CHECK_INTERVAL_S
-
         current = self._info.get(process_id)
         if current and current.state == "starting":
             current.state = "error"
@@ -610,13 +1100,40 @@ class ModelProcessManager:
 
     # -- start / stop / restart ------------------------------------------
 
+    async def _port_in_use(self, host: str, port: int) -> bool:
+        """Conector TCP efímero: ¿algo escucha en host:port?"""
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=1.0
+            )
+        except (OSError, asyncio.TimeoutError):
+            return False
+        writer.close()
+        await writer.wait_closed()
+        return True
+
+    async def _identify_listener(self, host: str, port: int) -> str:
+        """
+        Heurística de qué hay escuchando: 'llama-server' (/props es exclusivo
+        de llama.cpp), 'ollama' (/api/version) u 'otro'. Cualquier fallo se
+        lee como 'otro'.
+        """
+        base = f"http://{host}:{port}"
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                if (await client.get(f"{base}/props")).status_code == 200:
+                    return "llama-server"
+                if (await client.get(f"{base}/api/version")).status_code == 200:
+                    return "ollama"
+        except (httpx.HTTPError, OSError, ValueError):
+            pass
+        return "otro"
+
     async def start(self, cfg: LaunchConfig, process_id: str | None = None) -> ProcessInfo:
         model = model_inventory.get(cfg.model_id)
         if model is None:
             raise HTTPException(status_code=404, detail="Modelo no encontrado en el inventario")
-
         process_id = process_id or str(uuid4())
-
         if cfg.backend == "lm_studio":
             # LM Studio corre su propio servidor: solo verificamos que responda.
             is_up = await self.health_check(cfg.host, cfg.port)
@@ -632,6 +1149,8 @@ class ModelProcessManager:
                 started_at=datetime.now(timezone.utc).isoformat(),
                 error_message=None if is_up else "LM Studio no responde en ese host/puerto",
                 launch_config=cfg.model_dump(),
+                # LM Studio lo lanza el usuario por fuera: no hay argv propio.
+                command=None,
             )
             logger.info(
                 "start lm_studio: model=%s host=%s port=%s up=%s",
@@ -640,24 +1159,90 @@ class ModelProcessManager:
             self._info[process_id] = info
             self._start_monotonic[process_id] = time.monotonic()
             return info
-
         # C3: validar ANTES de lanzar: _pump_output escribe en log_path.
         log_path = resolve_log_path(cfg.log_file, process_id)
-
+        port_warning = None
         if cfg.backend == "llama_server":
+            # Pre-vuelo: si algo ya escucha en ese puerto, el server que
+            # lanzamos muere al bindear y el ocupante original sigue
+            # sirviendo sin que ninguna UI lo muestre (huérfano de un
+            # --reload u otra instancia). No bloqueamos: el proceso nace
+            # con el aviso y la UI lo muestra junto al estado.
+            if await self._port_in_use(cfg.host, cfg.port):
+                kind = await self._identify_listener(cfg.host, cfg.port)
+                if kind == "llama-server":
+                    port_warning = (
+                        f"El puerto {cfg.port} ya está en uso por un "
+                        "llama-server que esta instancia no lanzó (otra "
+                        "instancia o proceso huérfano). El server nuevo no "
+                        f"podrá subir: chateá con el existente usando "
+                        f"http://{cfg.host}:{cfg.port} como endpoint de "
+                        "Chat, o terminalo antes de relanzar."
+                    )
+                elif kind == "ollama":
+                    port_warning = (
+                        f"El puerto {cfg.port} ya está en uso por Ollama: "
+                        "el server nuevo no podrá subir en ese puerto."
+                    )
+                else:
+                    port_warning = (
+                        f"El puerto {cfg.port} ya está en uso por otro "
+                        "proceso: el server nuevo no podrá subir en ese "
+                        "puerto."
+                    )
             binary_path = config.get("backends.llama_server.binary_path")
             if not binary_path:
                 raise HTTPException(
                     status_code=400,
                     detail="No hay binary_path configurado para llama_server (ver Config)",
                 )
-            cmd = build_llama_server_command(cfg, binary_path, model.path)
+            # Puerta de thinking: usa la metadata persistida en el inventario
+            # (extraída en el scan) si el archivo no cambió, o relee el
+            # header con cache. Si no se puede leer, se conserva el
+            # comportamiento previo (enviar el kwarg) para no cambiar el
+            # launch por metadata ilegible.
+            meta = await get_entry_metadata(model)
+            enable_thinking_supported = (
+                True if meta.get("error") else bool(meta.get("enable_thinking_kwarg"))
+            )
+            cmd = build_llama_server_command(
+                cfg,
+                binary_path,
+                model.path,
+                enable_thinking_supported=enable_thinking_supported,
+            )
+            # Probe de capacidades: descarta los flags que esta build no
+            # conoce (ej. --grp-attn-n removido) en vez de morir con
+            # "unknown argument". Los críticos faltantes son error duro.
+            info = await probe_binary(binary_path)
+            supported = set(info.flags) if info.probed else set()
+            if supported:
+                # Solo los críticos que el comando emite realmente: si
+                # --host no va (default 127.0.0.1), una build sin --host
+                # no es un problema para este launch.
+                missing = sorted((CRITICAL_FLAGS & set(cmd)) - supported)
+                if missing:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"El binario no soporta flags críticos: {missing}",
+                    )
+            cmd, dropped = filter_command(cmd, supported)
+            if dropped:
+                logger.warning(
+                    "build %s: flags no soportados por este binario, se omiten: %s",
+                    info.build or "desconocida", ", ".join(dropped),
+                )
+            # Queda en el log del proceso: al abrir el log se ve contra qué
+            # build corrió realmente, sin tener que adivinarlo después.
+            logger.info(
+                "lanzando contra llama-server build %s (%s)",
+                info.build or "desconocida", binary_path,
+            )
         elif cfg.backend == "ollama":
             binary_path = config.get("backends.ollama.binary_path") or "/usr/bin/ollama"
             cmd = build_ollama_command(binary_path, model.name)
         else:
             raise HTTPException(status_code=400, detail=f"Backend desconocido: {cfg.backend}")
-
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -668,12 +1253,10 @@ class ModelProcessManager:
             raise HTTPException(
                 status_code=400, detail=f"No se pudo lanzar el proceso: {exc}"
             ) from exc
-
         logger.info(
             "start %s: model=%s pid=%s",
             cfg.backend, model.name, process.pid,
         )
-
         info = ProcessInfo(
             process_id=process_id,
             model_id=cfg.model_id,
@@ -686,23 +1269,22 @@ class ModelProcessManager:
             started_at=datetime.now(timezone.utc).isoformat(),
             error_message=None,
             launch_config=cfg.model_dump(),
+            command=mask_command(cmd),
+            warning=port_warning,
         )
         self._info[process_id] = info
         self._handles[process_id] = process
         self._start_monotonic[process_id] = time.monotonic()
         self._log_buffers[process_id] = deque(maxlen=LOG_BUFFER_MAXLEN)
-
         self._spawn_background(self._pump_output(process_id, process, log_path))
         self._spawn_background(self._watch_exit(process_id, process))
         self._spawn_background(self._monitor_health(process_id))
-
         return info
 
     async def stop(self, process_id: str) -> ProcessInfo:
         info = self._info.get(process_id)
         if info is None:
             raise HTTPException(status_code=404, detail="Proceso no encontrado")
-
         process = self._handles.get(process_id)
         logger.info(
             "stop: id=%s pid=%s", process_id, process.pid if process else None
@@ -712,7 +1294,6 @@ class ModelProcessManager:
             info.state = "stopped"
             info.pid = None
             return info
-
         self._stopping.add(process_id)
         try:
             process.terminate()  # SIGTERM (en Windows: TerminateProcess)
@@ -726,7 +1307,6 @@ class ModelProcessManager:
             except ProcessLookupError:
                 pass
             await process.wait()
-
         # _watch_exit (corriendo en paralelo) es quien setea el estado final
         # a "stopped" al detectar que process_id está en self._stopping.
         return self._info[process_id]
@@ -744,11 +1324,91 @@ class ModelProcessManager:
 
 manager = ModelProcessManager()
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Router
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 router = APIRouter()
+
+
+class CommandPreview(BaseModel):
+    """Comando que se ejecutaría con esta config, sin lanzar nada."""
+    command: list[str]
+    dropped: list[str] = []      # flags que esta build no soporta
+    build: str | None = None
+    probed: bool = False
+
+
+@router.post("/preview-command", response_model=CommandPreview)
+async def preview_command(cfg: LaunchConfig) -> CommandPreview:
+    """
+    Arma el comando exactamente como lo haría start() —mismo probe, mismo
+    filtrado, misma máscara de secretos— pero sin ejecutarlo. La UI lo usa
+    para mostrar qué se va a correr antes de apretar LAUNCH, y para avisar
+    qué flags va a descartar esta build.
+    """
+    model = model_inventory.get(cfg.model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="Modelo no encontrado en el inventario")
+
+    if cfg.backend == "lm_studio":
+        return CommandPreview(
+            command=[],
+            dropped=[],
+            build=None,
+            probed=False,
+        )
+
+    if cfg.backend == "ollama":
+        binary_path = config.get("backends.ollama.binary_path") or "/usr/bin/ollama"
+        return CommandPreview(
+            command=mask_command(build_ollama_command(binary_path, model.name)),
+            dropped=[],
+            build=None,
+            probed=False,
+        )
+
+    binary_path = config.get("backends.llama_server.binary_path")
+    if not binary_path:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay binary_path configurado para llama_server (ver Config)",
+        )
+    meta = await get_entry_metadata(model)
+    enable_thinking_supported = (
+        True if meta.get("error") else bool(meta.get("enable_thinking_kwarg"))
+    )
+    cmd = build_llama_server_command(
+        cfg,
+        binary_path,
+        model.path,
+        enable_thinking_supported=enable_thinking_supported,
+    )
+    info = await probe_binary(binary_path)
+    supported = set(info.flags) if info.probed else set()
+    cmd, dropped = filter_command(cmd, supported)
+    return CommandPreview(
+        command=mask_command(cmd),
+        dropped=dropped,
+        build=info.build,
+        probed=info.probed,
+    )
+
+
+@router.get("/backend-info", response_model=BinaryInfo)
+async def backend_info() -> BinaryInfo:
+    """
+    Build y capacidades del binario de llama_server configurado. La UI lo usa
+    para mostrar contra qué build está corriendo y avisar si el probe falló,
+    en vez de tener que comparar changelogs a mano en cada actualización.
+    """
+    binary_path = config.get("backends.llama_server.binary_path")
+    if not binary_path:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay binary_path configurado para llama_server (ver Config)",
+        )
+    return await probe_binary(binary_path)
 
 
 @router.get("/sampling-presets")
@@ -766,6 +1426,15 @@ async def list_templates() -> list[HWTemplate]:
 @router.post("/templates", response_model=HWTemplate)
 async def save_template(template: HWTemplate) -> HWTemplate:
     await templates.ensure_loaded()
+    existing = await templates.get(template.name)
+    if existing is not None and existing.builtin:
+        # La UI prellena el nombre al elegir un template: sin esta guarda,
+        # guardar sin cambiar el nombre pisaría un predefinido (y le
+        # quitaría el flag builtin, dejándolo eliminable).
+        raise HTTPException(
+            status_code=409,
+            detail="El template predefinido no se puede sobrescribir: usá otro nombre.",
+        )
     return await templates.upsert(template)
 
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 
 async def drain_sse(response) -> list[str]:
@@ -51,3 +52,33 @@ async def wait_until(
         await asyncio.sleep(interval)
         elapsed += interval
     return False
+
+
+def write_gguf(path, arch: str = "llama", chat_template: str | None = None,
+               kv: dict[str, int] | None = None):
+    """Escribe un GGUF mínimo pero real (header legible por read_gguf_metadata).
+
+    Los fixtures de sample_model_dir usan .touch() vacío (sirven para el
+    scanner pero no para metadata: mmap de archivo vacío falla). Para tests
+    de metadata hace falta un header de verdad con el chat_template a probar.
+
+    `kv` agrega campos extra bajo el namespace de la arch con claves relativas
+    (ej. {"attention.head_count_kv": 8} -> "<arch>.attention.head_count_kv").
+    Números enteros (GGUFValueType.UINT32): suficiente para block_count,
+    head_count(_kv), embedding_length, attention.head_size, ffn_expert_count…
+    """
+    from gguf import GGUFValueType, GGUFWriter
+
+    path = Path(path)
+    if path.exists():
+        path.unlink()
+    writer = GGUFWriter(str(path), arch)
+    writer.open_output_file()
+    if chat_template is not None:
+        writer.add_chat_template(chat_template)
+    for key, value in (kv or {}).items():
+        writer.add_key_value(f"{arch}.{key}", value, GGUFValueType.UINT32)
+    writer.write_header_to_file()
+    writer.write_kv_data_to_file()
+    writer.close()
+    return path

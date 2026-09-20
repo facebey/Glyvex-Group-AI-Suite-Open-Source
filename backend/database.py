@@ -20,6 +20,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from paths import BASE_DIR, DATA_DIR
 from typing import Any
 
 import aiofiles
@@ -43,11 +44,15 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "glyvex.db"
 RUNS_DIR = DATA_DIR / "benchmarks"
-TEMPLATES_JSON = DATA_DIR / "templates" / "hw_templates.json"
+# SEMILLA versionada en el repo (no está en .gitignore), no estado de
+# instancia: son los 5 templates predefinidos que se insertan en la DB de
+# CADA instancia al arrancar. Por eso cuelga de BASE_DIR y es compartida,
+# igual que benchmark.PROMPTS_DIR. Se lee en modo solo lectura.
+# Si colgara de DATA_DIR, una instancia nueva arrancaría sin ningún template
+# predefinido, porque su data-<algo>/ no trae el JSON.
+TEMPLATES_JSON = BASE_DIR / "data" / "templates" / "hw_templates.json"
 
 DB_URL = f"sqlite+aiosqlite:///{DB_PATH.as_posix()}"
 

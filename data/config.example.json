@@ -65,6 +65,30 @@
     "retention_1m_d": 30,
     "retention_1h_d": 365
   },
+  "display": {
+    "preset": "default",
+    "hidden": [
+      "monitor.gpu.power_clocks",
+      "monitor.cpu.freq"
+    ]
+  },
+  "exports": {
+    "prometheus_enabled": false,
+    "prometheus_token": "",
+    "influx": {
+      "enabled": false,
+      "version": "v2",
+      "url": "http://127.0.0.1:8086",
+      "token": "",
+      "org": "",
+      "bucket": "glyvex",
+      "database": "glyvex",
+      "username": "",
+      "password": "",
+      "interval_s": 10,
+      "measurement_prefix": "glyvex"
+    }
+  },
   "model_dirs": [],
   "last_used_model": null,
   "auto_start_last": false

@@ -17,9 +17,9 @@ MetricsService (histórico persistente):
   tiene histórico real. Sin start() (tests, o monitor.history_enabled=false)
   el loop se comporta como antes: corre solo mientras haya clientes WS.
 - Cada snapshot se aplana en series ("gpu.0.temp_c", "cpu.total_pct"...),
-  se agrega en ventanas de 5 s (promedio/mínimo/máximo) y se vuelca a
-  data/metrics.db. Cada minuto se compacta a 1 min y 1 h y se aplica la
-  retención (ver metrics_store.py).
+   se agrega en ventanas de 5 s (promedio/mínimo/máximo) y se vuelca a
+   <DATA_DIR>/metrics.db (ver paths.py). Cada minuto se compacta a 1 min
+   y 1 h y se aplica la retención (ver metrics_store.py).
 - GET /api/metrics/series y /api/metrics/query leen ese histórico eligiendo
   la resolución según el rango pedido.
 """
@@ -37,7 +37,9 @@ from typing import Any
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+import metrics_export
 from config import config
+from paths import DATA_DIR
 from metrics_store import RAW_STEP_S, MetricsStore, Retention, SampleWindow
 
 logger = logging.getLogger("glyvex.metrics")
@@ -46,8 +48,7 @@ HISTORY_MAXLEN = 300
 STREAM_INTERVAL_S = 1.0
 MAINTENANCE_INTERVAL_S = 60.0
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-METRICS_DB_PATH = BASE_DIR / "data" / "metrics.db"
+METRICS_DB_PATH = DATA_DIR / "metrics.db"
 
 TARGET_PROCESS_NAMES = ("llama-server", "ollama")
 
@@ -320,7 +321,11 @@ class MetricsCollector:
         gpu, gpu_error = self.collect_gpu()
         cpu, cpu_error = self.collect_cpu()
         ram = self.collect_ram()
-        processes = self.collect_processes()
+        # Recorrer los procesos del sistema es lo más costoso de cada lectura:
+        # si la tabla está oculta en Config, no se hace (único elemento cuya
+        # visibilidad afecta al backend; ver DisplayConfig).
+        hidden = config.get("display.hidden", [])
+        processes = [] if isinstance(hidden, list) and "monitor.processes" in hidden else self.collect_processes()
         return MetricsSnapshot(
             timestamp=datetime.now(timezone.utc).isoformat(),
             gpu=gpu, gpu_error=gpu_error,
@@ -463,18 +468,27 @@ class MetricsManager:
     async def start(self, db_path: Path | str | None = None) -> None:
         if self._running:
             return
-        if not bool(config.get("monitor.history_enabled", True)):
+        history = bool(config.get("monitor.history_enabled", True))
+        exporting = metrics_export.exporter.enabled()
+        if not history and not exporting:
             logger.info("histórico de métricas deshabilitado (monitor.history_enabled=false)")
             return
-        try:
-            await asyncio.to_thread(self.configure_store, db_path or METRICS_DB_PATH)
-        except Exception as exc:  # noqa: BLE001 — sin histórico, el Monitor en vivo sigue andando
-            logger.warning("no se pudo abrir la base de métricas: %s", exc)
-            self.store = None
-            return
+        if history:
+            try:
+                await asyncio.to_thread(self.configure_store, db_path or METRICS_DB_PATH)
+            except Exception as exc:  # noqa: BLE001 — sin histórico, el Monitor en vivo sigue andando
+                logger.warning("no se pudo abrir la base de métricas: %s", exc)
+                self.store = None
+                if not exporting:
+                    return
+        # Con el histórico apagado pero InfluxDB activo, el poller corre igual
+        # para armar las ventanas que se exportan (sin store).
         self._running = True
         self._ensure_loop()
-        logger.info("servicio de métricas iniciado: %s", self.store.path)
+        logger.info(
+            "servicio de métricas iniciado: histórico=%s, InfluxDB=%s",
+            self.store.path if self.store else "no", "sí" if exporting else "no",
+        )
 
     async def stop(self) -> None:
         self._running = False
@@ -486,11 +500,13 @@ class MetricsManager:
             except (asyncio.CancelledError, Exception):
                 pass
         self._broadcast_task = None
+        # Lo que quedó en ventanas abiertas también se guarda y se exporta.
+        pending = self._aggregator.pop_closed(time.time(), force=True)
+        if pending:
+            metrics_export.exporter.enqueue(pending, scope="hw", units=self._aggregator.units)
         if self.store is not None:
             store = self.store
-            # Lo que quedó en ventanas abiertas también se guarda.
             try:
-                pending = self._aggregator.pop_closed(time.time(), force=True)
                 await asyncio.to_thread(store.write_raw, pending, units=self._aggregator.units)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("no se pudieron guardar las últimas métricas: %s", exc)
@@ -499,15 +515,15 @@ class MetricsManager:
 
     async def _persist(self, snap: MetricsSnapshot, now: float) -> None:
         store = self.store
-        if store is None:
-            return
         values, units = flatten_snapshot(snap)
         self._aggregator.add(now, values, units)
         closed = self._aggregator.pop_closed(now)
         if closed:
-            await asyncio.to_thread(store.write_raw, closed, units=self._aggregator.units)
+            metrics_export.exporter.enqueue(closed, scope="hw", units=self._aggregator.units)
+            if store is not None:
+                await asyncio.to_thread(store.write_raw, closed, units=self._aggregator.units)
 
-        if now - self._last_maintenance >= MAINTENANCE_INTERVAL_S:
+        if store is not None and now - self._last_maintenance >= MAINTENANCE_INTERVAL_S:
             self._last_maintenance = now
             store.retention = _retention_from_config()
             ts = int(now)

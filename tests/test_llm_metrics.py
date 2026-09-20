@@ -1,6 +1,7 @@
 """Tests de llm_metrics.py — parseo Prometheus, tasas, snapshot, poller y API."""
 
 import asyncio
+import collections
 import json
 import time
 from pathlib import Path
@@ -264,6 +265,46 @@ def test_kv_cache_tiene_prioridad_sobre_slots():
     assert snap.ctx_used == 8192 and snap.ctx_source == "kv_cache"
 
 
+# -- última velocidad medida y avisos de /slots ----------------------------------
+
+
+def test_ultima_tg_se_conserva_con_el_servidor_ocioso():
+    manager = llm.LlmMetricsManager()
+    gen = llm.build_snapshot(_process(), {}, {**llm.EMPTY_RATES, "tg_tps": 37.2}, None)
+    manager.apply_last_tg(gen)
+    assert gen.tg_tps_last == 37.2 and gen.tg_tps_last_at == gen.timestamp
+
+    idle = llm.build_snapshot(_process(), {}, dict(llm.EMPTY_RATES), None)
+    manager.apply_last_tg(idle)
+    assert idle.tg_tps is None                    # ahora no genera
+    assert idle.tg_tps_last == 37.2               # pero se conserva la última
+    assert idle.tg_tps_last_at == gen.timestamp
+
+    otro = llm.build_snapshot(_process().model_copy(update={"process_id": "otro"}), {},
+                              dict(llm.EMPTY_RATES), None)
+    manager.apply_last_tg(otro)
+    assert otro.tg_tps_last is None               # no se mezcla entre procesos
+
+
+def test_aviso_de_slots_solo_en_cambios(caplog):
+    manager = llm.LlmMetricsManager()
+    with caplog.at_level("INFO", logger="glyvex.llm_metrics"):
+        assert manager.note_slots_status("p", None) is False          # OK desde el inicio: nada
+        assert manager.note_slots_status("p", "HTTP 501") is True     # empieza a fallar
+        assert manager.note_slots_status("p", "HTTP 501") is False    # mismo motivo: no repite
+        assert manager.note_slots_status("p", "HTTP 401") is True     # cambia el motivo
+        assert manager.note_slots_status("p", None) is True           # se recupera
+        assert manager.note_slots_status("p", None) is False
+    textos = [r.getMessage() for r in caplog.records]
+    assert len(textos) == 3
+    assert "HTTP 501" in textos[0] and "vuelve a responder" in textos[2]
+
+
+def test_describe_slots_status():
+    assert "--no-slots" in llm.describe_slots_status(501)
+    assert "API key" in llm.describe_slots_status(401)
+
+
 def test_scrape_host_y_errores():
     assert llm.scrape_host("0.0.0.0") == "127.0.0.1"
     assert llm.scrape_host("192.168.1.10") == "192.168.1.10"
@@ -348,3 +389,115 @@ async def test_persistencia_por_proceso_y_api(client, mock_llama_server):
         params={"key": "llm.tg_tps", "start": int(now) - 5, "end": int(now) + 10, "process_id": "proc-test"},
     )).json()
     assert via_hw_api["series"]["llm.tg_tps"][0]["avg"] == 50.0
+
+# -- limpieza de procesos muertos -------------------------------------------------
+
+
+def _snap(pid: str) -> llm.LlmMetricsSnapshot:
+    info = _process().model_copy(update={"process_id": pid})
+    return llm.build_snapshot(info, None, dict(llm.EMPTY_RATES), None, None)
+
+
+async def test_cleanup_dead_purga_proceso_corto(client):
+    manager = llm.manager
+    pid = "proc-corto"
+    launcher_module.manager._info[pid] = _process(state="stopped").model_copy(update={"process_id": pid})
+    manager._first_seen[pid] = time.time() - 60
+    manager._last_seen[pid] = time.time()
+    manager.buffers[pid] = collections.deque(maxlen=llm.HISTORY_MAXLEN)
+    manager.buffers[pid].append(_snap(pid))
+    manager._models[pid] = "Qwen3-Test"
+    store = metrics_module.manager.store
+    store.write_raw(
+        [metrics_module.SampleWindow("llm.tg_tps", int(time.time()) - 30, 42.0, 40.0, 44.0)],
+        scope="llm", process_id=pid, model_name="Qwen3-Test",
+    )
+    assert store.delete_process(pid) >= 1  # la serie existe antes de la limpieza
+
+    await manager._cleanup_dead()
+
+    assert pid not in manager.buffers
+    assert pid not in manager._models
+    assert pid not in manager._first_seen
+    assert [s["process_id"] for s in store.list_series(scope="llm")] == []
+
+
+async def test_cleanup_dead_deja_vivos_y_conserva_historico_largo(client):
+    manager = llm.manager
+    vivo = _process().model_copy(update={"process_id": "proc-vivo"})
+    largo = _process(state="stopped").model_copy(update={"process_id": "proc-largo"})
+    launcher_module.manager._info["proc-vivo"] = vivo
+    launcher_module.manager._info["proc-largo"] = largo
+
+    for pid, edad in (("proc-vivo", 10.0), ("proc-largo", 3600.0)):
+        manager._first_seen[pid] = time.time() - edad
+        manager._last_seen[pid] = time.time()
+        manager.buffers[pid] = collections.deque(maxlen=llm.HISTORY_MAXLEN)
+        manager.buffers[pid].append(_snap(pid))
+        manager._models[pid] = "Qwen3-Test"
+    store = metrics_module.manager.store
+    store.write_raw(
+        [metrics_module.SampleWindow("llm.tg_tps", int(time.time()) - 1000, 42.0, 40.0, 44.0)],
+        scope="llm", process_id="proc-largo", model_name="Qwen3-Test",
+    )
+
+    await manager._cleanup_dead()
+
+    # El vivo conserva todo. El muerto se libera de memoria, pero su histórico
+    # se conserva: duró lo suficiente para ser un arranque de verdad.
+    assert set(manager.buffers) == {"proc-vivo"}
+    assert "proc-largo" not in manager._first_seen
+    assert [s["process_id"] for s in store.list_series(scope="llm")] == ["proc-largo"]
+
+
+async def test_purge_leftovers_al_arrancar(client):
+    store = metrics_module.manager.store
+    now = int(time.time())
+    store.write_raw(
+        [metrics_module.SampleWindow("llm.tg_tps", now - 300, 10.0, 9.0, 11.0),
+         metrics_module.SampleWindow("llm.tg_tps", now - 10, 10.0, 9.0, 11.0)],
+        scope="llm", process_id="proc-antiguo-corto", model_name="M",
+    )
+    store.write_raw(
+        [metrics_module.SampleWindow("llm.tg_tps", now - 3600, 10.0, 9.0, 11.0),
+         metrics_module.SampleWindow("llm.tg_tps", now - 10, 10.0, 9.0, 11.0)],
+        scope="llm", process_id="proc-antiguo-largo", model_name="M",
+    )
+
+    await llm.manager._purge_leftovers()
+
+    pids = [s["process_id"] for s in store.list_series(scope="llm")]
+    assert pids == ["proc-antiguo-largo"]
+
+
+async def test_purge_leftovers_resiste_error_del_store(monkeypatch):
+    class StoreRoto:
+        def list_series(self, scope=None):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(metrics_module.manager, "store", StoreRoto())
+    await llm.manager._purge_leftovers()  # no lanza
+
+
+async def test_processos_endpoint_filtra_cortos_y_limita(monkeypatch):
+    ahora = int(time.time())
+
+    class StoreFake:
+        def list_series(self, scope=None):
+            series = []
+            for i in range(15):  # 15 procesos muertos
+                dur = 600 if i < 5 else 30
+                series.append({
+                    "key": "llm.tg_tps", "scope": "llm", "process_id": f"p{i}",
+                    "model_name": f"M{i}", "unit": "t/s",
+                    "first_ts": ahora - dur, "last_ts": ahora - dur + dur,
+                })
+            return series
+
+    monkeypatch.setattr(metrics_module.manager, "store", StoreFake())
+    data = await llm.list_processes()
+
+    pids = [e["process_id"] for e in data["stored"]]
+    # Con la lista saturada se descarta a los de 30 s (p5..p14) y queda el tope.
+    assert set(pids) == {f"p{i}" for i in range(5)}
+    assert len(pids) <= llm.MAX_STORED_PROCESSES

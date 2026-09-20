@@ -4,6 +4,35 @@ import CollapsibleSection from "./ui/CollapsibleSection.jsx";
 import Slider from "./ui/Slider.jsx";
 import { inputClasses } from "../lib/styles.js";
 
+/** Switch chico y sin dependencias extra, mismo patrón que el del Launcher. */
+function MiniToggle({ checked, onChange, disabled = false }) {
+  function handleClick() {
+    if (disabled) return;
+    onChange(!checked);
+  }
+  return (
+    <span
+      role="switch"
+      aria-checked={checked}
+      tabIndex={disabled ? -1 : 0}
+      onClick={handleClick}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), handleClick())}
+      className={
+        "inline-flex items-center h-5 w-9 shrink-0 rounded-full border transition-colors cursor-pointer " +
+        (disabled ? "opacity-40 cursor-not-allowed " : "") +
+        (checked ? "bg-glyvex-accent border-glyvex-accent" : "bg-black/30 border-white/10")
+      }
+    >
+      <span
+        className={
+          "h-3.5 w-3.5 rounded-full bg-white transition-transform " +
+          (checked ? "translate-x-[19px]" : "translate-x-[3px]")
+        }
+      />
+    </span>
+  );
+}
+
 /**
  * Panel izquierdo del chat: endpoint, modelo, system prompt, parámetros de
  * muestreo y acciones de la conversación.
@@ -24,6 +53,8 @@ export default function ChatSidebar({
   onApiKeyChange,
   systemPrompt,
   onSystemPromptChange,
+  appendFileConvention,
+  onAppendFileConventionChange,
   params,
   onParamChange,
   onClear,
@@ -147,6 +178,21 @@ export default function ChatSidebar({
           onChange={(e) => onSystemPromptChange(e.target.value)}
           placeholder="Instrucciones de sistema…"
         />
+        <label className="flex items-start gap-2 mt-2.5 cursor-pointer select-none">
+          <MiniToggle
+            checked={Boolean(appendFileConvention)}
+            onChange={onAppendFileConventionChange}
+          />
+          <span className="text-xs text-glyvex-muted leading-snug">
+            Nombrar archivos generados
+            <span className="block text-[11px] opacity-70">
+              Se suma a lo de arriba: le pide al modelo poner
+              {" "}<code className="text-glyvex-text">lenguaje:nombre.ext</code>{" "}
+              en la cerca de código cuando genera un archivo completo, para
+              poder descargarlo con su nombre real.
+            </span>
+          </span>
+        </label>
       </CollapsibleSection>
 
       <CollapsibleSection

@@ -1,7 +1,7 @@
 """
 metrics_store.py — Histórico de métricas en SQLite con tres niveles de resolución.
 
-Base aparte (`data/metrics.db`): el poller escribe cada pocos segundos y no
+Base aparte (`<DATA_DIR>/metrics.db`, ver paths.py): el poller escribe cada pocos segundos y no
 debe competir con chat y benchmarks en `glyvex.db`; además el histórico se
 puede borrar sin tocar nada más.
 
@@ -294,6 +294,40 @@ class MetricsStore:
                 " UNION SELECT series_id FROM samples_1h)"
             ).rowcount
         # Si se borró alguna, el cache de ids quedó con referencias muertas.
+        self._series_cache.clear()
+        return deleted
+
+    def delete_process(self, process_id: str) -> int:
+        """
+        Borra todas las muestras (los tres niveles) y las series de un proceso.
+        Devuelve cuántas series se eliminaron (0 si el proceso no tenía nada).
+        """
+        if not process_id:
+            return 0
+        with self._lock:
+            conn = self._db()
+            conn.execute("BEGIN")
+            try:
+                ids = [
+                    r[0]
+                    for r in conn.execute(
+                        "SELECT id FROM metric_series WHERE process_id = ?", (process_id,)
+                    )
+                ]
+                if not ids:
+                    conn.execute("COMMIT")
+                    return 0
+                placeholders = ",".join("?" * len(ids))
+                for table in TABLE.values():
+                    conn.execute(f"DELETE FROM {table} WHERE series_id IN ({placeholders})", ids)
+                deleted = conn.execute(
+                    f"DELETE FROM metric_series WHERE id IN ({placeholders})", ids
+                ).rowcount
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                self._series_cache.clear()
+                raise
         self._series_cache.clear()
         return deleted
 

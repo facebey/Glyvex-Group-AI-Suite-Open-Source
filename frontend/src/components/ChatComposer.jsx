@@ -6,19 +6,18 @@ import MicButton from "./MicButton.jsx";
 import { inputClasses } from "../lib/styles.js";
 
 /**
- * Extensiones que el file picker ofrece por defecto. No es una lista de
- * permitidos: el backend acepta cualquier cosa (un formato desconocido se
- * adjunta con su metadata y es el modelo quien dice que no puede leerlo).
- * Por eso el input también declara "*\/*" al final.
+ * El picker no filtra nada a propósito.
+ *
+ * Antes se listaban extensiones concretas y `*\/*` al final. El problema es
+ * que al mezclar tipos específicos con el comodín, Chrome arma un filtro
+ * "Archivos personalizados" y lo deja SELECCIONADO por defecto: los archivos
+ * que no están en la lista (un .pcap, un .bin, cualquier extensión propia)
+ * aparecen grisados hasta que el usuario cambia el desplegable a "Todos los
+ * archivos". Como el backend acepta cualquier cosa igual —lo que no sabe
+ * interpretar se adjunta con su metadata y es el modelo quien dice que no
+ * puede leerlo— filtrar acá solo escondía opciones válidas.
  */
-const SUGGESTED_ACCEPT = [
-  "image/*",
-  ".txt", ".md", ".pdf", ".docx", ".pptx", ".xlsx", ".csv", ".tsv",
-  ".json", ".yaml", ".yml", ".toml", ".xml", ".html", ".css",
-  ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".c", ".cpp",
-  ".sh", ".bash", ".ps1", ".sql", ".log",
-  "*/*",
-].join(",");
+const SUGGESTED_ACCEPT = "*/*";
 
 function ContextWarning({ estimate }) {
   if (!estimate || estimate.fits) return null;

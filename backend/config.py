@@ -10,14 +10,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from paths import DATA_DIR
 from typing import Any
 
 import aiofiles
 from pydantic import BaseModel, Field
 
-# Ruta del archivo de configuración: <repo>/data/config.json
-BASE_DIR = Path(__file__).resolve().parent.parent
-CONFIG_PATH = BASE_DIR / "data" / "config.json"
+# Ruta del archivo de configuración: <DATA_DIR>/config.json
+# DATA_DIR sale de paths.py (respeta GLYVEX_DATA_DIR), así que cada instancia
+# tiene su propio config.json.
+CONFIG_PATH = DATA_DIR / "config.json"
 
 
 class BackendConfig(BaseModel):
@@ -125,7 +127,7 @@ class STTConfig(BaseModel):
 
 
 class MonitorConfig(BaseModel):
-    """Histórico del Monitor (MetricsService, data/metrics.db)."""
+    """Histórico del Monitor (MetricsService, <DATA_DIR>/metrics.db)."""
     # Poller en segundo plano desde que arranca la app. En false, el Monitor
     # en vivo sigue andando pero no se guarda histórico.
     history_enabled: bool = True
@@ -133,6 +135,56 @@ class MonitorConfig(BaseModel):
     retention_raw_h: int = 48
     retention_1m_d: int = 30
     retention_1h_d: int = 365
+
+
+# Elementos ocultos por defecto (plantilla "Predeterminada"). Tiene que
+# coincidir con PRESETS.default de frontend/src/lib/metricsDisplay.js; lo
+# verifica tests/test_config.py.
+DEFAULT_HIDDEN_METRICS = ["monitor.gpu.power_clocks", "monitor.cpu.freq"]
+
+
+class DisplayConfig(BaseModel):
+    """
+    Qué métricas se ven en Monitor, Chat y Launcher.
+
+    Se guarda lo OCULTO, no lo visible: una métrica que se agregue en una
+    versión futura aparece sola, sin que el usuario tenga que habilitarla.
+    Ocultar es solo visual (el histórico y las exportaciones siguen con
+    todo), salvo "monitor.processes": oculto, el backend deja de recorrer
+    los procesos del sistema.
+    """
+
+    preset: str = "default"  # default | minimal | full | custom
+    hidden: list[str] = Field(default_factory=lambda: list(DEFAULT_HIDDEN_METRICS))
+
+
+class InfluxExportConfig(BaseModel):
+    enabled: bool = False
+    # "v2": /api/v2/write con org + bucket + token (InfluxDB 2.x y 3).
+    # "v1": /write?db= con usuario/contraseña opcionales (InfluxDB 1.x,
+    # VictoriaMetrics, QuestDB).
+    version: str = "v2"
+    url: str = "http://127.0.0.1:8086"
+    # Se lee antes la variable de entorno GLYVEX_INFLUX_TOKEN: dejar el token
+    # acá lo escribe en config.json.
+    token: str = ""
+    org: str = ""
+    bucket: str = "glyvex"
+    database: str = "glyvex"
+    username: str = ""
+    password: str = ""
+    interval_s: int = 10
+    measurement_prefix: str = "glyvex"
+
+
+class ExportsConfig(BaseModel):
+    """Salidas opcionales de métricas hacia sistemas externos."""
+
+    # GET /api/metrics/prometheus. Apagado: responde 404.
+    prometheus_enabled: bool = False
+    # Opcional: si tiene valor, el endpoint exige "Authorization: Bearer <token>".
+    prometheus_token: str = ""
+    influx: InfluxExportConfig = Field(default_factory=InfluxExportConfig)
 
 
 class ConfigSchema(BaseModel):
@@ -145,6 +197,8 @@ class ConfigSchema(BaseModel):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     stt: STTConfig = Field(default_factory=STTConfig)
     monitor: MonitorConfig = Field(default_factory=MonitorConfig)
+    display: DisplayConfig = Field(default_factory=DisplayConfig)
+    exports: ExportsConfig = Field(default_factory=ExportsConfig)
     model_dirs: list[str] = Field(default_factory=list)
     last_used_model: str | None = None
     auto_start_last: bool = False

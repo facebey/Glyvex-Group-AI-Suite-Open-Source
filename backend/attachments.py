@@ -42,12 +42,28 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from config import config
+from paths import DATA_DIR
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-ATTACHMENTS_DIR = BASE_DIR / "data" / "attachments"
+ATTACHMENTS_DIR = DATA_DIR / "attachments"
 
-IMAGE_MIMES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+# Formatos que se reconocen COMO imagen al adjuntarlos. Es más amplio que lo
+# que el upstream sabe decodificar: lo que no pasa por PASSTHROUGH_IMAGE_MIMES
+# se convierte a PNG antes de guardarlo (ver _normalize_image).
+IMAGE_MIMES = {
+    "image/png", "image/jpeg", "image/webp", "image/gif",
+    "image/bmp", "image/tiff", "image/heic", "image/heif", "image/avif",
+}
+IMAGE_EXTS = {
+    ".png", ".jpg", ".jpeg", ".jfif", ".webp", ".gif",
+    ".bmp", ".tif", ".tiff", ".heic", ".heif", ".avif",
+}
+
+# Los que se mandan tal cual al modelo. El decoder de imágenes de llama.cpp
+# (stb_image) cubre PNG/JPEG/GIF/BMP; WEBP anda en las builds con soporte
+# propio. HEIC, HEIF, AVIF y TIFF no los decodifica ninguna build conocida,
+# así que esos se convierten a PNG en el servidor en vez de que el upstream
+# devuelva un 400 sin explicación.
+PASSTHROUGH_IMAGE_MIMES = {"image/png", "image/jpeg", "image/gif", "image/bmp", "image/webp"}
 
 # Extensiones que se leen como texto plano sin intentar ningún parser.
 TEXT_EXTS = {
@@ -284,6 +300,46 @@ def _extract_csv(raw: bytes) -> tuple[str, str | None]:
     return _rows_to_markdown(rows), note
 
 
+def _normalize_image(filename: str, mime: str, raw: bytes) -> tuple[bytes, str, str | None]:
+    """
+    Devuelve (bytes, mime, nota) listos para guardar.
+
+    Si el formato está en PASSTHROUGH_IMAGE_MIMES se devuelve intacto. Si no
+    (HEIC de un iPhone, AVIF, TIFF), se convierte a PNG con Pillow, porque el
+    upstream no sabe decodificarlo. Sin Pillow instalado se levanta
+    _MissingLib con la pista de instalación, igual que los otros parsers.
+    """
+    sniffed = _sniff_image_mime(raw, fallback=mime)
+    if sniffed in PASSTHROUGH_IMAGE_MIMES:
+        return raw, sniffed, None
+
+    try:
+        from PIL import Image
+    except ImportError:
+        raise _MissingLib("Pillow", "pip install Pillow") from None
+
+    suffix = Path(filename).suffix.lower()
+    if suffix in (".heic", ".heif") or sniffed in ("image/heic", "image/heif"):
+        try:
+            import pillow_heif  # noqa: F401  — registra el decoder en Pillow
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            raise _MissingLib("pillow-heif", "pip install pillow-heif") from None
+
+    with Image.open(io.BytesIO(raw)) as img:
+        # RGBA se conserva; paletas y modos raros (CMYK, I;16) van a RGB para
+        # que el PNG resultante sea legible por cualquier decoder.
+        converted = img if img.mode in ("RGB", "RGBA", "L") else img.convert("RGB")
+        buffer = io.BytesIO()
+        converted.save(buffer, format="PNG")
+
+    return (
+        buffer.getvalue(),
+        "image/png",
+        f"Convertida de {sniffed} a PNG: el modelo no decodifica ese formato.",
+    )
+
+
 class _MissingLib(Exception):
     """La biblioteca de extracción para este tipo no está instalada."""
 
@@ -431,13 +487,40 @@ async def _process_one(
         }
 
     if _is_image(filename, mime):
-        if not vision:
+        # La imagen se guarda SIEMPRE, tenga o no visión el modelo activo.
+        #
+        # Antes, con vision=False se devolvía el descriptor sin escribir nada
+        # a disco. Eso hacía irreversible una decisión que es temporal: el
+        # frontend manda vision=False mientras /capabilities todavía no
+        # respondió, y cuando después confirmaba que el modelo SÍ acepta
+        # imágenes, el archivo ya no existía — resolve_image_ref devolvía
+        # None y chat.py degradaba el mensaje a "ya no está disponible".
+        # Ahora `vision` solo decide el status (que el frontend puede
+        # recalcular), nunca si se conservan los bytes. Los archivos que
+        # queden sin usar los levanta purge_orphans/delete_attachments.
+        try:
+            raw, mime, convert_note = await asyncio.to_thread(
+                _normalize_image, filename, mime, raw
+            )
+        except _MissingLib as exc:
             return {
                 **base,
                 "kind": "image",
-                "status": "vision_unsupported",
-                "note": "El modelo activo no acepta imágenes, así que no se envía.",
+                "status": "error",
+                "error": (
+                    f"El formato {mime} necesita convertirse y falta la "
+                    f"biblioteca `{exc.package}` en el servidor."
+                ),
+                "note": f"Instalala con: {exc.install_hint}",
             }
+        except Exception as exc:  # noqa: BLE001 — un decoder puede romper
+            return {
+                **base,
+                "kind": "image",
+                "status": "error",
+                "error": f"No se pudo leer la imagen: {type(exc).__name__}: {exc}",
+            }
+
         try:
             await asyncio.to_thread(_write_image, base["id"], raw)
         except OSError as exc:
@@ -447,12 +530,24 @@ async def _process_one(
                 "status": "error",
                 "error": f"No se pudo guardar la imagen en disco: {exc}",
             }
+
+        notes = [n for n in (convert_note,) if n]
+        if not vision:
+            notes.append("El modelo activo no acepta imágenes, así que no se envía.")
+
         return {
             **base,
             "kind": "image",
-            "status": "ready",
+            "mime": mime,
+            "size": len(raw),
+            # La url va SIEMPRE: es lo que usan las miniaturas del composer y
+            # del mensaje enviado. Sin esto no se podía previsualizar una
+            # imagen marcada como vision_unsupported, aunque estuviera en
+            # disco y el usuario la hubiera adjuntado a propósito.
             "url": f"/api/chat/attachments/{base['id']}/raw",
-            "tokens_estimate": image_tokens,
+            "status": "ready" if vision else "vision_unsupported",
+            "note": " ".join(notes) or None,
+            "tokens_estimate": image_tokens if vision else 0,
         }
 
     result = await asyncio.to_thread(_process_sync, filename, mime, raw, max_text_chars)
@@ -536,7 +631,13 @@ async def get_attachment_raw(attachment_id: str) -> FileResponse:
     path = ATTACHMENTS_DIR / attachment_id
     if not path.is_file():
         raise HTTPException(status_code=404, detail="El adjunto ya no está en disco")
-    return FileResponse(path)
+    # Sin media_type explícito, FileResponse lo adivina por el nombre del
+    # archivo — y como se guarda sin extensión, servía todo como
+    # application/octet-stream. Las miniaturas (<img src=...>) dependían de
+    # que el navegador adivinara el tipo por su cuenta.
+    with path.open("rb") as handle:
+        header = handle.read(16)
+    return FileResponse(path, media_type=_sniff_image_mime(header))
 
 
 # ---------------------------------------------------------------------------
@@ -567,17 +668,33 @@ def resolve_image_ref(attachment_id: str) -> str | None:
     return f"data:{kind};base64,{encoded}"
 
 
-def _sniff_image_mime(raw: bytes) -> str:
-    """Mime por magic bytes: el archivo en disco se guarda sin extensión."""
+def _sniff_image_mime(raw: bytes, fallback: str = "image/png") -> str:
+    """
+    Mime por magic bytes: el archivo en disco se guarda sin extensión, así que
+    el content-type declarado por el navegador no sobrevive al round-trip.
+    """
     if raw.startswith(b"\x89PNG"):
         return "image/png"
     if raw.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
     if raw.startswith(b"GIF8"):
         return "image/gif"
+    if raw[:2] in (b"BM",):
+        return "image/bmp"
+    if raw[:4] in (b"II*\x00", b"MM\x00*"):
+        return "image/tiff"
     if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
         return "image/webp"
-    return "image/png"
+    # ISO-BMFF: HEIC/HEIF/AVIF comparten contenedor, los separa el brand.
+    if raw[4:8] == b"ftyp":
+        brand = raw[8:12]
+        if brand in (b"heic", b"heix", b"hevc", b"heim", b"heis"):
+            return "image/heic"
+        if brand in (b"mif1", b"msf1"):
+            return "image/heif"
+        if brand in (b"avif", b"avis"):
+            return "image/avif"
+    return fallback if fallback.startswith("image/") else "image/png"
 
 
 def purge_orphans(keep_ids: set[str]) -> int:

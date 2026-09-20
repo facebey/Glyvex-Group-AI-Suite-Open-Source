@@ -29,8 +29,10 @@ export function toPayloadContent(message) {
     return [message.content, ...textBlocks].filter(Boolean).join("\n\n");
   }
 
+  // La parte de texto se omite si está vacía: mandar {type:"text", text:""}
+  // junto a una imagen hace que algunos upstreams respondan 400.
   return [
-    { type: "text", text: message.content || "" },
+    ...(message.content ? [{ type: "text", text: message.content }] : []),
     ...textBlocks.map((text) => ({ type: "text", text })),
     ...images.map((a) => ({ type: "image_ref", id: a.id, filename: a.filename })),
   ];

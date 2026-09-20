@@ -3,6 +3,9 @@ import { Plus, Trash2, Save, RotateCcw, ScanSearch } from "lucide-react";
 import Section from "../components/ui/Section.jsx";
 import Field from "../components/ui/Field.jsx";
 import ChatSettings from "../components/ChatSettings.jsx";
+import MetricsDisplaySettings from "../components/MetricsDisplaySettings.jsx";
+import MetricsExportSettings from "../components/MetricsExportSettings.jsx";
+import { CONFIG_SAVED_EVENT, PRESETS } from "../lib/metricsDisplay.js";
 import { formInputClasses as inputClasses } from "../lib/styles.js";
 
 const EMPTY_CONFIG = {
@@ -40,7 +43,18 @@ const EMPTY_CONFIG = {
     whisper_compute_type: "int8",
     whisper_language: "",
   },
+  display: { preset: "default", hidden: PRESETS.default },
+  exports: {
+    prometheus_enabled: false,
+    prometheus_token: "",
+    influx: { enabled: false, version: "v2", url: "http://127.0.0.1:8086" },
+  },
 };
+
+/** Avisa a las páginas abiertas (Monitor, Chat, Launcher) que la config cambió. */
+function notifyConfigSaved(data) {
+  window.dispatchEvent(new CustomEvent(CONFIG_SAVED_EVENT, { detail: data }));
+}
 
 /**
  * Lee un stream SSE emitido por POST /api/models/scan.
@@ -188,6 +202,7 @@ export default function Config() {
       if (!res.ok) throw new Error("save_failed");
       const data = await res.json();
       setConfig((prev) => ({ ...prev, ...data }));
+      notifyConfigSaved(data);
       setMessage({ type: "success", text: "Configuración guardada." });
     } catch {
       setMessage({ type: "error", text: "Error al guardar la configuración." });
@@ -204,6 +219,7 @@ export default function Config() {
       if (!res.ok) throw new Error("reset_failed");
       const data = await res.json();
       setConfig(data);
+      notifyConfigSaved(data);
       setMessage({ type: "success", text: "Configuración restaurada a defaults." });
     } catch {
       setMessage({ type: "error", text: "Error al restaurar defaults." });
@@ -453,6 +469,17 @@ export default function Config() {
           </Field>
         </div>
       </Section>
+
+      <MetricsDisplaySettings
+        display={config.display}
+        onChange={(display) => setConfig((prev) => ({ ...prev, display }))}
+      />
+
+      <MetricsExportSettings
+        exportsConfig={config.exports}
+        port={config.app?.port}
+        onChange={(exportsConfig) => setConfig((prev) => ({ ...prev, exports: exportsConfig }))}
+      />
     </div>
   );
 }

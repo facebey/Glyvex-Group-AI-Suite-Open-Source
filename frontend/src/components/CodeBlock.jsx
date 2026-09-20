@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Check, Copy, WrapText } from "lucide-react";
+import { Check, Copy, Download, WrapText } from "lucide-react";
 
 /**
  * Copia al portapapeles con fallback.
@@ -83,6 +83,27 @@ function labelFor(language) {
 const WRAP_BY_DEFAULT = new Set(["text", "txt", "plaintext", "plain", "log", "md", "markdown", "output", "console"]);
 
 /**
+ * Nombre seguro para el atributo `download`: el nombre viene del modelo, así
+ * que se queda solo con el basename (sin separadores de ruta). Si queda
+ * vacío, un nombre por defecto.
+ */
+function safeFilename(filename) {
+  const base = String(filename || "").replace(/[/\\]+/g, "").trim();
+  return base || "archivo.txt";
+}
+
+/** Descarga el texto como archivo (mismo patrón Blob + anchor de export.js). */
+function downloadText(filename, text) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = safeFilename(filename);
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
  * Envoltorio de un bloque de código: header con el lenguaje detectado,
  * ajuste de líneas y botón de copiar; debajo el <pre> que ya viene resaltado
  * por rehype-highlight.
@@ -92,14 +113,27 @@ const WRAP_BY_DEFAULT = new Set(["text", "txt", "plaintext", "plain", "log", "md
  * defecto (la indentación importa) y se puede ajustar con un clic; el texto
  * plano se ajusta solo.
  */
-export default function CodeBlock({ language, code, children }) {
+export default function CodeBlock({ language, code, children, filename }) {
   const [wrap, setWrap] = useState(() => !language || WRAP_BY_DEFAULT.has(language.toLowerCase()));
 
   return (
     <div className="my-2 rounded-md border border-white/10 overflow-hidden bg-black/40 max-w-full min-w-0">
-      <div className="flex items-center justify-between px-3 py-1 border-b border-white/10 bg-black/30">
-        <span className="text-xs text-glyvex-muted font-mono">{labelFor(language)}</span>
-        <span className="inline-flex items-center gap-0.5">
+      <div className="flex items-center justify-between gap-2 px-3 py-1 border-b border-white/10 bg-black/30">
+        <span className="text-xs text-glyvex-muted font-mono truncate min-w-0">
+          {labelFor(language)}
+          {filename ? <span className="text-glyvex-text"> · {filename}</span> : null}
+        </span>
+        <span className="inline-flex items-center gap-0.5 shrink-0">
+          {filename && (
+            <button
+              type="button"
+              onClick={() => downloadText(filename, code)}
+              title={`Descargar ${filename}`}
+              className="p-1 rounded hover:bg-white/10 text-glyvex-muted hover:text-glyvex-text"
+            >
+              <Download size={13} />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setWrap((v) => !v)}

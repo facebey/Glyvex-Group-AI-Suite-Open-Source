@@ -22,12 +22,18 @@ import {
   ChevronDown,
   ChevronRight,
   Trash2,
+  Terminal,
+  Copy,
+  Check,
 } from "lucide-react";
 import { useLlmStream } from "../hooks/useLlmStream.js";
+import { useDisplay } from "../lib/metricsDisplay.js";
 
 // Espejo de SAMPLING_PRESETS de backend/launcher.py. Vive acá para poder
 // previsualizar los valores sin round-trip; si cambian en el backend, hay
 // que actualizarlos también acá (o pedirlos a /api/launcher/sampling-presets).
+// "instruct" usa penalties moderados: repeat/presence 1.5 degeneran la
+// salida en la familia Qwen (especialmente código).
 const SAMPLING_PRESETS = {
   thinking: {
     temperature: 1.0,
@@ -42,8 +48,8 @@ const SAMPLING_PRESETS = {
     top_p: 0.80,
     top_k: 20,
     min_p: 0.0,
-    presence_penalty: 1.5,
-    repeat_penalty: 1.5,
+    presence_penalty: 0.3,
+    repeat_penalty: 1.1,
   },
 };
 
@@ -56,20 +62,23 @@ const SAMPLING_PRESET_LABELS = {
 const DEFAULT_LAUNCH_CONFIG = {
   backend: "llama_server",
   n_ctx: 65536,
-  n_batch: 512,
+  // 2048 (default de llama.cpp) rinde bastante más en prompt processing
+  // que 512 en GPUs anchas (medido: pp2048 ~1400 t/s con batch 2048).
+  n_batch: 2048,
   n_ubatch: 512,
   n_gpu_layers: -1,
   gpu_mode: "gpu_only",
   cache_type_k: "q4_0",
   cache_type_v: "q4_0",
   flash_attn: true,
-  use_mlock: false,
-  use_mmap: true,
+  load_mode: "auto",
   mtp_draft_model: "",
   mtp_embedded: false,
   n_draft: 5,
-  cache_type_k_draft: "",
-  cache_type_v_draft: "",
+  // q8_0 ahorra ~50% de VRAM del draft vs el default f16 de llama-server,
+  // con aceptación prácticamente idéntica. "" = no pasar el flag.
+  cache_type_k_draft: "q8_0",
+  cache_type_v_draft: "q8_0",
   mmproj_path: "",
   lora_path: "",
   lora_scale: 1.0,
@@ -80,8 +89,8 @@ const DEFAULT_LAUNCH_CONFIG = {
   top_p: 0.80,
   top_k: 20,
   min_p: 0.0,
-  presence_penalty: 0.0,
-  repeat_penalty: 1.5,
+  presence_penalty: 0.3,
+  repeat_penalty: 1.1,
   rope_freq_base: 0,
   rope_scaling_type: "none",
   yarn_ext_factor: -1,
@@ -93,6 +102,29 @@ const DEFAULT_LAUNCH_CONFIG = {
   grp_attn_w: 512,
   jinja: true,
   reasoning_effort: "none",
+  // -- Checkpoints de contexto y memoria (build 11003+) ----------------
+  // Cada checkpoint cuesta ~150 MiB de VRAM (estado recurrente SSM).
+  // Defaults de la build: 32 / 8192 -> hasta 16 en un ctx de 128k (~2.4 GiB).
+  ctx_checkpoints: 8,
+  checkpoint_min_step: 16384,
+  // Prompt cache en RAM del sistema (no VRAM). 0 = desactivado.
+  cache_ram_mib: 8192,
+  // Margen de VRAM a reservar por dispositivo (0 = off).
+  fit_target_mib: 0,
+  no_reasoning_preserve: false,
+  kv_unified: false,
+  // -- VRAM / multi-modelo (build 11009) --------------------------------
+  kv_unified_per_slot: 0,
+  sleep_idle_seconds: 0,
+  warmup: true,
+  lazy_mode: "auto",
+  // Token budget nativo del server para el reasoning (-1 = sin límite).
+  reasoning_budget: -1,
+  // -- P1.5: toggles por flag -------------------------------------------
+  // fit = "ajusta los args sin fijar a la VRAM" (default on en la build).
+  fit: true,
+  // Modo automático (F4): comando estricto, solo modelo + puerto.
+  auto_mode: false,
   host: "127.0.0.1",
   port: 8080,
   n_threads: -1,
@@ -101,19 +133,64 @@ const DEFAULT_LAUNCH_CONFIG = {
   log_file: "data/logs/llama-server.log",
 };
 
+// P1.5: un toggle por grupo de flags. OFF = el payload envía null = el
+// builder no emite el flag = llama.cpp usa su default de build (permite
+// benchmarks default-vs-fijado). `flag` es el que se chequea contra la
+// disponibilidad del probe (/backend-info): ausente -> griseado.
+const TOGGLE_GROUPS = {
+  n_ctx: { flag: "--ctx-size", fields: ["n_ctx"] },
+  n_batch: { flag: "--batch-size", fields: ["n_batch"] },
+  // Extensión del alcance P1.5 (2026-09-20).
+  n_ubatch: { flag: "--ubatch-size", fields: ["n_ubatch"] },
+  cache_type_k: { flag: "--cache-type-k", fields: ["cache_type_k"] },
+  cache_type_v: { flag: "--cache-type-v", fields: ["cache_type_v"] },
+  mmproj: { flag: "--mmproj", fields: ["mmproj_path"] },
+  rope: { flag: "--rope-scaling", fields: ["rope_scaling_type", "rope_freq_base", "yarn_ext_factor"] },
+  cache_reuse: { flag: "--cache-reuse", fields: ["cache_reuse"] },
+  defrag_thold: { flag: "--defrag-thold", fields: ["defrag_thold"] },
+  grp_attn: { flag: "--grp-attn-n", fields: ["grp_attn_n", "grp_attn_w"] },
+  cache_ram: { flag: "--cache-ram", fields: ["cache_ram_mib"] },
+  fit: { flag: "--fit", fields: ["fit"] },
+  fit_target: { flag: "--fit-target", fields: ["fit_target_mib"] },
+  checkpoint_min_step: { flag: "--checkpoint-min-step", fields: ["checkpoint_min_step"] },
+  ctx_checkpoints: { flag: "--ctx-checkpoints", fields: ["ctx_checkpoints"] },
+  n_parallel: { flag: "--parallel", fields: ["n_parallel"] },
+  n_threads: { flag: "--threads", fields: ["n_threads"] },
+};
+
+const DEFAULT_TOGGLES = Object.fromEntries(Object.keys(TOGGLE_GROUPS).map((k) => [k, true]));
+
+// La config serializada de un proceso vivo trae null justo donde el toggle
+// estaba OFF: se deduce el estado para restaurarlo al re-montar.
+function togglesFromConfig(cfg) {
+  const out = {};
+  for (const [id, group] of Object.entries(TOGGLE_GROUPS)) {
+    const known = group.fields.filter((f) => f in cfg);
+    if (known.length === 0) continue;
+    out[id] = !known.some((f) => cfg[f] === null);
+  }
+  return out;
+}
+
 const TEMPLATE_FIELDS = [
-  "n_ctx","n_batch","n_ubatch","n_gpu_layers","gpu_mode",
-  "cache_type_k","cache_type_v","flash_attn","use_mlock","use_mmap",
-  "n_draft","n_parallel","cache_type_k_draft","cache_type_v_draft",
+  "auto_mode",
+  "n_ctx", "n_batch", "n_ubatch", "n_gpu_layers", "gpu_mode",
+  "cache_type_k", "cache_type_v", "flash_attn", "load_mode",
+  "n_draft", "n_parallel", "cache_type_k_draft", "cache_type_v_draft",
   // Razonamiento
-  "thinking_enabled","budget_tokens",
+  "thinking_enabled", "budget_tokens", "no_reasoning_preserve", "reasoning_budget",
   // Sampling
-  "sampling_preset","temperature","top_p","top_k",
-  "min_p","presence_penalty","repeat_penalty",
+  "sampling_preset", "temperature", "top_p", "top_k",
+  "min_p", "presence_penalty", "repeat_penalty",
+  // Checkpoints / memoria (build 11003+)
+  "ctx_checkpoints", "checkpoint_min_step", "cache_ram_mib",
+  "fit_target_mib", "kv_unified",
+  // VRAM / multi-modelo (build 11009)
+  "kv_unified_per_slot", "sleep_idle_seconds", "warmup", "lazy_mode",
   // Parámetros avanzados
-  "rope_freq_base","rope_scaling_type","yarn_ext_factor",
-  "numa","no_kv_offload","cache_reuse","defrag_thold",
-  "grp_attn_n","grp_attn_w","jinja", "reasoning_effort",
+  "rope_freq_base", "rope_scaling_type", "yarn_ext_factor",
+  "numa", "no_kv_offload", "cache_reuse", "defrag_thold",
+  "grp_attn_n", "grp_attn_w", "jinja", "reasoning_effort",
 ];
 
 const N_CTX_PRESETS = [4096, 8192, 16384, 32768, 65536, 131072, 262144];
@@ -127,8 +204,21 @@ const N_CTX_LABELS = {
   262144: "256K",
 };
 const BUDGET_PRESETS = [1024, 4096, 8192, 16384];
-const CACHE_TYPES = ["f16", "q8_0", "q4_0", "q4_1"];
+// bf16 entra (está en FA_QUANTS de la build); q4_1 sale: con Flash
+// Attention activado el kernel solo acepta q4_0/q4_0, q8_0/q8_0,
+// f16/f16 y bf16/bf16.
+const CACHE_TYPES = ["f16", "bf16", "q8_0", "q4_0"];
+// Reemplaza a los viejos toggles use_mlock/use_mmap: el binario los unificó
+// en --load-mode (--mlock/--no-mmap ya no existen en builds recientes).
+const LOAD_MODE_OPTIONS = ["auto", "none", "mmap", "mlock", "mmap+mlock", "dio"];
 const ROPE_SCALING_TYPES = ["none", "linear", "yarn"];
+// Semáforo del estimador de VRAM (backend/vram_estimate.py).
+const VRAM_STATE_DOT = {
+  comodo: "bg-emerald-400",
+  justo: "bg-amber-400",
+  no_cabe: "bg-red-400",
+  unknown: "bg-white/30",
+};
 
 const STATE_BADGE = {
   starting: { label: "STARTING", classes: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
@@ -231,6 +321,104 @@ const SORT_OPTIONS = [
   { value: "size_gb", label: "Tamaño" },
   { value: "family", label: "Familia" },
 ];
+
+// ---------------------------------------------------------------------------
+// Comando de lanzamiento (preview antes de LAUNCH + argv real del proceso)
+// ---------------------------------------------------------------------------
+
+/** Cita un argumento para poder pegarlo tal cual en una shell POSIX. */
+function shellQuote(arg) {
+  if (arg === "") return "''";
+  // Sin metacaracteres: va crudo. Con ellos: comillas simples, escapando las
+  // simples internas (así el JSON de --chat-template-kwargs sobrevive).
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(arg)) return arg;
+  return "'" + arg.replace(/'/g, `'\\''`) + "'";
+}
+
+/**
+ * Parte el argv en líneas legibles: el binario solo, y después cada flag con
+ * su valor. Es solo presentación; el texto que se copia sale de shellQuote.
+ */
+function argvToLines(argv) {
+  if (!argv?.length) return [];
+  const lines = [{ flag: argv[0], value: null }];
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg.startsWith("-")) {
+      const next = argv[i + 1];
+      if (next != null && !next.startsWith("--")) {
+        lines.push({ flag: arg, value: next });
+        i++;
+      } else {
+        lines.push({ flag: arg, value: null });
+      }
+    } else {
+      lines.push({ flag: arg, value: null });
+    }
+  }
+  return lines;
+}
+
+/**
+ * Bloque de comando con copiar al portapapeles. `argv` es la lista cruda;
+ * la api-key ya viene enmascarada por el backend (mask_command).
+ */
+function CommandBlock({ argv, emptyHint }) {
+  const [copied, setCopied] = useState(false);
+  const lines = useMemo(() => argvToLines(argv), [argv]);
+  const oneLiner = useMemo(() => (argv || []).map(shellQuote).join(" "), [argv]);
+
+  const copy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(oneLiner);
+    } catch {
+      // Sin permiso de portapapeles (o contexto no seguro): fallback manual.
+      const ta = document.createElement("textarea");
+      ta.value = oneLiner;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch { /* el usuario copia a mano */ }
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [oneLiner]);
+
+  if (!argv?.length) {
+    return <p className="text-xs text-glyvex-muted">{emptyHint || "Sin comando disponible."}</p>;
+  }
+
+  return (
+    <div className="relative rounded-md border border-white/10 bg-black/40">
+      <button
+        type="button"
+        onClick={copy}
+        title="Copiar el comando completo en una línea"
+        className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-1 rounded text-xs border border-white/10 bg-glyvex-card text-glyvex-muted hover:text-glyvex-text"
+      >
+        {copied ? <Check size={12} /> : <Copy size={12} />}
+        {copied ? "Copiado" : "Copiar"}
+      </button>
+      {/* overflow-x-auto: en ventanas angostas el comando scrollea dentro de
+          su caja en vez de estirar el panel entero. */}
+      <pre className="overflow-x-auto p-3 pr-24 text-xs leading-relaxed font-mono text-glyvex-text">
+        {lines.map((l, i) => (
+          <div key={i} className="whitespace-pre">
+            {i === 0 ? (
+              <span className="text-glyvex-accent">{l.flag}</span>
+            ) : (
+              <>
+                {"  "}
+                <span className="text-sky-400">{l.flag}</span>
+                {l.value != null && <span className="text-glyvex-muted"> {l.value}</span>}
+              </>
+            )}
+          </div>
+        ))}
+      </pre>
+    </div>
+  );
+}
 
 function BackendBadge({ backend }) {
   return (
@@ -590,6 +778,25 @@ function GroupCard({ group, onSelect }) {
 // ---------------------------------------------------------------------------
 
 const VITALS_POINTS = 60;
+const STRIP_KEYS = ["launcher.tg", "launcher.ctx", "launcher.queue", "launcher.cache", "launcher.mtp"];
+
+/**
+ * Velocidad a mostrar: la actual si está generando; si no, la última que
+ * midió el backend (tg_tps_last, sin importar cuánto hace). Devuelve también
+ * el tooltip con la antigüedad.
+ */
+function tgDisplay(snaps) {
+  const last = snaps[snaps.length - 1] || null;
+  if (last?.tg_tps != null) return { value: last.tg_tps, live: true, title: "Velocidad de generación actual" };
+  const fromBackend = last?.tg_tps_last ?? null;
+  const fromBuffer = [...snaps].reverse().find((s) => s.tg_tps != null)?.tg_tps ?? null;
+  const value = fromBackend ?? fromBuffer;
+  if (value == null) return { value: null, live: false, title: "Todavía no hubo generación en este proceso" };
+  const at = last?.tg_tps_last_at ? Date.parse(String(last.tg_tps_last_at).replace(/(\.\d{3})\d+/, "$1")) : NaN;
+  const seconds = Number.isNaN(at) ? null : Math.max(0, Math.round((Date.now() - at) / 1000));
+  const ago = seconds == null ? "" : seconds < 60 ? ` hace ${seconds} s` : seconds < 3600 ? ` hace ${Math.round(seconds / 60)} min` : ` hace ${Math.round(seconds / 3600)} h`;
+  return { value, live: false, title: `Sin generación ahora: última velocidad medida${ago}` };
+}
 
 function contextTitle(snap) {
   if (!snap || snap.ctx_used == null) {
@@ -651,8 +858,11 @@ function MiniSpark({ values, color = "#06b6d4", width = 72, height = 20 }) {
  */
 function ServerVitalsStrip({ processId, state }) {
   const [snaps, setSnaps] = useState([]);
+  const { isVisible: show, anyVisible, ready: displayReady } = useDisplay();
+  const stripVisible = anyVisible(STRIP_KEYS);
   const { connected } = useLlmStream({
     processId,
+    active: displayReady && stripVisible,
     onHistory: (data) => setSnaps(data.slice(-VITALS_POINTS)),
     onSnap: (snap) =>
       setSnaps((prev) => {
@@ -667,8 +877,10 @@ function ServerVitalsStrip({ processId, state }) {
 
   const last = snaps[snaps.length - 1] || null;
   const tgValues = snaps.map((s) => s.tg_tps ?? null);
-  const lastTg = [...tgValues].reverse().find((v) => v != null) ?? null;
-  const generatingNow = last?.tg_tps != null;
+  const tg = tgDisplay(snaps);
+
+  // Todo oculto en Config: ni tira ni WebSocket (ver active de useLlmStream).
+  if (!stripVisible) return null;
 
   if (state !== "running" && !last) {
     return (
@@ -697,17 +909,20 @@ function ServerVitalsStrip({ processId, state }) {
         </p>
       )}
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        {show("launcher.tg") && (
         <div
           className="flex items-center gap-2"
-          title={generatingNow ? "Velocidad de generación actual" : "Sin generación ahora: último valor medido"}
+          title={tg.title}
         >
           <span className="text-glyvex-muted">tg</span>
-          <span className={`font-medium tabular-nums ${generatingNow ? "text-glyvex-text" : "text-glyvex-muted"}`}>
-            {lastTg != null ? `${lastTg.toFixed(1)} t/s` : "—"}
+          <span className={`font-medium tabular-nums ${tg.live ? "text-glyvex-text" : "text-glyvex-muted"}`}>
+            {tg.value != null ? `${tg.value.toFixed(1)} t/s` : "—"}
           </span>
           <MiniSpark values={tgValues} />
         </div>
+        )}
 
+        {show("launcher.ctx") && (
         <div
           className="flex items-center gap-2"
           title={contextTitle(last)}
@@ -734,7 +949,9 @@ function ServerVitalsStrip({ processId, state }) {
             </span>
           )}
         </div>
+        )}
 
+        {show("launcher.queue") && (
         <div className="flex items-center gap-2" title="Requests procesándose y esperando un slot libre">
           <span className="text-glyvex-muted">cola</span>
           <span className="font-medium tabular-nums text-glyvex-text">
@@ -745,8 +962,9 @@ function ServerVitalsStrip({ processId, state }) {
             ) : null}
           </span>
         </div>
+        )}
 
-        {cacheTotal != null && (
+        {show("launcher.cache") && cacheTotal != null && (
           <div
             className="flex items-center gap-2"
             title={
@@ -759,7 +977,7 @@ function ServerVitalsStrip({ processId, state }) {
           </div>
         )}
 
-        {specTotal != null && (
+        {show("launcher.mtp") && specTotal != null && (
           <div
             className="flex items-center gap-2"
             title={
@@ -846,6 +1064,7 @@ export default function Launcher() {
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [modelMeta, setModelMeta] = useState(null);
+  const [vramEstimate, setVramEstimate] = useState(null);
   const [launchConfig, setLaunchConfig] = useState(DEFAULT_LAUNCH_CONFIG);
   const [templateList, setTemplateList] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState("");
@@ -855,16 +1074,98 @@ export default function Launcher() {
   const [actionError, setActionError] = useState(null);
   const [launching, setLaunching] = useState(false);
   const [advancedMode, setAdvancedMode] = useState(false);
+  const [toggles, setToggles] = useState({ ...DEFAULT_TOGGLES });
   const [customCtx, setCustomCtx] = useState(false);
   const [scrollTick, setScrollTick] = useState(0);
   const pollRef = useRef(null);
   const configPanelRef = useRef(null);
   const templateBoxRef = useRef(null);
+  // Build de llama-server detectada por el probe del backend. Se muestra en
+  // la cabecera para saber contra qué binario se está lanzando sin tener que
+  // ir a comparar releases a mano después de cada actualización.
+  const [backendInfo, setBackendInfo] = useState(null);
+  // Preview del comando: se pide al backend (mismo probe y mismo filtrado que
+  // usa start()) solo cuando el usuario abre el bloque, no en cada tecleo.
+  const [showCommand, setShowCommand] = useState(false);
+  const [commandPreview, setCommandPreview] = useState(null);
+  const [commandError, setCommandError] = useState(null);
+
   // Una vez que el usuario (o un template, o una config restaurada) definió
   // el sampling, la metadata del GGUF ya no lo pisa.
   const samplingTouchedRef = useRef(false);
 
   const selectedModel = useMemo(() => modelList.find((m) => m.id === selectedId) || null, [modelList, selectedId]);
+
+  // Modo automático (F4): comando estricto -m + --port. Grisea los 16
+  // toggles y sus controles (el payload hace bypass total de la config).
+  const autoMode = Boolean(launchConfig.auto_mode);
+
+  // P1.5: disponibilidad por build — el probe (flags de /backend-info) dice
+  // qué soporta esta build. probe fallido (probed=false) -> null = todo
+  // habilitado (filter_command sigue protegiendo en el backend).
+  const supportedFlags = useMemo(
+    () => (backendInfo?.probed ? new Set(backendInfo.flags || []) : null),
+    [backendInfo]
+  );
+  const isBuildUnavailable = (id) => {
+    const flag = TOGGLE_GROUPS[id].flag;
+    return Boolean(supportedFlags && !supportedFlags.has(flag));
+  };
+  // disabled de toggles Y controles: modo auto ON o build sin el flag.
+  const isToggleUnavailable = (id) => autoMode || isBuildUnavailable(id);
+  const toggleTitle = (id) => {
+    const flag = TOGGLE_GROUPS[id].flag;
+    if (isBuildUnavailable(id)) {
+      return `No disponible en esta build (${backendInfo?.build || "?"}): ${flag} no está en el --help del binario`;
+    }
+    return backendInfo?.flag_help?.[flag] || undefined;
+  };
+  // OFF -> null en los campos del grupo (el builder salta lo que es None).
+  const applyToggles = useCallback((cfg) => {
+    const out = { ...cfg };
+    for (const [id, group] of Object.entries(TOGGLE_GROUPS)) {
+      if (toggles[id]) continue;
+      for (const f of group.fields) out[f] = null;
+    }
+    return out;
+  }, [toggles]);
+  const setToggle = useCallback((id, value) => {
+    setToggles((prev) => ({ ...prev, [id]: value }));
+  }, []);
+
+  // Preview del comando. Se re-pide con debounce cuando cambia la config, y
+  // solo mientras el bloque está abierto: así mover un slider no dispara una
+  // request por frame.
+  useEffect(() => {
+    if (!showCommand || !selectedId) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/launcher/preview-command", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(autoMode
+            ? { model_id: selectedId, host: launchConfig.host, port: launchConfig.port, auto_mode: true }
+            : { model_id: selectedId, ...applyToggles(launchConfig) }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) {
+          setCommandPreview(null);
+          setCommandError(data?.detail ? String(data.detail) : "No se pudo armar el comando.");
+          return;
+        }
+        setCommandError(null);
+        setCommandPreview(data);
+      } catch {
+        if (!cancelled) {
+          setCommandPreview(null);
+          setCommandError("No se pudo consultar el comando al backend.");
+        }
+      }
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [showCommand, selectedId, launchConfig, applyToggles]);
 
   useEffect(() => {
     let cancelled = false;
@@ -899,9 +1200,17 @@ export default function Launcher() {
             // la metadata: es lo que realmente está corriendo.
             samplingTouchedRef.current = true;
             setLaunchConfig((prev) => ({ ...prev, ...activeProcess.launch_config }));
+            // P1.5: los toggles OFF quedaron como null en la config serializada.
+            setToggles((prev) => ({ ...prev, ...togglesFromConfig(activeProcess.launch_config) }));
           }
         }
       } catch { /* sin proceso activo que restaurar */ }
+
+      // Build del binario: informativo, nunca bloquea la carga del Launcher.
+      try {
+        const infoRes = await fetch("/api/launcher/backend-info");
+        if (!cancelled && infoRes.ok) setBackendInfo(await infoRes.json());
+      } catch { /* backend sin binario configurado todavía */ }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -932,6 +1241,29 @@ export default function Launcher() {
       });
     return () => { cancelled = true; };
   }, [selectedId]);
+
+  // VRAM estimada del modelo seleccionado; depende de los parámetros que la
+  // mueven (n_ctx, tipos de KV, slots). Con debounce corto para no disparar
+  // una fetch por cada dígito al editar n_parallel.
+  useEffect(() => {
+    if (!selectedId) { setVramEstimate(null); return undefined; }
+    let cancelled = false;
+    setVramEstimate(null);
+    const params = new URLSearchParams({
+      n_ctx: String(launchConfig.n_ctx),
+      cache_type_k: launchConfig.cache_type_k,
+      cache_type_v: launchConfig.cache_type_v,
+      n_parallel: String(launchConfig.n_parallel),
+      flash_attn: String(launchConfig.flash_attn),
+    });
+    const timer = setTimeout(() => {
+      fetch(`/api/models/${selectedId}/vram-estimate?${params}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => { if (!cancelled && data) setVramEstimate(data); })
+        .catch(() => { /* sin estimación: la tarjeta simplemente no se muestra */ });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [selectedId, launchConfig.n_ctx, launchConfig.cache_type_k, launchConfig.cache_type_v, launchConfig.n_parallel, launchConfig.flash_attn]);
 
   useEffect(() => {
     if (!selectedId) { setProcessInfo(null); return undefined; }
@@ -1004,12 +1336,20 @@ export default function Launcher() {
     setSelectedTemplate(name);
     const tpl = templateList.find((t) => t.name === name);
     if (tpl && tpl.params) {
+      // P1.5 F5: el snapshot trae el estado de toggles y el modo automático.
+      // Compat: un template viejo sin `toggles` restaura todo ON (los grupos
+      // que no estén en el snapshot guardado usan su default ON).
+      setToggles(tpl.params.toggles
+        ? { ...DEFAULT_TOGGLES, ...tpl.params.toggles }
+        : { ...DEFAULT_TOGGLES });
+      // `toggles` no es un campo de launchConfig: se saca antes de merguear.
+      const { toggles: _toggles, ...configParams } = tpl.params;
       // Un template guardado trae su propio sampling: no dejamos que la
       // metadata del modelo lo sobrescriba después.
       if (Object.prototype.hasOwnProperty.call(tpl.params, "sampling_preset")) {
         samplingTouchedRef.current = true;
       }
-      updateConfig(tpl.params);
+      updateConfig(configParams);
       setCustomCtx(false);
     }
   }
@@ -1018,6 +1358,8 @@ export default function Launcher() {
     const name = newTemplateName.trim();
     if (!name) return;
     const params = Object.fromEntries(TEMPLATE_FIELDS.map((k) => [k, launchConfig[k]]));
+    // P1.5 F5: snapshot de los toggles (estado por grupo, no solo valores).
+    params.toggles = { ...toggles };
     setActionError(null);
     try {
       const res = await fetch("/api/launcher/templates", {
@@ -1025,12 +1367,17 @@ export default function Launcher() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, builtin: false, params }),
       });
-      if (!res.ok) throw new Error("save_template_failed");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || "save_template_failed");
+      }
       const saved = await res.json();
       await reloadTemplates();
       setNewTemplateName("");
       setSelectedTemplate(saved.name);
-    } catch { setActionError("No se pudo guardar el template."); }
+    } catch (err) {
+      setActionError(typeof err.message === "string" && err.message !== "save_template_failed" ? err.message : "No se pudo guardar el template.");
+    }
   }
 
   async function deleteTemplate(name) {
@@ -1075,16 +1422,30 @@ export default function Launcher() {
     setLaunching(true);
     setActionError(null);
     try {
+      // Modo automático (F4): bypass total — solo modelo + host + puerto;
+      // el backend arma el comando estricto con los defaults de la build.
+      if (autoMode) {
+        const res = await fetch("/api/launcher/launch", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model_id: selectedModel.id, host: launchConfig.host, port: launchConfig.port, auto_mode: true }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "launch_failed");
+        setProcessInfo(data);
+        return;
+      }
       // Los selects opcionales usan "" como "automático"; el backend espera
-      // null (no pasar el flag) — normalizar antes de enviar.
+      // null (no pasar el flag) — normalizar antes de enviar. P1.5: los
+      // toggles OFF ya dejaron sus campos en null vía applyToggles.
+      const toggled = applyToggles(launchConfig);
       const payload = {
-        ...launchConfig,
+        ...toggled,
         model_id: selectedModel.id,
-        mtp_draft_model: launchConfig.mtp_draft_model || null,
-        cache_type_k_draft: launchConfig.cache_type_k_draft || null,
-        cache_type_v_draft: launchConfig.cache_type_v_draft || null,
-        mmproj_path: launchConfig.mmproj_path || null,
-        lora_path: launchConfig.lora_path || null,
+        mtp_draft_model: toggled.mtp_draft_model || null,
+        cache_type_k_draft: toggled.cache_type_k_draft || null,
+        cache_type_v_draft: toggled.cache_type_v_draft || null,
+        mmproj_path: toggled.mmproj_path || null,
+        lora_path: toggled.lora_path || null,
       };
       const res = await fetch("/api/launcher/launch", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
@@ -1095,7 +1456,7 @@ export default function Launcher() {
     } catch (err) {
       setActionError(typeof err.message === "string" ? err.message : "Error al lanzar el modelo.");
     } finally { setLaunching(false); }
-  }, [launchConfig, selectedModel]);
+  }, [launchConfig, selectedModel, applyToggles]);
 
   async function handleStop() {
     if (!processInfo) return;
@@ -1127,7 +1488,7 @@ export default function Launcher() {
   const metaOk = modelMeta && !modelMeta.error;
   const nativeCtx = metaOk ? modelMeta.context_length : null;
   const ctxOverflow = Boolean(nativeCtx && launchConfig.n_ctx > nativeCtx);
-  const thinkingUnsupported = Boolean(metaOk && modelMeta.thinking_support === false);
+  const thinkingUnsupported = Boolean(metaOk && modelMeta.enable_thinking_kwarg === false);
   const showSamplingSliders = advancedMode || launchConfig.sampling_preset === "custom";
 
   const samplingPanel = (
@@ -1149,7 +1510,6 @@ export default function Launcher() {
           </button>
         ))}
       </div>
-
       {!showSamplingSliders && (
         <div className="flex flex-wrap gap-2 text-xs font-mono text-glyvex-muted">
           {[
@@ -1166,7 +1526,6 @@ export default function Launcher() {
           ))}
         </div>
       )}
-
       {showSamplingSliders && (
         <div className="space-y-3">
           <SamplingSlider label="Temperature" value={launchConfig.temperature} min={0} max={2} step={0.05}
@@ -1183,7 +1542,6 @@ export default function Launcher() {
             onChange={(v) => updateSampling({ repeat_penalty: v })} />
         </div>
       )}
-
       {modelMeta && (
         <div className="space-y-1 pt-1 border-t border-white/10">
           {modelMeta.error ? (
@@ -1213,6 +1571,62 @@ export default function Launcher() {
           )}
         </div>
       )}
+      {vramEstimate && vramEstimate.available && (
+        <div className="mt-2 rounded-md bg-black/20 border border-white/10 p-3 space-y-1">
+          <div className="flex items-center gap-2 text-sm">
+            <span className={`inline-block w-2.5 h-2.5 rounded-full ${VRAM_STATE_DOT[vramEstimate.state] || VRAM_STATE_DOT.unknown}`} />
+            <span className="font-medium">VRAM estimada: {vramEstimate.total_gb} GB</span>
+            {vramEstimate.pct !== null && (
+              <span className="text-glyvex-muted">/ {vramEstimate.gpu_vram_gb} GB ({vramEstimate.pct}%)</span>
+            )}
+          </div>
+          <p className="text-xs text-glyvex-muted">
+            Pesos {vramEstimate.weights_gb} GB · KV cache {vramEstimate.kv_gb} GB
+            {vramEstimate.ssm_gb ? ` · SSM ${vramEstimate.ssm_gb} GB` : ""} · Cómputo {vramEstimate.compute_gb} GB
+            {vramEstimate.n_parallel > 1 ? ` · ${vramEstimate.n_parallel} slots` : ""}
+          </p>
+          {Array.isArray(vramEstimate.legend) && vramEstimate.legend.length > 0 && (
+            <div className="pt-1.5 border-t border-white/10">
+              <p className="text-[11px] text-glyvex-muted-2 mb-1">
+                VRAM según contexto (misma cuantización):
+              </p>
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                {vramEstimate.legend.map((row) => (
+                  <span key={row.n_ctx} className="text-[11px] text-glyvex-muted">
+                    <span className="font-medium">{N_CTX_LABELS[row.n_ctx] ?? `${Math.round(row.n_ctx / 1024)}K`}</span>{" "}
+                    {row.total_gb} GB
+                    {row.pct !== null && (
+                      <span className={row.state === "no_cabe" ? "text-red-400" : row.state === "justo" ? "text-amber-400" : ""}>
+                        {" "}({row.pct}%)
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {vramEstimate.state === "no_cabe" && (
+            <p className="text-xs text-red-400">
+              No cabe en la VRAM de la GPU: probá una cuantización más baja, un n_ctx menor u offload de MoE a CPU.
+            </p>
+          )}
+          {vramEstimate.state === "justo" && (
+            <p className="text-xs text-amber-400">
+              Cabe, pero justo al límite: considerá reducir n_ctx o usar fit_target.
+            </p>
+          )}
+          {vramEstimate.state === "unknown" && (
+            <p className="text-xs text-glyvex-muted-2">
+              Declará la VRAM de tu GPU en Configuración para saber si cabe.
+            </p>
+          )}
+          {vramEstimate.is_moe && (
+            <p className="text-xs text-glyvex-muted-2">
+              MoE: los pesos son los parámetros totales (por token solo corren los activos).
+            </p>
+          )}
+        </div>
+      )}
     </Panel>
   );
 
@@ -1221,7 +1635,23 @@ export default function Launcher() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Launcher</h1>
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-xl font-semibold">Launcher</h1>
+          {backendInfo && (
+            <span
+              className="text-xs font-mono px-2 py-0.5 rounded border border-white/10 text-glyvex-muted"
+              title={
+                backendInfo.probed
+                  ? `${backendInfo.version_line || "llama-server"}\n${backendInfo.flags?.length ?? 0} flags soportados\n${backendInfo.path}`
+                  : "No se pudo leer --help/--version del binario: no se filtran flags no soportados"
+              }
+            >
+              {backendInfo.probed
+                ? `llama.cpp ${backendInfo.build || "build desconocida"}`
+                : "⚠ binario sin detectar"}
+            </span>
+          )}
+        </div>
         <div className="flex gap-1 bg-glyvex-card border border-white/10 rounded-md p-1">
           <button type="button" onClick={() => setViewMode("group")} className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs ${viewMode === "group" ? "bg-glyvex-accent text-white" : "text-glyvex-muted hover:text-glyvex-text"}`}><LayoutGrid size={13} /> Group</button>
           <button type="button" onClick={() => setViewMode("list")} className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs ${viewMode === "list" ? "bg-glyvex-accent text-white" : "text-glyvex-muted hover:text-glyvex-text"}`}><ListIcon size={13} /> List</button>
@@ -1248,9 +1678,26 @@ export default function Launcher() {
             <p className="text-sm text-glyvex-muted">Configurando lanzamiento para <span className="text-glyvex-text">{selectedModel.name}</span></p>
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-2 text-sm">
-                <span className="text-glyvex-muted">Avanzado</span>
-                <Toggle checked={advancedMode} onChange={setAdvancedMode} />
+                <span className="text-glyvex-muted">Auto</span>
+                <Toggle checked={autoMode} onChange={(v) => updateConfig({ auto_mode: v })}
+                  disabled={advancedMode}
+                  title="Comando estricto: solo modelo + puerto (defaults de la build). Conserva la infra: --verbosity y --metrics." />
               </span>
+              <span className="flex items-center gap-2 text-sm">
+                <span className="text-glyvex-muted">Avanzado</span>
+                <Toggle checked={advancedMode}
+                  onChange={(v) => { setAdvancedMode(v); if (v) updateConfig({ auto_mode: false }); }} />
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowCommand((v) => !v)}
+                title="Ver el comando de llama-server que se va a ejecutar"
+                className={"flex items-center gap-2 px-3 py-2 rounded-md text-sm border " + (showCommand ? "border-glyvex-accent/60 text-glyvex-text bg-glyvex-card" : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card")}
+              >
+                <Terminal size={16} />
+                Comando
+                {showCommand ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              </button>
               {isProcessActive && (
                 <button type="button" onClick={handleRestart} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"><RotateCw size={16} />Restart</button>
               )}
@@ -1264,7 +1711,33 @@ export default function Launcher() {
 
           {actionError && <p className="text-sm text-red-400">{actionError}</p>}
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {showCommand && (
+            <Panel icon={Terminal} title="Comando de lanzamiento">
+              {commandError ? (
+                <p className="text-xs text-red-400">{commandError}</p>
+              ) : (
+                <>
+                  <p className="text-xs text-glyvex-muted">
+                    Lo que se va a ejecutar con la config actual
+                    {commandPreview?.build ? ` (build detectada: ${commandPreview.build})` : ""}.
+                    La api-key se muestra enmascarada.
+                  </p>
+                  <CommandBlock
+                    argv={commandPreview?.command}
+                    emptyHint="LM Studio corre su propio servidor: no hay comando que lanzar desde acá."
+                  />
+                  {commandPreview?.dropped?.length > 0 && (
+                    <p className="text-xs text-amber-400">
+                      ⚠ Esta build no soporta {commandPreview.dropped.length} flag(s), se omiten:{" "}
+                      <span className="font-mono">{commandPreview.dropped.join(", ")}</span>
+                    </p>
+                  )}
+                </>
+              )}
+            </Panel>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
             <Panel icon={Sliders} title="Template">
               <Field label="Template predefinido o guardado">
                 <div className="relative" ref={templateBoxRef}>
@@ -1288,7 +1761,7 @@ export default function Launcher() {
                       {templateList.map((t) => (
                         <div key={t.name} className={"flex items-center gap-1 pr-1 hover:bg-white/5 " + (t.name === selectedTemplate ? "bg-glyvex-accent/10" : "")}>
                           <button type="button"
-                            onClick={() => { applyTemplate(t.name); setTemplateOpen(false); }}
+                            onClick={() => { applyTemplate(t.name); setNewTemplateName(t.name); setTemplateOpen(false); }}
                             className="flex-1 min-w-0 px-3 py-2 text-left text-sm text-glyvex-text">
                             <span className="truncate block">{t.name}</span>
                             {t.builtin && <span className="text-xs text-glyvex-muted">predefinido</span>}
@@ -1313,8 +1786,12 @@ export default function Launcher() {
             </Panel>
 
             <Panel icon={Cpu} title="Contexto">
+              <Toggle label="n_ctx (--ctx-size)" checked={toggles.n_ctx}
+                onChange={(v) => setToggle("n_ctx", v)}
+                disabled={isToggleUnavailable("n_ctx")} title={toggleTitle("n_ctx")} />
               <Field label="n_ctx (tamaño de contexto)">
                 <select className={selectClasses}
+                  disabled={!toggles.n_ctx || isToggleUnavailable("n_ctx")}
                   value={showCustomCtx ? "custom" : launchConfig.n_ctx}
                   onChange={(e) => {
                     if (e.target.value === "custom") {
@@ -1332,6 +1809,7 @@ export default function Launcher() {
               {showCustomCtx && (
                 <Field label="n_ctx custom" hint="Cualquier valor mayor a 0 (en tokens).">
                   <input type="number" min={1} className={inputClasses}
+                    disabled={!toggles.n_ctx || isToggleUnavailable("n_ctx")}
                     value={launchConfig.n_ctx || ""}
                     onChange={(e) => updateConfig({ n_ctx: Number(e.target.value) })} />
                 </Field>
@@ -1342,8 +1820,21 @@ export default function Launcher() {
                   {` (n_ctx actual: ${Number(launchConfig.n_ctx).toLocaleString()})`}
                 </p>
               )}
-              <Field label="n_batch">
-                <input type="number" className={inputClasses} value={launchConfig.n_batch} onChange={(e) => updateConfig({ n_batch: Number(e.target.value) })} />
+              <Toggle label="n_batch (--batch-size)" checked={toggles.n_batch}
+                onChange={(v) => setToggle("n_batch", v)}
+                disabled={isToggleUnavailable("n_batch")} title={toggleTitle("n_batch")} />
+              <Field label="n_batch" hint="2048 (default de llama.cpp) rinde más en prompt processing que 512 en GPUs anchas.">
+                <input type="number" className={inputClasses}
+                  disabled={!toggles.n_batch || isToggleUnavailable("n_batch")}
+                  value={launchConfig.n_batch} onChange={(e) => updateConfig({ n_batch: Number(e.target.value) })} />
+              </Field>
+              <Toggle label="n_ubatch (--ubatch-size)" checked={toggles.n_ubatch}
+                onChange={(v) => setToggle("n_ubatch", v)}
+                disabled={isToggleUnavailable("n_ubatch")} title={toggleTitle("n_ubatch")} />
+              <Field label="n_ubatch" hint="Tamaño del compute buffer por paso. 512 no lo infla; más rinde en CPUs.">
+                <input type="number" min={1} className={inputClasses}
+                  disabled={!toggles.n_ubatch || isToggleUnavailable("n_ubatch")}
+                  value={launchConfig.n_ubatch} onChange={(e) => updateConfig({ n_ubatch: Number(e.target.value) })} />
               </Field>
             </Panel>
 
@@ -1367,13 +1858,34 @@ export default function Launcher() {
             {advancedMode && (
               <>
                 <Panel icon={Sliders} title="Memoria / Precisión">
-                  <div className="grid grid-cols-2 gap-4">
-                    <Field label="cache_type_k"><select className={selectClasses} value={launchConfig.cache_type_k} onChange={(e) => updateConfig({ cache_type_k: e.target.value })}>{CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
-                    <Field label="cache_type_v"><select className={selectClasses} value={launchConfig.cache_type_v} onChange={(e) => updateConfig({ cache_type_v: e.target.value })}>{CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Toggle label="cache_type_k" checked={toggles.cache_type_k}
+                      onChange={(v) => setToggle("cache_type_k", v)}
+                      disabled={isToggleUnavailable("cache_type_k")} title={toggleTitle("cache_type_k")} />
+                    <Toggle label="cache_type_v" checked={toggles.cache_type_v}
+                      onChange={(v) => setToggle("cache_type_v", v)}
+                      disabled={isToggleUnavailable("cache_type_v")} title={toggleTitle("cache_type_v")} />
                   </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="cache_type_k"><select className={selectClasses}
+                      disabled={!toggles.cache_type_k || isToggleUnavailable("cache_type_k")}
+                      value={launchConfig.cache_type_k} onChange={(e) => updateConfig({ cache_type_k: e.target.value })}>{CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
+                    <Field label="cache_type_v"><select className={selectClasses}
+                      disabled={!toggles.cache_type_v || isToggleUnavailable("cache_type_v")}
+                      value={launchConfig.cache_type_v} onChange={(e) => updateConfig({ cache_type_v: e.target.value })}>{CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
+                  </div>
+                  {launchConfig.flash_attn && launchConfig.cache_type_k !== launchConfig.cache_type_v && (
+                    <p className="text-xs text-red-400">
+                      ⚠ Con flash_attn=on el KV cache debe ser simétrico y estar en
+                      q4_0/q4_0, q8_0/q8_0, f16/f16 o bf16/bf16 (FA_QUANTS de la build).
+                    </p>
+                  )}
                   <Toggle label="flash_attn" checked={launchConfig.flash_attn} onChange={(v) => updateConfig({ flash_attn: v })} />
-                  <Toggle label="use_mlock" checked={launchConfig.use_mlock} onChange={(v) => updateConfig({ use_mlock: v })} />
-                  <Toggle label="use_mmap" checked={launchConfig.use_mmap} onChange={(v) => updateConfig({ use_mmap: v })} />
+                  <Field label="load_mode" hint="Reemplaza a mlock/mmap: cómo carga el binario el archivo del modelo (--load-mode).">
+                    <select className={selectClasses} value={launchConfig.load_mode} onChange={(e) => updateConfig({ load_mode: e.target.value })}>
+                      {LOAD_MODE_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </Field>
                 </Panel>
 
                 <Panel icon={Puzzle} title="Módulos opcionales">
@@ -1400,7 +1912,7 @@ export default function Launcher() {
                   </div>
                   {(launchConfig.mtp_embedded || launchConfig.mtp_draft_model) && (
                     <div className="grid grid-cols-2 gap-3">
-                      <Field label="cache_type_k (draft)" hint="Default de llama-server: f16, aunque el modelo principal use otro.">
+                      <Field label="cache_type_k (draft)" hint="q8_0 ahorra ~50% de VRAM del draft vs el default f16 de llama-server.">
                         <select className={selectClasses} value={launchConfig.cache_type_k_draft}
                           onChange={(e) => updateConfig({ cache_type_k_draft: e.target.value })}>
                           <option value="">Automático (f16)</option>
@@ -1416,6 +1928,18 @@ export default function Launcher() {
                       </Field>
                     </div>
                   )}
+                  {(launchConfig.mtp_embedded || launchConfig.mtp_draft_model) &&
+                    launchConfig.flash_attn &&
+                    (launchConfig.cache_type_k_draft || "f16") !== (launchConfig.cache_type_v_draft || "f16") && (
+                      <p className="text-xs text-red-400 -mt-2">
+                        ⚠ El KV del draft también cae bajo FA_QUANTS: con flash_attn=on
+                        k y v deben ser iguales (o ambos en Automático). El backend
+                        rechaza el lanzamiento si difieren.
+                      </p>
+                    )}
+                  <Toggle label="mmproj (--mmproj)" checked={toggles.mmproj}
+                    onChange={(v) => setToggle("mmproj", v)}
+                    disabled={isToggleUnavailable("mmproj")} title={toggleTitle("mmproj")} />
                   <Field
                     label="Módulo de visión — mmproj (path)"
                     hint={
@@ -1426,6 +1950,7 @@ export default function Launcher() {
                           : undefined
                     }>
                     <input className={inputClasses}
+                      disabled={!toggles.mmproj || isToggleUnavailable("mmproj")}
                       value={launchConfig.mmproj_path || (selectedModel.has_vision_embedded ? "" : (selectedModel.mmproj_path ?? ""))}
                       onChange={(e) => updateConfig({ mmproj_path: e.target.value })}
                       placeholder={selectedModel.has_vision_embedded ? "No requiere path" : "/models/mmproj.gguf"} />
@@ -1440,10 +1965,16 @@ export default function Launcher() {
                     checked={launchConfig.thinking_enabled}
                     onChange={(v) => updateConfig({ thinking_enabled: v })}
                     disabled={thinkingUnsupported}
-                    title={thinkingUnsupported ? "Este modelo no soporta thinking" : undefined}
+                    title={thinkingUnsupported ? (modelMeta.thinking_support
+                      ? "El template de este modelo no usa enable_thinking"
+                      : "Este modelo no soporta thinking") : undefined}
                   />
                   {thinkingUnsupported && (
-                    <p className="text-xs text-glyvex-muted-2">Este modelo no soporta thinking.</p>
+                    <p className="text-xs text-glyvex-muted-2">
+                      {modelMeta.thinking_support
+                        ? "El template de este modelo no usa enable_thinking: el thinking no se puede controlar desde aquí."
+                        : "Este modelo no soporta thinking."}
+                    </p>
                   )}
                   {launchConfig.backend === "ollama" && (
                     <p className="text-xs text-amber-400">
@@ -1465,7 +1996,7 @@ export default function Launcher() {
                     <div className="flex gap-2 flex-wrap">
                       {["none", "low", "medium", "high", "xhigh"].map((level) => (
                         <button key={level} type="button"
-                          disabled={!launchConfig.jinja}
+                            disabled={!launchConfig.jinja || thinkingUnsupported}
                           onClick={() => updateConfig({ reasoning_effort: level })}
                           className={
                             "px-3 py-1.5 rounded-md text-xs border capitalize " +
@@ -1482,6 +2013,27 @@ export default function Launcher() {
                       Solo llama-server con --jinja. No compatible con Ollama.
                     </p>
                   </Field>
+                  <Toggle
+                    label="no_reasoning_preserve (ahorra tokens)"
+                    checked={launchConfig.no_reasoning_preserve}
+                    disabled={thinkingUnsupported}
+                    onChange={(v) => updateConfig({ no_reasoning_preserve: v })}
+                  />
+                  <p className="text-xs text-glyvex-muted -mt-2">
+                    La build 11003 preserva el razonamiento en cada turno por defecto
+                    (gasta tokens extra); activarlo agrega --no-reasoning-preserve.
+                  </p>
+                  <Field label={`reasoning_budget: ${launchConfig.reasoning_budget === -1 ? "∞" : launchConfig.reasoning_budget}`}>
+                    <select className={selectClasses} disabled={thinkingUnsupported} value={launchConfig.reasoning_budget} onChange={(e) => updateConfig({ reasoning_budget: Number(e.target.value) })}>
+                      <option value={-1}>∞ (sin límite)</option>
+                      <option value={0}>0 (fin inmediato)</option>
+                      {BUDGET_PRESETS.map((v) => <option key={v} value={v}>{v.toLocaleString()}</option>)}
+                    </select>
+                  </Field>
+                  <p className="text-xs text-glyvex-muted -mt-2">
+                    Token budget nativo del server (--reasoning-budget). Controla el
+                    razonamiento en todos los requests, no solo con thinking enabled.
+                  </p>
                 </Panel>
               </>
             )}
@@ -1491,24 +2043,48 @@ export default function Launcher() {
             {advancedMode && (
               <>
                 <Panel icon={Server} title="Servidor">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Toggle label="n_parallel (--parallel)" checked={toggles.n_parallel}
+                      onChange={(v) => setToggle("n_parallel", v)}
+                      disabled={isToggleUnavailable("n_parallel")} title={toggleTitle("n_parallel")} />
+                    <Toggle label="n_threads (--threads)" checked={toggles.n_threads}
+                      onChange={(v) => setToggle("n_threads", v)}
+                      disabled={isToggleUnavailable("n_threads")} title={toggleTitle("n_threads")} />
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="Host"><input className={inputClasses} value={launchConfig.host} onChange={(e) => updateConfig({ host: e.target.value })} /></Field>
                     <Field label="Port"><input type="number" className={inputClasses} value={launchConfig.port} onChange={(e) => updateConfig({ port: Number(e.target.value) })} /></Field>
-                    <Field label="n_parallel (1–8)"><input type="number" min={1} max={8} className={inputClasses} value={launchConfig.n_parallel} onChange={(e) => updateConfig({ n_parallel: Number(e.target.value) })} /></Field>
-                    <Field label="n_threads (-1 = auto)"><input type="number" className={inputClasses} value={launchConfig.n_threads} onChange={(e) => updateConfig({ n_threads: Number(e.target.value) })} /></Field>
+                    <Field label="n_parallel (1–8)"><input type="number" min={1} max={8} className={inputClasses}
+                      disabled={!toggles.n_parallel || isToggleUnavailable("n_parallel")}
+                      value={launchConfig.n_parallel} onChange={(e) => updateConfig({ n_parallel: Number(e.target.value) })} /></Field>
+                    <Field label="n_threads (-1 = auto)"><input type="number" className={inputClasses}
+                      disabled={!toggles.n_threads || isToggleUnavailable("n_threads")}
+                      value={launchConfig.n_threads} onChange={(e) => updateConfig({ n_threads: Number(e.target.value) })} /></Field>
                   </div>
+                  {launchConfig.n_parallel > 1 && !launchConfig.kv_unified && (
+                    <p className="text-xs text-amber-400">
+                      ⚠ Con n_parallel &gt; 1 y kv_unified apagado, cada slot reserva su
+                      propio KV cache completo (x{launchConfig.n_parallel} la VRAM de contexto).
+                    </p>
+                  )}
                   <Field label="API key (opcional)"><input className={inputClasses} value={launchConfig.api_key} onChange={(e) => updateConfig({ api_key: e.target.value })} placeholder="Dejar vacío para no requerir auth" /></Field>
                 </Panel>
 
                 <Panel icon={Settings} title="Parámetros avanzados">
+                  <Toggle label="RoPE (--rope-scaling, grupo)" checked={toggles.rope}
+                    onChange={(v) => setToggle("rope", v)}
+                    disabled={isToggleUnavailable("rope")} title={toggleTitle("rope")} />
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="rope_freq_base" hint="0 = auto">
                       <input type="number" min={0} step={1000} className={inputClasses}
+                        disabled={!toggles.rope || isToggleUnavailable("rope")}
                         value={launchConfig.rope_freq_base}
                         onChange={(e) => updateConfig({ rope_freq_base: Number(e.target.value) })} />
                     </Field>
                     <Field label="rope_scaling_type">
-                      <select className={selectClasses} value={launchConfig.rope_scaling_type}
+                      <select className={selectClasses}
+                        disabled={!toggles.rope || isToggleUnavailable("rope")}
+                        value={launchConfig.rope_scaling_type}
                         onChange={(e) => updateConfig({ rope_scaling_type: e.target.value })}>
                         {ROPE_SCALING_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                       </select>
@@ -1517,36 +2093,111 @@ export default function Launcher() {
                   {launchConfig.rope_scaling_type === "yarn" && (
                     <Field label="yarn_ext_factor" hint="-1 = auto">
                       <input type="number" step={0.1} className={inputClasses}
+                        disabled={!toggles.rope || isToggleUnavailable("rope")}
                         value={launchConfig.yarn_ext_factor}
                         onChange={(e) => updateConfig({ yarn_ext_factor: Number(e.target.value) })} />
                     </Field>
                   )}
-
                   <Toggle label="numa" checked={launchConfig.numa} onChange={(v) => updateConfig({ numa: v })} />
                   <Toggle label="no_kv_offload" checked={launchConfig.no_kv_offload} onChange={(v) => updateConfig({ no_kv_offload: v })} />
 
+                  <Toggle label="cache_reuse (--cache-reuse)" checked={toggles.cache_reuse}
+                    onChange={(v) => setToggle("cache_reuse", v)}
+                    disabled={isToggleUnavailable("cache_reuse")} title={toggleTitle("cache_reuse")} />
                   <Field label={`cache_reuse: ${launchConfig.cache_reuse === 0 ? "0 (desactivado)" : launchConfig.cache_reuse}`}>
                     <input type="range" min={0} max={256} step={1} value={launchConfig.cache_reuse}
+                      disabled={!toggles.cache_reuse || isToggleUnavailable("cache_reuse")}
                       onChange={(e) => updateConfig({ cache_reuse: Number(e.target.value) })}
                       className="w-full accent-glyvex-accent" />
                   </Field>
-                  <Field label={`defrag_thold: ${launchConfig.defrag_thold < 0 ? "-1 (desactivado)" : Number(launchConfig.defrag_thold).toFixed(2)}`}>
+                  <Toggle label="defrag_thold (--defrag-thold)" checked={toggles.defrag_thold}
+                    onChange={(v) => setToggle("defrag_thold", v)}
+                    disabled={isToggleUnavailable("defrag_thold")} title={toggleTitle("defrag_thold")} />
+                  <Field label={`defrag_thold: ${launchConfig.defrag_thold < 0 ? "-1 (desactivado)" : Number(launchConfig.defrag_thold).toFixed(2)}`}
+                    hint="Marcado DEPRECATED en el --help del binario; el backend lo sigue enviando por ahora.">
                     <input type="range" min={-1} max={1} step={0.01} value={launchConfig.defrag_thold}
+                      disabled={!toggles.defrag_thold || isToggleUnavailable("defrag_thold")}
                       onChange={(e) => updateConfig({ defrag_thold: Number(e.target.value) })}
                       className="w-full accent-glyvex-accent" />
                   </Field>
 
+                  <Toggle label="grp_attn (--grp-attn-n/w, grupo)" checked={toggles.grp_attn}
+                    onChange={(v) => setToggle("grp_attn", v)}
+                    disabled={isToggleUnavailable("grp_attn")} title={toggleTitle("grp_attn")} />
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="grp_attn_n" hint="1 = desactivado">
                       <input type="number" min={1} className={inputClasses} value={launchConfig.grp_attn_n}
+                        disabled={!toggles.grp_attn || isToggleUnavailable("grp_attn")}
                         onChange={(e) => updateConfig({ grp_attn_n: Number(e.target.value) })} />
                     </Field>
                     {launchConfig.grp_attn_n > 1 && (
                       <Field label="grp_attn_w">
                         <input type="number" min={1} className={inputClasses} value={launchConfig.grp_attn_w}
+                          disabled={!toggles.grp_attn || isToggleUnavailable("grp_attn")}
                           onChange={(e) => updateConfig({ grp_attn_w: Number(e.target.value) })} />
                       </Field>
                     )}
+                  </div>
+                  <div className="border-t border-white/10 pt-4 space-y-4">
+                    <p className="text-xs text-glyvex-muted uppercase tracking-wide">
+                      Checkpoints y memoria (build 11003+)
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Toggle label="ctx_checkpoints" checked={toggles.ctx_checkpoints}
+                        onChange={(v) => setToggle("ctx_checkpoints", v)}
+                        disabled={isToggleUnavailable("ctx_checkpoints")} title={toggleTitle("ctx_checkpoints")} />
+                      <Toggle label="checkpoint_min_step" checked={toggles.checkpoint_min_step}
+                        onChange={(v) => setToggle("checkpoint_min_step", v)}
+                        disabled={isToggleUnavailable("checkpoint_min_step")} title={toggleTitle("checkpoint_min_step")} />
+                      <Toggle label="cache_ram (--cache-ram)" checked={toggles.cache_ram}
+                        onChange={(v) => setToggle("cache_ram", v)}
+                        disabled={isToggleUnavailable("cache_ram")} title={toggleTitle("cache_ram")} />
+                      <Toggle label="fit_target (--fit-target)" checked={toggles.fit_target}
+                        onChange={(v) => setToggle("fit_target", v)}
+                        disabled={isToggleUnavailable("fit_target")} title={toggleTitle("fit_target")} />
+                      <Toggle label="fit (--fit on)" checked={toggles.fit}
+                        onChange={(v) => setToggle("fit", v)}
+                        disabled={isToggleUnavailable("fit")} title={toggleTitle("fit")} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <Field label="ctx_checkpoints" hint="Máx. checkpoints de contexto por slot (~150 MiB de VRAM c/u). Default de la build: 32.">
+                        <input type="number" min={0} className={inputClasses} value={launchConfig.ctx_checkpoints}
+                          disabled={!toggles.ctx_checkpoints || isToggleUnavailable("ctx_checkpoints")}
+                          onChange={(e) => updateConfig({ ctx_checkpoints: Number(e.target.value) })} />
+                      </Field>
+                      <Field label="checkpoint_min_step" hint="Espaciado mínimo entre checkpoints (tokens). Default de la build: 8192.">
+                        <input type="number" min={512} step={512} className={inputClasses} value={launchConfig.checkpoint_min_step}
+                          disabled={!toggles.checkpoint_min_step || isToggleUnavailable("checkpoint_min_step")}
+                          onChange={(e) => updateConfig({ checkpoint_min_step: Number(e.target.value) })} />
+                      </Field>
+                      <Field label="cache_ram_mib" hint="Límite del prompt cache en RAM del sistema (0 = desactivado).">
+                        <input type="number" min={0} step={1024} className={inputClasses} value={launchConfig.cache_ram_mib}
+                          disabled={!toggles.cache_ram || isToggleUnavailable("cache_ram")}
+                          onChange={(e) => updateConfig({ cache_ram_mib: Number(e.target.value) })} />
+                      </Field>
+                      <Field label="fit_target_mib" hint="Margen de VRAM a reservar por dispositivo (0 = off).">
+                        <input type="number" min={0} step={512} className={inputClasses} value={launchConfig.fit_target_mib}
+                          disabled={!toggles.fit_target || isToggleUnavailable("fit_target")}
+                          onChange={(e) => updateConfig({ fit_target_mib: Number(e.target.value) })} />
+                      </Field>
+                    </div>
+                    <Toggle label="kv_unified (KV compartido entre slots)" checked={launchConfig.kv_unified}
+                      onChange={(v) => updateConfig({ kv_unified: v })} />
+                    <Field label="kv_unified_per_slot" hint="Contexto por slot con kv_unified activo (0 = sin límite, usa n_ctx).">
+                      <input type="number" min={0} step={4096} className={inputClasses} value={launchConfig.kv_unified_per_slot}
+                        onChange={(e) => updateConfig({ kv_unified_per_slot: Number(e.target.value) })} />
+                    </Field>
+                    <Field label="sleep_idle_seconds" hint="Segundos de inactividad hasta que el server libera VRAM (0 = off).">
+                      <input type="number" min={0} step={60} className={inputClasses} value={launchConfig.sleep_idle_seconds}
+                        onChange={(e) => updateConfig({ sleep_idle_seconds: Number(e.target.value) })} />
+                    </Field>
+                    <Toggle label="warmup (corrida vacía al arrancar)" checked={launchConfig.warmup}
+                      onChange={(v) => updateConfig({ warmup: v })} />
+                    <Field label="lazy_mode" hint="Lectura bajo demanda de tensores grandes (auto = solo >4GiB).">
+                      <select className={selectClasses} value={launchConfig.lazy_mode} onChange={(e) => updateConfig({ lazy_mode: e.target.value })}>
+                        {["auto", "on", "off"].map((m) => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </Field>
                   </div>
                 </Panel>
               </>
@@ -1564,9 +2215,22 @@ export default function Launcher() {
                   <span className="text-sm text-glyvex-muted">{processInfo.host}:{processInfo.port}</span>
                   {processInfo.state === "running" && <span className="text-sm text-emerald-400">✓ Servidor listo</span>}
                 </div>
+                {processInfo.warning && <p className="text-sm text-amber-400">{processInfo.warning}</p>}
                 {processInfo.error_message && <p className="text-sm text-red-400">{processInfo.error_message}</p>}
                 {processInfo.backend === "llama_server" && (
                   <ServerVitalsStrip processId={processInfo.process_id} state={processInfo.state} />
+                )}
+                {processInfo.command?.length > 0 && (
+                  <details className="group">
+                    <summary className="flex items-center gap-2 cursor-pointer text-xs text-glyvex-muted hover:text-glyvex-text select-none">
+                      <Terminal size={13} />
+                      Comando ejecutado
+                      <ChevronRight size={12} className="group-open:rotate-90 transition-transform" />
+                    </summary>
+                    <div className="mt-2">
+                      <CommandBlock argv={processInfo.command} />
+                    </div>
+                  </details>
                 )}
                 <LogTerminal processId={processInfo.process_id} />
               </div>

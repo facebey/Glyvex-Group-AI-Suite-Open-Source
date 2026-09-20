@@ -16,6 +16,8 @@
  * aparece solo cuando algo salió de la heurística de caracteres.
  */
 
+import { useDisplay } from "../lib/metricsDisplay.js";
+
 const SOURCE_LABEL = {
   timings: "Medido por el servidor (timings).",
   usage: "Tokens del servidor sobre el tiempo de generación medido.",
@@ -104,22 +106,29 @@ export default function MetricsBar({
     ? `${tokensThinking.toLocaleString()} de razonamiento y ${Math.max(0, tokensTotal - tokensThinking).toLocaleString()} de respuesta.`
     : undefined;
 
+  const { isVisible } = useDisplay();
+
   const items = [
     {
+      key: "chat.tps",
       label: "t/s",
       value: tps ? `${source === "chunks" ? "~" : ""}${tps.toFixed(1)}` : "—",
       live: true,
       title: tpsTitle,
     },
-    { label: "TTFT", value: ttft || "—", title: ttftTitle },
-    { label: "Tokens", value: tokensTotal ? tokensTotal.toLocaleString() : "—", title: tokensTitle },
+    { key: "chat.ttft", label: "TTFT", value: ttft || "—", title: ttftTitle },
+    { key: "chat.tokens", label: "Tokens", value: tokensTotal ? tokensTotal.toLocaleString() : "—", title: tokensTitle },
     {
+      key: "chat.context",
       label: "Contexto",
       value: contextValue,
       className: contextColor,
       title: contextTitle,
     },
-  ];
+  ].filter((item) => isVisible(item.key));
+
+  // Todo oculto en Config: la barra no ocupa lugar.
+  if (items.length === 0) return null;
 
   return (
     <div className="flex items-center gap-6 px-4 py-2 bg-glyvex-card border-b border-white/10 text-sm">

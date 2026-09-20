@@ -22,6 +22,16 @@ import {
 
 const SESSION_KEY = "glyvex_chat_messages";
 
+// Texto que se suma al system prompt cuando el toggle "convención de
+// archivos" está activo (ver appendFileConvention). Vive acá, no en el
+// textarea del usuario, para no pisarle lo que ya haya escrito: se
+// concatena, nunca reemplaza.
+const FILE_CONVENTION_PROMPT =
+  "Cuando generes el contenido completo de un archivo, abrí la cerca de " +
+  "código con el lenguaje, dos puntos y el nombre del archivo, por ejemplo " +
+  "```python:procesar_captura.py```. Si es un fragmento parcial o un " +
+  "ejemplo suelto, usá la cerca normal sin nombre.";
+
 const DEFAULT_PARAMS = {
   temperature: 0.7,
   top_p: 0.9,
@@ -67,6 +77,13 @@ export default function Chat() {
   const [apiKey, setApiKey] = useState("");
 
   const [systemPrompt, setSystemPrompt] = useState("");
+  // Se suma al system prompt en buildRequest, no lo reemplaza: si el
+  // usuario ya escribió algo en el cuadro, la convención se concatena al
+  // final. Si el cuadro está vacío, se manda sola.
+  const [appendFileConvention, setAppendFileConvention] = useLocalStorage(
+    "glyvex_chat_file_convention",
+    false
+  );
   const [reasoning, setReasoning] = useLocalStorage("glyvex_chat_reasoning", DEFAULT_REASONING);
   const [params, setParams] = useLocalStorage("glyvex_chat_params", DEFAULT_PARAMS);
 
@@ -198,16 +215,28 @@ export default function Chat() {
     };
   }, [endpointUrl, selectedModel]);
 
-  // Si el modelo dejó de aceptar imágenes, las que ya estaban adjuntadas
-  // quedan marcadas en vez de fallar recién al enviar.
+  // Estado de las imágenes ya adjuntadas según lo que soporte el modelo
+  // activo. Es BIDIRECCIONAL a propósito: antes solo degradaba
+  // ready -> vision_unsupported y no existía el camino de vuelta, así que una
+  // imagen adjuntada mientras /capabilities todavía cargaba quedaba marcada
+  // para siempre y handleSend la filtraba en silencio. El backend ahora
+  // guarda los bytes pase lo que pase, así que el status se puede recalcular.
   useEffect(() => {
     if (!capabilities) return;
+    const vision = Boolean(capabilities.vision);
     setAttachments((prev) =>
-      prev.map((a) =>
-        a.kind === "image" && !capabilities.vision && a.status === "ready"
-          ? { ...a, status: "vision_unsupported" }
-          : a
-      )
+      prev.map((a) => {
+        if (a.kind !== "image") return a;
+        if (!vision && a.status === "ready") {
+          return { ...a, status: "vision_unsupported" };
+        }
+        // Vuelta atrás: la imagen sigue en disco y el modelo sí acepta
+        // imágenes, así que se vuelve a habilitar para el envío.
+        if (vision && a.status === "vision_unsupported") {
+          return { ...a, status: "ready" };
+        }
+        return a;
+      })
     );
   }, [capabilities]);
 
@@ -290,7 +319,7 @@ export default function Chat() {
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, attachments, draftBucket, systemPrompt, endpointUrl, apiKey, params.max_tokens, streaming]);
+  }, [path, attachments, draftBucket, systemPrompt, appendFileConvention, endpointUrl, apiKey, params.max_tokens, streaming]);
 
   // -- persistencia entre rutas ----------------------------------------------
   // sessionStorage (no localStorage): cambiar de página no pierde nada, pero
@@ -405,6 +434,17 @@ export default function Chat() {
       .catch(() => {});
   }, []);
 
+  /**
+   * Libera el object URL de un chip. Los blob: URL viven hasta que se los
+   * revoca explícitamente, así que sin esto cada imagen adjuntada queda
+   * retenida en memoria hasta recargar la página.
+   */
+  const revokePreview = useCallback((chip) => {
+    if (chip?.previewUrl) {
+      try { URL.revokeObjectURL(chip.previewUrl); } catch { /* ya revocado */ }
+    }
+  }, []);
+
   /** Sube un archivo y devuelve el descriptor ya procesado por el backend. */
   const uploadOne = useCallback(
     async (file, localId, vision) => {
@@ -422,8 +462,14 @@ export default function Chat() {
         const result = processed[0];
         if (!result) throw new Error("El servidor no devolvió el adjunto procesado.");
 
+        // previewUrl se conserva: el backend devuelve su propia `url`, pero
+        // el blob local ya está decodificado y evita un salto visual.
         setAttachments((prev) =>
-          prev.map((chip) => (chip.localId === localId ? { ...result, localId } : chip))
+          prev.map((chip) =>
+            chip.localId === localId
+              ? { ...result, localId, previewUrl: chip.previewUrl || null }
+              : chip
+          )
         );
         return result;
       } catch (err) {
@@ -454,19 +500,29 @@ export default function Chat() {
         );
       }
 
-      const vision = Boolean(capabilities?.vision);
-      const pending = batch.map((file) => ({
-        localId: uuid(),
-        filename: file.name,
-        mime: file.type || "",
-        size: file.size,
-        kind: file.type.startsWith("image/") ? "image" : "text",
-        status: "pending",
-        text: "",
-        note: null,
-        error: null,
-        tokens_estimate: 0,
-      }));
+      // Si todavía no llegó /capabilities, se asume que SÍ hay visión. El
+      // backend guarda la imagen igual y el efecto de arriba corrige el
+      // status en cuanto se sepa: es preferible a descartarla de entrada.
+      const vision = capabilities ? Boolean(capabilities.vision) : true;
+      const pending = batch.map((file) => {
+        const isImage = (file.type || "").startsWith("image/");
+        return {
+          localId: uuid(),
+          filename: file.name,
+          mime: file.type || "",
+          size: file.size,
+          kind: isImage ? "image" : "text",
+          status: "pending",
+          text: "",
+          note: null,
+          error: null,
+          tokens_estimate: 0,
+          // Miniatura inmediata mientras sube, sin esperar al backend ni
+          // meter base64 en el estado. Se revoca al reemplazar el chip o al
+          // quitarlo (ver revokePreview) para no filtrar memoria.
+          previewUrl: isImage ? URL.createObjectURL(file) : null,
+        };
+      });
 
       setAttachments((prev) => [...prev, ...pending]);
 
@@ -500,8 +556,12 @@ export default function Chat() {
   );
 
   const removeAttachment = useCallback((localId) => {
-    setAttachments((prev) => prev.filter((a) => a.localId !== localId));
-  }, []);
+    setAttachments((prev) => {
+      const going = prev.find((a) => a.localId === localId);
+      if (going) revokePreview(going);
+      return prev.filter((a) => a.localId !== localId);
+    });
+  }, [revokePreview]);
 
   // -- dictado ----------------------------------------------------------------
   // El texto cae en el textarea y queda editable: nunca se envía solo.
@@ -554,7 +614,12 @@ export default function Chat() {
       const effective = reasoningOverride || reasoning;
       // Si el chat template no acepta role=system, el prompt de sistema se
       // antepone al primer mensaje del usuario en vez de perderse.
-      const systemText = systemPrompt.trim();
+      const systemText = [
+        systemPrompt.trim(),
+        appendFileConvention ? FILE_CONVENTION_PROMPT : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
       let withSystem = payloadMessages;
       if (systemText) {
         if (capabilities && capabilities.system_role === false) {
@@ -585,7 +650,7 @@ export default function Chat() {
         tools_enabled: toolsEnabled,
       };
     },
-    [reasoning, systemPrompt, endpointUrl, apiKey, selectedModel, params, toolsEnabled, capabilities]
+    [reasoning, systemPrompt, appendFileConvention, endpointUrl, apiKey, selectedModel, params, toolsEnabled, capabilities]
   );
 
   const handleSend = useCallback(async () => {
@@ -605,7 +670,9 @@ export default function Chat() {
       content: text,
       // Se guardan todos, incluso los descartados: el historial muestra lo que
       // el usuario adjuntó, y toPayloadContent filtra por status.
-      attachments: attachments.map(({ localId, ...rest }) => rest),
+      // previewUrl NO se persiste: es un blob: local que muere con la pestaña.
+      // El mensaje guardado usa `url` (/api/chat/attachments/<id>/raw).
+      attachments: attachments.map(({ localId, previewUrl, ...rest }) => rest),
       thinking: null,
       timestamp: nowIso(),
       metrics: null,
@@ -619,6 +686,7 @@ export default function Chat() {
 
     setNodes(next);
     setInput("");
+    attachments.forEach(revokePreview);
     setAttachments([]);
 
     const payloadMessages = visiblePath(next)
@@ -626,7 +694,7 @@ export default function Chat() {
       .flatMap(toPayloadMessages);
 
     await stream.run({ request: buildRequest(payloadMessages), assistantId: ids[1] });
-  }, [input, attachments, busyWithAttachments, estimate, streaming, nodes, path, stream, buildRequest]);
+  }, [input, attachments, busyWithAttachments, estimate, streaming, nodes, path, stream, buildRequest, revokePreview]);
 
   /**
    * Editar un mensaje del usuario y reenviarlo.
@@ -774,6 +842,8 @@ export default function Chat() {
           onApiKeyChange={setApiKey}
           systemPrompt={systemPrompt}
           onSystemPromptChange={setSystemPrompt}
+          appendFileConvention={appendFileConvention}
+          onAppendFileConventionChange={setAppendFileConvention}
           params={params}
           onParamChange={(patch) => setParams((prev) => ({ ...prev, ...patch }))}
           onClear={handleClear}

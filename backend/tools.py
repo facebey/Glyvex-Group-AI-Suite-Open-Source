@@ -40,7 +40,9 @@ SEGURIDAD
 `fetch_url` recibe la URL del modelo, no del usuario, y un resultado de
 búsqueda puede intentar inyectarle una dirección interna. Por eso las
 direcciones privadas (loopback, RFC1918, link-local) se bloquean salvo que
-se habiliten explícitamente en `tools.allow_private_hosts`.
+se habiliten explícitamente en `tools.allow_private_hosts`. La validación se
+aplica a cada salto de redirección (no solo a la URL original): los
+redirects se siguen a mano, máximo 5, y cada `Location` se re-checkea.
 """
 
 from __future__ import annotations
@@ -52,7 +54,7 @@ import os
 import socket
 import time
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -516,6 +518,10 @@ def _strip_tags(html: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
+# Tope de saltos de redirección que seguimos antes de abandonar.
+MAX_REDIRECTS = 5
+
+
 async def fetch_url(url: str) -> dict[str, Any]:
     settings = _settings()
     url = (url or "").strip()
@@ -533,18 +539,52 @@ async def fetch_url(url: str) -> dict[str, Any]:
                 "el acceso a direcciones privadas está deshabilitado.",
             )
 
+    # Las redirecciones se siguen a mano (follow_redirects=False): httpx no
+    # re-valida cada `Location`, y un sitio público puede redirigir a una
+    # dirección interna (SSRF por redirección). Cada salto se re-checkea
+    # contra _host_is_private igual que la URL original.
+    current_url = url
     try:
         async with httpx.AsyncClient(
             timeout=settings["timeout_s"],
-            follow_redirects=True,
+            follow_redirects=False,
             headers={
                 "User-Agent": settings["user_agent"],
                 "Accept": "text/html,application/xhtml+xml",
             },
         ) as client:
-            res = await client.get(url)
+            res = await client.get(current_url)
+            for _ in range(MAX_REDIRECTS):
+                if not res.is_redirect:
+                    break
+                next_url = urljoin(current_url, res.headers["location"].strip())
+                next_parsed = urlparse(next_url)
+                if next_parsed.scheme not in ("http", "https") or not next_parsed.hostname:
+                    return _failure(
+                        "fetch_url",
+                        f"La redirección hacia `{next_url}` no es una URL "
+                        "http(s) válida.",
+                    )
+                if (
+                    not settings["allow_private_hosts"]
+                    and await asyncio.to_thread(_host_is_private, next_parsed.hostname)
+                ):
+                    return _failure(
+                        "fetch_url",
+                        f"La redirección apunta a `{next_parsed.hostname}`, una "
+                        "dirección de red interna, y el acceso a direcciones "
+                        "privadas está deshabilitado.",
+                    )
+                current_url = next_url
+                res = await client.get(current_url)
+            if res.is_redirect:
+                return _failure(
+                    "fetch_url",
+                    f"Demasiadas redirecciones al seguir {url} "
+                    f"(máximo {MAX_REDIRECTS}).",
+                )
     except httpx.ConnectError:
-        return _failure("fetch_url", f"No se pudo conectar a {parsed.hostname}.")
+        return _failure("fetch_url", f"No se pudo conectar a {urlparse(current_url).hostname}.")
     except (httpx.TimeoutException, httpx.HTTPError) as exc:
         return _failure("fetch_url", f"La página no respondió: {exc}")
 

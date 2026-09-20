@@ -65,3 +65,51 @@ async def test_config_persists_to_disk(client, tmp_config_dir):
 
     assert on_disk["app"]["port"] == 4242
     assert on_disk["model_dirs"] == ["/models"]
+
+
+# --------------------------------------------------------------------------
+# display y exports
+# --------------------------------------------------------------------------
+
+import json as _json  # noqa: E402
+import re as _re  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+
+def test_plantilla_predeterminada_coincide_con_el_frontend():
+    """DEFAULT_HIDDEN_METRICS (backend) == PRESETS.default (frontend/src/lib/metricsDisplay.js)."""
+    import config as config_module
+
+    js = (_Path(__file__).resolve().parent.parent / "frontend" / "src" / "lib" / "metricsDisplay.js").read_text(
+        encoding="utf-8")
+    match = _re.search(r"export const PRESETS = \{\s*default:\s*(\[[^\]]*\])", js)
+    assert match, "no se encontró PRESETS.default en metricsDisplay.js"
+    frontend_default = _json.loads(match.group(1))
+    assert frontend_default == config_module.DEFAULT_HIDDEN_METRICS
+
+    # Y todas sus claves existen en el catálogo del frontend.
+    for key in frontend_default:
+        assert f'key: "{key}"' in js
+
+
+def test_defaults_de_display_y_exports():
+    import config as config_module
+
+    data = config_module.Config().defaults()
+    assert data["display"] == {"preset": "default", "hidden": config_module.DEFAULT_HIDDEN_METRICS}
+    assert data["exports"]["prometheus_enabled"] is False
+    assert data["exports"]["influx"]["enabled"] is False
+
+
+def test_redaccion_de_secretos_en_el_log():
+    import main
+
+    red = main._redact_secrets({
+        "attachments": {"image_tokens_estimate": 1024},
+        "exports": {"prometheus_token": "t", "influx": {"token": "abc", "password": "p", "url": "http://x"}},
+        "tools": {"brave_api_key": "k", "tavily_api_key": ""},
+    })
+    assert red["attachments"]["image_tokens_estimate"] == 1024        # contiene "token" pero no es secreto
+    assert red["exports"]["prometheus_token"] == "<redactado>"
+    assert red["exports"]["influx"] == {"token": "<redactado>", "password": "<redactado>", "url": "http://x"}
+    assert red["tools"] == {"brave_api_key": "<redactado>", "tavily_api_key": ""}

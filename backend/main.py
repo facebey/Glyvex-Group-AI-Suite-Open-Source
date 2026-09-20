@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import config
+from paths import BASE_DIR, DATA_DIR, ENV_NAME
 from database import db_all_attachment_ids, init_db
 import benchmark
 import chat
@@ -25,6 +26,7 @@ import launcher
 import llm_metrics
 import logsetup
 import metrics
+import metrics_export
 import models
 import attachments
 import stt
@@ -34,20 +36,30 @@ import sys
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 APP_NAME = "Glyvex-AI-Suite"
 APP_START_MONOTONIC = time.monotonic()
 
 logger = logging.getLogger("glyvex.app")
 
 
+# Campos cuyo valor no se escribe en el log. Se compara por nombre de campo
+# (exacto o terminado en _<nombre>), no por substring: "image_tokens_estimate"
+# contiene "token" y no es un secreto.
+_SECRET_FIELDS = ("api_key", "token", "password")
+
+
+def _is_secret_field(key: object) -> bool:
+    name = str(key).lower()
+    return any(name == f or name.endswith("_" + f) for f in _SECRET_FIELDS)
+
+
 def _redact_secrets(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            k: "<redactado>" if "api_key" in str(k).lower() else _redact_secrets(v)
+            k: "<redactado>" if _is_secret_field(k) and v else _redact_secrets(v)
             for k, v in value.items()
         }
     if isinstance(value, list):
@@ -60,16 +72,21 @@ async def lifespan(app: FastAPI):
     logs_dir = logsetup.setup()
     await config.load()
     await init_db()
-    # Poller de métricas en segundo plano: guarda histórico en data/metrics.db
-    # aunque el Monitor no esté abierto (ver metrics.MetricsManager.start).
+    # Exportador a InfluxDB antes que los pollers: ellos le encolan ventanas.
+    await metrics_export.exporter.start()
+    # Poller de métricas en segundo plano: guarda histórico en
+    # <DATA_DIR>/metrics.db aunque el Monitor no esté abierto
+    # (ver metrics.MetricsManager.start).
     await metrics.manager.start()
     # Métricas de llama-server (/metrics): después de metrics.manager.start()
-    # porque escriben en el mismo store de data/metrics.db.
+    # porque escriben en el mismo store (<DATA_DIR>/metrics.db).
     await llm_metrics.manager.start()
     logger.info(
-        "arranque: version=%s puerto=%s logs=%s",
+        "arranque: version=%s entorno=%s puerto=%s data=%s logs=%s",
         APP_VERSION,
+        ENV_NAME,
         os.environ.get("GLYVEX_PORT", "7981"),
+        DATA_DIR,
         logs_dir,
     )
 
@@ -88,15 +105,42 @@ async def lifespan(app: FastAPI):
     await config.save()
     await llm_metrics.manager.stop()
     await metrics.manager.stop()
+    # Último: los managers encolan sus ventanas pendientes al detenerse.
+    await metrics_export.exporter.stop()
     await launcher.manager.shutdown()
     stt.unload_model()
 
 
 app = FastAPI(title="Glyvex-AI-Suite", version=APP_VERSION, lifespan=lifespan)
 
+def _cors_origins() -> list[str]:
+    """
+    Orígenes permitidos, desde GLYVEX_CORS_ORIGINS (lista separada por comas).
+
+    Cada instancia sirve su frontend en un puerto distinto, así que la lista no
+    puede ser fija. El default mantiene el valor histórico para que una
+    instalación que no setea la variable siga funcionando igual que antes.
+
+    "*" se acepta pero se avisa: con allow_credentials=True los navegadores
+    rechazan esa combinación, así que es casi siempre un error de
+    configuración y conviene que quede en el log en vez de fallar en silencio
+    desde el browser.
+    """
+    raw = os.environ.get("GLYVEX_CORS_ORIGINS", "").strip()
+    if not raw:
+        return ["http://localhost:5173"]
+    origins = [item.strip() for item in raw.split(",") if item.strip()]
+    if "*" in origins:
+        logger.warning(
+            "GLYVEX_CORS_ORIGINS='*' junto con allow_credentials=True: los "
+            "navegadores rechazan esa combinación. Listá los orígenes."
+        )
+    return origins or ["http://localhost:5173"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -172,6 +216,7 @@ api_router.include_router(launcher.router, prefix="/launcher", tags=["launcher"]
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(benchmark.router, prefix="/benchmark", tags=["benchmark"])
 api_router.include_router(metrics.router, prefix="/metrics", tags=["metrics"])
+api_router.include_router(metrics_export.router, prefix="/metrics", tags=["metrics-export"])
 api_router.include_router(llm_metrics.router, prefix="/llm-metrics", tags=["llm-metrics"])
 api_router.include_router(stt.router, prefix="/stt", tags=["stt"])
 

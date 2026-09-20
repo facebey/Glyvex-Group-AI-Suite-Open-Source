@@ -33,22 +33,51 @@ function formatSize(bytes) {
 function MessageAttachments({ attachments }) {
   if (!attachments || attachments.length === 0) return null;
 
-  const images = attachments.filter((a) => a.kind === "image" && a.url && a.status === "ready");
+  // Se muestra la miniatura de toda imagen que tenga archivo servible, no
+  // solo de las que se enviaron al modelo: si quedó en vision_unsupported,
+  // el usuario igual la adjuntó y quiere verla (con el aviso de que no se
+  // mandó). Antes se exigía status === "ready", y como el backend solo
+  // devolvía `url` en ese caso, la miniatura no aparecía nunca.
+  const images = attachments.filter(
+    (a) => a.kind === "image" && a.url && a.status !== "error"
+  );
   const rest = attachments.filter((a) => !images.includes(a));
 
   return (
     <div className="flex flex-col gap-1.5 mb-1.5 w-full">
       {images.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {images.map((a) => (
-            <a key={a.id} href={a.url} target="_blank" rel="noreferrer" title={a.filename}>
-              <img
-                src={a.url}
-                alt={a.filename}
-                className="h-24 w-24 object-cover rounded-md border border-white/10"
-              />
-            </a>
-          ))}
+          {images.map((a) => {
+            const skipped = a.status === "vision_unsupported";
+            return (
+              <a
+                key={a.id}
+                href={a.url}
+                target="_blank"
+                rel="noreferrer"
+                title={skipped ? `${a.filename} — no se envió al modelo` : a.filename}
+                className="relative block"
+              >
+                <img
+                  src={a.url}
+                  alt={a.filename}
+                  loading="lazy"
+                  className={
+                    "h-24 w-24 object-cover rounded-md border " +
+                    (skipped ? "border-amber-500/40 opacity-50" : "border-white/10")
+                  }
+                />
+                {skipped && (
+                  <span
+                    className="absolute bottom-1 right-1 p-0.5 rounded bg-black/70 text-amber-300"
+                    title="El modelo activo no acepta imágenes: no se envió"
+                  >
+                    <EyeOff size={12} />
+                  </span>
+                )}
+              </a>
+            );
+          })}
         </div>
       )}
 

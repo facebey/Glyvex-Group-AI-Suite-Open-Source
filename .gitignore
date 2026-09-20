@@ -20,6 +20,9 @@ frontend/dist/
 distribution/oss-clone/
 
 # Data / logs (no commitear datos locales)
+# Instancias alternativas: environments/<nombre>.env define GLYVEX_DATA_DIR,
+# y por convención esos directorios se llaman data-<algo> (data-testing, etc).
+data-*/
 data/config.json
 data/models.json
 data/models_schema_version.json
@@ -37,3 +40,6 @@ Thumbs.db
 # IDE
 .vscode/settings.json
 .idea/
+
+# Documentacion local (solo en disco, no versionar)
+AGENTS.md

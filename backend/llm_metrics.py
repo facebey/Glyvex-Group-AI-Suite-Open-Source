@@ -9,8 +9,9 @@ Mismo esqueleto que metrics.py:
 - Buffer circular deque(maxlen=300) por process_id.
 - WS /api/llm-metrics/{process_id}/stream emite los snapshots de ese proceso.
 - Con `manager.start()` (lifespan de main.py) el poller corre en segundo
-  plano aunque nadie mire, y guarda histórico en data/metrics.db a través del
-  store de metrics_store.py (scope="llm", separado por process_id). Sin start()
+   plano aunque nadie mire, y guarda histórico en <DATA_DIR>/metrics.db a
+   través del store de metrics_store.py (scope="llm", separado por
+   process_id). Sin start()
   (tests) corre solo mientras haya clientes WS, como antes.
 
 Particularidades de llama-server que definen el cálculo:
@@ -53,6 +54,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 import metrics as hw_metrics
+import metrics_export
 from launcher import ProcessInfo
 from launcher import manager as launcher_manager
 
@@ -69,6 +71,14 @@ MAX_TRACKED_PROCESSES = 64
 POLL_INTERVAL_S = 1.0
 BACKGROUND_INTERVAL_S = 5.0
 SCRAPE_TIMEOUT = httpx.Timeout(connect=1.0, read=1.5, write=1.0, pool=1.0)
+# El selector del Monitor solo lista procesos guardados que duraron al menos
+# esto: un arranque que vivió 30 segundos no merece una entrada en la lista.
+MIN_STORED_LIFETIME_S = 120
+# Proceso muerto que duró menos de esto: se borra del histórico (metrics.db).
+# Fueron pruebas de arranque y sus series solo generan basura.
+PURGE_SHORT_LIFETIME_S = 300
+# Tope de procesos guardados que muestra el selector (más recientes primero).
+MAX_STORED_PROCESSES = 10
 
 # Series que se guardan en metrics.db (scope="llm") y su unidad.
 PERSISTED_UNITS: dict[str, str] = {
@@ -164,6 +174,12 @@ class LlmMetricsSnapshot(BaseModel):
     # Decodificación especulativa (MTP/draft): % de tokens propuestos aceptados.
     spec_accept_pct: float | None = None
     spec_accept_pct_total: float | None = None
+
+    # Última velocidad de generación medida y cuándo, aunque haya sido hace
+    # rato: con el servidor ocioso tg_tps es null y la tira necesita algo que
+    # mostrar sin depender de cuántos snapshots entren en un buffer.
+    tg_tps_last: float | None = None
+    tg_tps_last_at: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -370,6 +386,14 @@ def flatten_llm_snapshot(snap: LlmMetricsSnapshot) -> dict[str, float]:
     return out
 
 
+def describe_slots_status(status: int) -> str:
+    if status == 501:
+        return "HTTP 501: /slots deshabilitado (llama-server con --no-slots)"
+    if status in (401, 403):
+        return f"HTTP {status}: rechazó el API key"
+    return f"HTTP {status}"
+
+
 def scrape_host(host: str) -> str:
     # Un servidor escuchando en todas las interfaces se consulta por loopback.
     return "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
@@ -407,6 +431,15 @@ class LlmMetricsManager:
         # Se crea dentro de _loop(): un Event queda atado al event loop que lo
         # usa primero, y en los tests cada test corre en un loop distinto.
         self._wake: asyncio.Event | None = None
+        # Última tg medida por proceso: (valor, timestamp ISO).
+        self._last_tg: dict[str, tuple[float, str]] = {}
+        # Último estado de /slots por proceso (None = OK) para loguear solo
+        # los cambios y no una línea por lectura.
+        self._slots_status: dict[str, str | None] = {}
+        # Primer/último contacto con cada proceso (time.time()): con eso se
+        # mide cuánto duró, para no llenar el Monitor de pruebas de arranque.
+        self._first_seen: dict[str, float] = {}
+        self._last_seen: dict[str, float] = {}
 
     # -- procesos a leer --------------------------------------------------------
 
@@ -429,15 +462,25 @@ class LlmMetricsManager:
         values: dict[str, float] | None = None
         error: str | None = None
         slots: dict[str, int] | None = None
+        slots_problem: str | None = None
         client = self._client or httpx.AsyncClient(timeout=SCRAPE_TIMEOUT)
 
-        async def get_slots() -> dict[str, int] | None:
-            # Opcional: sin /slots (--no-slots, 501, formato distinto) sigue el pico.
+        async def get_slots() -> tuple[dict[str, int] | None, str | None]:
+            # Opcional: sin /slots (--no-slots, 501, formato distinto) sigue el
+            # pico. Devuelve también el motivo si falla, para el log.
             try:
                 res = await client.get(url.rsplit("/", 1)[0] + "/slots", headers=headers)
-                return parse_slots(res.json()) if res.status_code == 200 else None
-            except (httpx.HTTPError, ValueError):
-                return None
+            except httpx.HTTPError as exc:
+                return None, f"{type(exc).__name__}: {exc}"
+            if res.status_code != 200:
+                return None, describe_slots_status(res.status_code)
+            try:
+                parsed = parse_slots(res.json())
+            except ValueError:
+                return None, "respuesta que no es JSON"
+            if parsed is None:
+                return None, "formato inesperado (¿cambió en este build de llama-server?)"
+            return parsed, None
 
         try:
             # return_exceptions: las dos lecturas terminan siempre antes de
@@ -445,7 +488,10 @@ class LlmMetricsManager:
             metrics_res, slots_res = await asyncio.gather(
                 client.get(url, headers=headers), get_slots(), return_exceptions=True
             )
-            slots = slots_res if isinstance(slots_res, dict) else None
+            if isinstance(slots_res, tuple):
+                slots, slots_problem = slots_res
+            else:
+                slots, slots_problem = None, f"{type(slots_res).__name__}: {slots_res}"
             if isinstance(metrics_res, httpx.HTTPError):
                 error = describe_scrape_error(None, metrics_res)
             elif isinstance(metrics_res, BaseException):
@@ -465,7 +511,39 @@ class LlmMetricsManager:
             rates = dict(EMPTY_RATES)
         else:
             rates = self.rates.update(info.process_id, values, wall)
-        return build_snapshot(info, values, rates, error, slots)
+            # Solo con /metrics OK: si el servidor no responde, ese error ya
+            # se informa y /slots fallaría por lo mismo.
+            self.note_slots_status(info.process_id, slots_problem)
+        snap = build_snapshot(info, values, rates, error, slots)
+        self.apply_last_tg(snap)
+        return snap
+
+    def apply_last_tg(self, snap: LlmMetricsSnapshot) -> None:
+        if snap.tg_tps is not None:
+            self._last_tg[snap.process_id] = (snap.tg_tps, snap.timestamp)
+        last = self._last_tg.get(snap.process_id)
+        if last is not None:
+            snap.tg_tps_last, snap.tg_tps_last_at = last
+
+    def note_slots_status(self, process_id: str, problem: str | None) -> bool:
+        """
+        Loguea cuando /slots empieza a fallar o cambia el motivo, y cuando se
+        recupera. Devuelve True si escribió en el log. Sin esto el fallo era
+        silencioso: la tira mostraba el pico y no había forma de saber por qué.
+        """
+        previous = self._slots_status.get(process_id, None)
+        known = process_id in self._slots_status
+        self._slots_status[process_id] = problem
+        if problem is not None and problem != previous:
+            logger.warning(
+                "no se pudo leer /slots del proceso %s (%s): el contexto actual queda "
+                "vacío y se muestra el pico", process_id, problem,
+            )
+            return True
+        if problem is None and known and previous is not None:
+            logger.info("/slots del proceso %s vuelve a responder", process_id)
+            return True
+        return False
 
     def _evict_if_full(self, d: dict, name: str) -> None:
         while len(d) >= MAX_TRACKED_PROCESSES:
@@ -479,6 +557,85 @@ class LlmMetricsManager:
         buf.append(snap)
         self._evict_if_full(self._models, "_models")
         self._models[snap.process_id] = snap.model_name
+        now = time.time()
+        self._first_seen.setdefault(snap.process_id, now)
+        self._last_seen[snap.process_id] = now
+
+    # -- limpieza de procesos muertos -------------------------------------------
+
+    @staticmethod
+    def _is_dead(process_id: str) -> bool:
+        info = launcher_manager.status(process_id)
+        return info is None or info.state in ("stopped", "error")
+
+    def _forget_process(self, process_id: str) -> None:
+        self.buffers.pop(process_id, None)
+        self._models.pop(process_id, None)
+        self._aggregators.pop(process_id, None)
+        self.rates.forget(process_id)
+        self._last_tg.pop(process_id, None)
+        self._slots_status.pop(process_id, None)
+        self._first_seen.pop(process_id, None)
+        self._last_seen.pop(process_id, None)
+
+    async def _cleanup_dead(self) -> None:
+        """
+        Suelta de memoria los procesos que ya no corren y borra del histórico
+        los que duraron un momento (pruebas de arranque): sin esto cada
+        arranque muerto dejaba series en metrics.db y una entrada permanente
+        en el selector del Monitor.
+        """
+        live = {p.process_id for p in self.targets()}
+        store = hw_metrics.manager.store
+        for process_id in list(self._first_seen):
+            if process_id in live or not self._is_dead(process_id):
+                continue
+            lifetime = self._last_seen.get(process_id, 0.0) - self._first_seen[process_id]
+            if store is not None and lifetime < PURGE_SHORT_LIFETIME_S:
+                try:
+                    deleted = await asyncio.to_thread(store.delete_process, process_id)
+                    logger.info(
+                        "proceso corto %s (%.0f s): %d series borradas del histórico",
+                        process_id, lifetime, deleted,
+                    )
+                except Exception as exc:  # noqa: BLE001 — la limpieza no corta el poller
+                    logger.warning("no se pudo borrar del histórico el proceso %s: %s", process_id, exc)
+            self._forget_process(process_id)
+
+    async def _purge_leftovers(self) -> None:
+        """
+        Procesos cortos dejados por sesiones anteriores: el poller solo conoce
+        los que vio en esta sesión, así que al arrancar se recorre el
+        histórico y se borran los que duraron un momento.
+        """
+        store = hw_metrics.manager.store
+        if store is None:
+            return
+        try:
+            series = await asyncio.to_thread(store.list_series, "llm")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("no se pudo revisar el histórico al arrancar: %s", exc)
+            return
+        live = {p.process_id for p in self.targets()}
+        bounds: dict[str, list[int]] = {}
+        for s in series:
+            pid = s["process_id"]
+            if not pid:
+                continue
+            values = [v for v in (s["first_ts"], s["last_ts"]) if v is not None]
+            if not values:
+                continue
+            bound = bounds.setdefault(pid, [min(values), max(values)])
+            bound[0] = min(bound[0], min(values))
+            bound[1] = max(bound[1], max(values))
+        for pid, (first, last) in bounds.items():
+            if pid in live or last - first >= PURGE_SHORT_LIFETIME_S:
+                continue
+            try:
+                deleted = await asyncio.to_thread(store.delete_process, pid)
+                logger.info("proceso corto de sesión anterior %s: %d series borradas", pid, deleted)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("no se pudo borrar del histórico el proceso %s: %s", pid, exc)
 
     async def poll_once(self) -> list[LlmMetricsSnapshot]:
         targets = self.targets()
@@ -524,8 +681,8 @@ class LlmMetricsManager:
     # -- persistencia -------------------------------------------------------------
 
     async def _persist(self, snaps: list[LlmMetricsSnapshot], now: float) -> None:
-        store = hw_metrics.manager.store
-        if store is None:
+        # Las ventanas se arman si hay a dónde mandarlas: histórico o InfluxDB.
+        if hw_metrics.manager.store is None and not metrics_export.exporter.enabled():
             return
         self._evict_if_full(self._aggregators, "_aggregators")
         for snap in snaps:
@@ -535,14 +692,19 @@ class LlmMetricsManager:
 
     async def _flush(self, now: float, *, force: bool) -> None:
         store = hw_metrics.manager.store
-        if store is None:
-            return
         for process_id, agg in list(self._aggregators.items()):
             closed = agg.pop_closed(now, force=force)
-            if closed:
+            if not closed:
+                continue
+            model_name = self._models.get(process_id)
+            metrics_export.exporter.enqueue(
+                closed, scope="llm", units=PERSISTED_UNITS,
+                process_id=process_id, model_name=model_name,
+            )
+            if store is not None:
                 await asyncio.to_thread(
                     store.write_raw, closed, scope="llm", units=PERSISTED_UNITS,
-                    process_id=process_id, model_name=self._models.get(process_id),
+                    process_id=process_id, model_name=model_name,
                 )
         # Procesos que ya no se leen y no tienen ventanas abiertas: se sueltan.
         live = {p.process_id for p in self.targets()}
@@ -564,6 +726,7 @@ class LlmMetricsManager:
                         await self._broadcast(snap)
                     if self._running:
                         await self._persist(snaps, time.time())
+                        await self._cleanup_dead()
                 except Exception as exc:  # noqa: BLE001 — un error no corta el poller
                     logger.warning("error leyendo métricas de llama-server: %s", exc)
                 elapsed = time.monotonic() - started
@@ -598,6 +761,7 @@ class LlmMetricsManager:
         if self._running:
             return
         self._running = True
+        await self._purge_leftovers()
         self._ensure_loop()
         logger.info("poller de métricas de llama-server iniciado")
 
@@ -631,7 +795,11 @@ router = APIRouter()
 async def list_processes() -> dict[str, Any]:
     """
     Procesos para el selector del Monitor: los que están corriendo ahora y los
-    que tienen histórico guardado (aunque ya no existan).
+    que tienen histórico guardado (aunque ya no existan), con tope de
+    MAX_STORED_PROCESSES (más recientes primero). Con la lista saturada se
+    descarta además a los procesos que solo dejaron un momento de muestras
+    (menos de MIN_STORED_LIFETIME_S): pruebas de arranque que sin eso dejarían
+    una entrada permanente por cada intento.
     """
     live = [
         {"process_id": p.process_id, "model_name": p.model_name, "state": p.state,
@@ -651,7 +819,14 @@ async def list_processes() -> dict[str, Any]:
                 values = [v for v in (entry[bound], s[bound]) if v is not None]
                 entry[bound] = pick(values) if values else None
     ordered = sorted(stored.values(), key=lambda e: e["last_ts"] or 0, reverse=True)
-    return {"live": live, "stored": ordered}
+    if len(ordered) > MAX_STORED_PROCESSES:
+        ordered = [
+            e for e in ordered
+            if e["first_ts"] is not None
+            and e["last_ts"] is not None
+            and e["last_ts"] - e["first_ts"] >= MIN_STORED_LIFETIME_S
+        ]
+    return {"live": live, "stored": ordered[:MAX_STORED_PROCESSES]}
 
 
 @router.get("/{process_id}/history", response_model=list[LlmMetricsSnapshot])

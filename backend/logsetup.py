@@ -12,9 +12,9 @@ from __future__ import annotations
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from paths import DATA_DIR
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-LOGS_DIR = BASE_DIR / "data" / "logs"
+LOGS_DIR = DATA_DIR / "logs"
 
 MAX_BYTES = 5 * 1024 * 1024
 BACKUP_COUNT = 3
