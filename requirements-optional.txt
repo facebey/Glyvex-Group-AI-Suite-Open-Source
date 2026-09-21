@@ -11,4 +11,4 @@
 #   - querés dictado que NO salga a internet, o
 #   - vas a usar la app dentro del bundle de Tauri, donde el WebView no
 #     expone la Web Speech API y este es el único motor que funciona.
-faster-whisper>=1.0
+faster-whisper>=1.2.1
