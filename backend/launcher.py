@@ -280,10 +280,12 @@ class LaunchConfig(BaseModel):
     # auto-reducir lo que haga falta (ctx incluido). Ideal para una app que
     # carga modelos arbitrarios sin conocer su tamaño de antemano.
     fit_target_mib: int | None = 0       # --fit-target (0 = off)
-    # --fit on: llama.cpp ajusta los argumentos que el usuario NO fijó para
-    # caber en la memoria del dispositivo (default de b11009: on). None = no
-    # se emite el flag (default de la build).
-    fit: bool | None = True              # --fit on
+    # --fit [on|off]: llama.cpp ajusta los argumentos que el usuario NO fijó
+    # para caber en la memoria del dispositivo (default de b11009: on).
+    # True -> --fit on, False -> --fit off (enviar el flag es obligatorio:
+    # si falta, la build usa su default 'on' y fit queda activo igual).
+    # None = no se emite el flag (modo manual).
+    fit: bool | None = True              # --fit on|off
 
     # -- Optimizaciones avanzadas ---------------------------------------
     numa: bool = False
@@ -769,8 +771,13 @@ def build_llama_server_command(
         cmd += ["--checkpoint-min-step", str(cfg.checkpoint_min_step)]
     if cfg.cache_ram_mib is not None:
         cmd += ["--cache-ram", str(cfg.cache_ram_mib)]
+    # fit: el flag es on|off y el default de la build es 'on', así que faltar
+    # no lo apaga. False -> --fit off explícito; True -> --fit on; None -> no
+    # se emite (modo manual, la build usa su default).
     if cfg.fit is True:
         cmd += ["--fit", "on"]
+    elif cfg.fit is False:
+        cmd += ["--fit", "off"]
     if cfg.fit_target_mib is not None and cfg.fit_target_mib > 0:
         cmd += ["--fit-target", str(cfg.fit_target_mib)]
     if cfg.kv_unified:

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import i18n from "../lib/i18n.js";
 
 /** El primero que el navegador acepte. Chrome da webm/opus, Safari mp4. */
 const PREFERRED_MIME_TYPES = [
@@ -61,10 +62,10 @@ export function useAudioRecorder({ onError } = {}) {
     } catch (err) {
       const message =
         err.name === "NotAllowedError"
-          ? "Falta permiso para usar el micrófono."
+          ? i18n.t("mic.permission")
           : err.name === "NotFoundError"
-            ? "No se encontró ningún micrófono."
-            : "No se pudo acceder al micrófono.";
+            ? i18n.t("mic.notFound")
+            : i18n.t("mic.access");
       onErrorRef.current?.(message);
       return;
     }

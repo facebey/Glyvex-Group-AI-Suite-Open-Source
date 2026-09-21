@@ -12,13 +12,11 @@ llama-server, Ollama, LM Studio) sin depender de ningún servicio en la nube.
 Todo corre en tu propia máquina: el inventario de modelos, los procesos, las
 conversaciones y los benchmarks quedan en tu disco.
 
-Optimizada para **GPU NVIDIA (CUDA)** — se desarrolló en una estación de
-trabajo con RTX 3090 (24GB) + Intel i9-12900K (16 cores) + 64GB RAM sobre
-Linux — pero no es requisito: corre en CPU pura en cualquier máquina
-moderna, la GPU solo acelera los modelos grandes, y los templates de
-hardware del Launcher ajustan la carga a lo que la máquina tiene. Sin GPU
-NVIDIA, el Monitor y el Launcher degradan de forma segura (ver sección de
-Módulos).
+Optimizada para **GPU NVIDIA (CUDA)**, pero no es un requisito: corre en
+CPU pura en cualquier máquina moderna, la GPU solo acelera los modelos
+grandes, y los templates de hardware del Launcher ajustan la carga a lo
+que la máquina tiene. Sin GPU NVIDIA, el Monitor y el Launcher degradan
+de forma segura (ver sección de Módulos).
 
 **Sitio de producto:** [ai-suite.glyvexgroup.com](https://ai-suite.glyvexgroup.com/) — [División Glyvex AI](https://ai.glyvexgroup.com/)
 
@@ -45,7 +43,15 @@ Módulos).
 - Al menos uno de estos backends de inferencia instalado aparte, según qué
   vayas a usar: [`llama-server`](https://github.com/ggml-org/llama.cpp)
   (de llama.cpp), [Ollama](https://ollama.com), o [LM Studio](https://lmstudio.ai)
-  corriendo en modo servidor.
+   corriendo en modo servidor.
+
+## Plataformas
+
+| Plataforma | Estado | Notas |
+|---|---|---|
+| **Windows** | ✅ Desarrollo y pruebas | Scripts `start.cmd` (CMD) y `start.ps1` (PowerShell). |
+| **Linux** | ⏳ Próximamente | `start.sh` ya existe; el soporte formal (pruebas completas y CI) está en el roadmap. |
+| **macOS** | ⏳ Próximamente | Usa el mismo `start.sh`; no se prueba en el ciclo actual. |
 
 ## Instalación
 
@@ -237,19 +243,20 @@ El chat expone al modelo dos herramientas, invocadas de forma nativa vía
 - `GET /api/chat/tools/status` informa al frontend qué proveedores están
   activos.
 
-## Docs
+## Documentación
 
-- [`docs/modulos.md`](docs/modulos.md) — detalle técnico por módulo (M0–M8).
-- [`docs/launcher-params.md`](docs/launcher-params.md) — referencia de
-  parámetros de lanzamiento de `llama-server` (los que maneja el Launcher).
-- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — problemas
-  frecuentes y cómo resolverlos.
-- [`docs/voz-a-texto.md`](docs/voz-a-texto.md) — micrófono del chat: Web
-  Speech API vs Whisper local, modelos disponibles, seguridad y
-  empaquetado con Tauri.
-- [`docs/searxng/README.md`](docs/searxng/README.md) — proveedores de
-  búsqueda web (DuckDuckGo, SearXNG, Brave, Tavily), configuración de
-  `tools.*` y diagnóstico.
+| A dónde ir | Qué vas a encontrar |
+|---|---|
+| [README](README.md) | Panorama completo: módulos (M0–M8), instalación, uso, seguridad y release. |
+| [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | El camino más corto a tenerla corriendo: prerrequisitos, install, arranque y primera vez. |
+| [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Mapa del código: procesos, flujos de datos y dónde vive el estado. |
+| [`docs/PRIVACIDAD.md`](docs/PRIVACIDAD.md) | Qué sale de la máquina y qué no: 100% local, sin telemetría saliente. |
+| [`docs/modulos.md`](docs/modulos.md) | Detalle técnico por módulo (M0–M8). |
+| [`docs/launcher-params.md`](docs/launcher-params.md) | Referencia de parámetros de lanzamiento de `llama-server` (los que maneja el Launcher). |
+| [`docs/voz-a-texto.md`](docs/voz-a-texto.md) | Micrófono del chat: Web Speech API vs Whisper local, modelos, seguridad y empaquetado. |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Problemas frecuentes y cómo resolverlos. |
+| [`docs/searxng/README.md`](docs/searxng/README.md) | Proveedores de búsqueda web (DuckDuckGo, SearXNG, Brave, Tavily) y `tools.*`. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Cómo contribuir: ramas, commits, tests y conventions. |
 
 ## Seguridad
 
@@ -268,8 +275,8 @@ El chat expone al modelo dos herramientas, invocadas de forma nativa vía
   solo en tu máquina.
 - El servidor escucha en `127.0.0.1` por defecto (app local, sin
   autenticación). Para exponerlo a la red hay que pasarlo a propósito:
-  `GLYVEX_HOST=0.0.0.0 ./start.sh` — y en ese caso, **no lo hagas sin
-  autenticación** (ítem I5 del plan de bugs).
+   `GLYVEX_HOST=0.0.0.0 ./start.sh` — y en ese caso, **no lo hagas sin
+   autenticación**.
 - `log_file` del launcher validado contra path traversal (400 si queda
   fuera de `BASE_DIR`).
 
@@ -285,10 +292,11 @@ El chat expone al modelo dos herramientas, invocadas de forma nativa vía
 - [x] **M7** — Base de datos SQLite (conversaciones, benchmarks, templates, sets)
 - [x] **M8** — Vitales del LLM server (Prometheus `/metrics`, histórico en `metrics.db`)
 - [ ] Soporte para GPU AMD (el stack es hoy optimizado para NVIDIA/CUDA)
+- [ ] Soporte formal para Linux (y macOS): pruebas completas y CI
 
 ## Tests
 
-Suite de tests automatizados (pytest + pytest-asyncio + httpx, 296 tests,
+Suite de tests automatizados (pytest + pytest-asyncio + httpx, 297 tests,
 sin unittest, sin requests, sin GPU/modelos/red real — todo mockeado: mock
 LLM server uvicorn en `:18080`, binarios fake, SQLite en memoria):
 

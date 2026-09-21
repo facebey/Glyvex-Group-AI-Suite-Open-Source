@@ -1,7 +1,7 @@
 {
   "name": "glyvex-ai-suite-frontend",
   "private": true,
-  "version": "0.4.2",
+  "version": "0.4.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,9 +10,11 @@
   },
   "dependencies": {
     "highlight.js": "^11.9.0",
+    "i18next": "^26.4.2",
     "lucide-react": "^0.400.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
+    "react-i18next": "^17.0.14",
     "react-markdown": "^9.0.1",
     "react-router-dom": "^7.18.3",
     "recharts": "^2.12.0",

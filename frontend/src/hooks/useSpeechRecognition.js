@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import i18n from "../lib/i18n.js";
 
 /** El constructor está sin prefijar en algunos motores y con webkit- en otros. */
 function getRecognitionCtor() {
@@ -8,12 +9,13 @@ function getRecognitionCtor() {
 
 export const browserSpeechSupported = () => Boolean(getRecognitionCtor());
 
-const ERROR_MESSAGES = {
-  "not-allowed": "Falta permiso para usar el micrófono.",
-  "service-not-allowed": "El navegador bloqueó el servicio de reconocimiento.",
-  "no-speech": "No se escuchó nada.",
-  "audio-capture": "No se encontró ningún micrófono.",
-  network: "El servicio de reconocimiento no está disponible sin conexión.",
+// Valores = claves i18n (ver locales/es.json y en.json); null no es error.
+const ERROR_KEYS = {
+  "not-allowed": "mic.permission",
+  "service-not-allowed": "speech.serviceBlocked",
+  "no-speech": "speech.noSpeech",
+  "audio-capture": "mic.notFound",
+  network: "speech.network",
   aborted: null, // cancelación del usuario, no es error
 };
 
@@ -73,9 +75,9 @@ export function useSpeechRecognition({ language = "es-AR", onError } = {}) {
     };
 
     recognition.onerror = (event) => {
-      const message = ERROR_MESSAGES[event.error];
-      if (message !== null) {
-        onErrorRef.current?.(message || `Error de reconocimiento: ${event.error}`);
+      const key = ERROR_KEYS[event.error];
+      if (key !== null) {
+        onErrorRef.current?.(i18n.t(key || "speech.unknown", { error: event.error }));
       }
     };
 
@@ -95,7 +97,7 @@ export function useSpeechRecognition({ language = "es-AR", onError } = {}) {
       setRecording(true);
     } catch (err) {
       recognitionRef.current = null;
-      onErrorRef.current?.("No se pudo iniciar el dictado.");
+      onErrorRef.current?.(i18n.t("speech.startError"));
     }
   }, [language]);
 

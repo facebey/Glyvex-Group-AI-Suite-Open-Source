@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -33,11 +34,11 @@ export function streamPhase({ message, metrics, tools }) {
   return "prompt";
 }
 
-const LABELS = {
-  prompt: "Leyendo el mensaje",
-  thinking: "Pensando",
-  tool_prep: "Preparando una búsqueda",
-  analyzing: "Analizando los resultados",
+const LABEL_KEYS = {
+  prompt: "stream.prompt",
+  thinking: "stream.thinking",
+  tool_prep: "stream.toolPrep",
+  analyzing: "stream.analyzing",
 };
 
 function useElapsedSeconds(resetKey) {
@@ -71,6 +72,7 @@ export function formatSeconds(seconds) {
  * "Pensando 12 s" dice cuánto lleva pensando, que es lo que uno quiere saber.
  */
 export default function StreamStatus({ phase }) {
+  const { t } = useTranslation();
   const seconds = useElapsedSeconds(phase);
   if (!phase || phase === "writing" || phase === "tools") return null;
 
@@ -86,7 +88,7 @@ export default function StreamStatus({ phase }) {
       }
     >
       <Loader2 size={14} className="animate-spin shrink-0 motion-reduce:animate-none" />
-      <span>{LABELS[phase]}</span>
+      <span>{t(LABEL_KEYS[phase])}</span>
       {seconds >= 1 && <span className="tabular-nums opacity-70">{seconds} s</span>}
     </div>
   );

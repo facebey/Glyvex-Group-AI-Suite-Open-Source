@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Search, Globe, ChevronRight, Check, AlertTriangle, Loader2 } from "lucide-react";
 
 function hostOf(url) {
@@ -14,14 +15,14 @@ function iconFor(name) {
 }
 
 /** Qué está haciendo la tool, en palabras del usuario y no del protocolo. */
-function describe(entry) {
+function describe(entry, t) {
   if (entry.name === "web_search") {
     const query = entry.arguments?.query;
-    return query ? `Buscando: ${query}` : "Buscando en la web";
+    return query ? t("tools.searching", { query }) : t("tools.searchingWeb");
   }
   if (entry.name === "fetch_url") {
     const url = entry.arguments?.url;
-    return url ? `Leyendo ${hostOf(url)}` : "Leyendo una página";
+    return url ? t("tools.reading", { host: hostOf(url) }) : t("tools.readingPage");
   }
   return entry.name;
 }
@@ -32,6 +33,7 @@ function describe(entry) {
  * llega la respuesta final y se reemplaza por ToolSummary.
  */
 export function ToolActivityLive({ entries }) {
+  const { t } = useTranslation();
   if (!entries || entries.length === 0) return null;
 
   return (
@@ -55,7 +57,7 @@ export function ToolActivityLive({ entries }) {
             )}
             <Icon size={13} className="shrink-0" />
             <span className="truncate min-w-0">
-              {done && entry.summary ? entry.summary : describe(entry)}
+              {done && entry.summary ? entry.summary : describe(entry, t)}
             </span>
           </div>
         );
@@ -70,6 +72,7 @@ export function ToolActivityLive({ entries }) {
  * buscado perdería las fuentes.
  */
 export default function ToolSummary({ activity }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   if (!activity || activity.length === 0) return null;
 
@@ -93,8 +96,8 @@ export default function ToolSummary({ activity }) {
           <Search size={13} className="shrink-0" />
         )}
         <span>
-          {activity.length} búsqueda(s) en la web
-          {sources.length > 0 ? ` · ${sources.length} fuente(s)` : ""}
+          {t("tools.searches", { count: activity.length })}
+          {sources.length > 0 ? t("tools.sources", { count: sources.length }) : ""}
         </span>
       </button>
 
@@ -106,7 +109,7 @@ export default function ToolSummary({ activity }) {
               <div key={entry.id} className="text-xs">
                 <div className="flex items-center gap-1.5 text-glyvex-text">
                   <Icon size={12} className="shrink-0 text-glyvex-muted" />
-                  <span>{describe(entry)}</span>
+                  <span>{describe(entry, t)}</span>
                 </div>
                 {entry.summary && (
                   <p className={"pl-5 " + (entry.ok ? "text-glyvex-muted" : "text-amber-400")}>

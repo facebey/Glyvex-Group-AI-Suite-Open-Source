@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Loader2 } from "lucide-react";
 import { formatSeconds } from "./StreamStatus.jsx";
+import { useTranslation } from "react-i18next";
 
 /**
  * Panel colapsable con el razonamiento de una respuesta (reasoning_content o
@@ -11,6 +12,7 @@ import { formatSeconds } from "./StreamStatus.jsx";
  * Al terminar muestra cuánto duró, calculado con las métricas del mensaje.
  */
 export default function ThinkingPanel({ thinking, active = false, durationSeconds = null, defaultOpen = false }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(defaultOpen);
   const bodyRef = useRef(null);
 
@@ -23,10 +25,10 @@ export default function ThinkingPanel({ thinking, active = false, durationSecond
   if (!thinking) return null;
 
   const label = active
-    ? "Pensando…"
+    ? t("chat.thinking.thinking")
     : durationSeconds != null && durationSeconds >= 0.1
-      ? `Pensó durante ${formatSeconds(durationSeconds)}`
-      : "Razonamiento";
+      ? t("chat.thinking.thoughtFor", { time: formatSeconds(durationSeconds) })
+      : t("chat.thinking.reasoning");
 
   return (
     <div
@@ -44,7 +46,7 @@ export default function ThinkingPanel({ thinking, active = false, durationSecond
         {active && <Loader2 size={13} className="animate-spin shrink-0 motion-reduce:animate-none" />}
         <span>{label}</span>
         {!open && !active && (
-          <span className="ml-auto text-xs opacity-60">Ver razonamiento</span>
+          <span className="ml-auto text-xs opacity-60">{t("chat.thinking.viewReasoning")}</span>
         )}
       </button>
       {open && (

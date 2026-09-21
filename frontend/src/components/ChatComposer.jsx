@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Send, Square, Paperclip, AlertTriangle, Globe } from "lucide-react";
 import ReasoningControl from "./ReasoningControl.jsx";
 import AttachmentChips from "./AttachmentChips.jsx";
@@ -20,6 +21,7 @@ import { inputClasses } from "../lib/styles.js";
 const SUGGESTED_ACCEPT = "*/*";
 
 function ContextWarning({ estimate }) {
+  const { t } = useTranslation();
   if (!estimate || estimate.fits) return null;
 
   const over = Math.abs(estimate.headroom).toLocaleString();
@@ -27,9 +29,9 @@ function ContextWarning({ estimate }) {
     <div className="flex items-start gap-2 mb-2 px-2.5 py-2 rounded-md border border-amber-500/40 bg-amber-500/10 text-xs text-amber-300">
       <AlertTriangle size={14} className="mt-0.5 shrink-0" />
       <span>
-        Este envío supera el contexto del modelo por unos {over} tokens
-        {estimate.source === "heuristic" && " (estimado, el endpoint no expone tokenizer)"}.
-        Quitá algún adjunto, empezá una conversación nueva o bajá max_tokens.
+        {t("composer.contextOver", { over })}
+        {estimate.source === "heuristic" && t("composer.contextOverEstimated")}
+        {t("composer.contextOverAdvice")}
       </span>
     </div>
   );
@@ -67,6 +69,7 @@ export default function ChatComposer({
   interimTranscript,
   onDictationError,
 }) {
+  const { t } = useTranslation();
   const fileInputRef = useRef(null);
 
   function handleFileInput(event) {
@@ -95,10 +98,10 @@ export default function ChatComposer({
   }
 
   const attachTitle = visionReady
-    ? "Adjuntar archivos (imágenes, documentos, código)"
+    ? t("composer.attachFiles")
     : capabilitiesSource === "props"
-      ? "Adjuntar archivos — el modelo activo no acepta imágenes"
-      : "Adjuntar archivos — no se pudo confirmar si el modelo acepta imágenes";
+      ? t("composer.attachNoVision")
+      : t("composer.attachVisionUnknown");
 
   const canSend = Boolean(input.trim() || attachments.length > 0);
 
@@ -109,18 +112,18 @@ export default function ChatComposer({
   const search = toolsStatus?.search;
   const searchReady = search ? search.ready !== false : true;
   const toolsBlocked = !toolsSupported || !searchReady;
-  const providerLabel = search?.provider_label || "el proveedor de búsqueda";
+  const providerLabel = search?.provider_label || t("composer.providerDefault");
 
   let toolsTitle = toolsEnabled
-    ? `Búsqueda web activada para esta conversación (${providerLabel})`
-    : `Activar búsqueda web para esta conversación (${providerLabel})`;
+    ? t("composer.toolsOn", { provider: providerLabel })
+    : t("composer.toolsOff", { provider: providerLabel });
   if (!toolsSupported) {
     toolsTitle =
       capabilitiesSource === "props"
-        ? "El chat template del modelo activo no soporta tool-calling"
-        : "No se pudo confirmar si el modelo soporta tool-calling";
+        ? t("composer.toolsNotSupported")
+        : t("composer.toolsUnconfirmed");
   } else if (!searchReady) {
-    toolsTitle = search?.reason || `${providerLabel} no está disponible`;
+    toolsTitle = search?.reason || t("composer.providerUnavailable", { provider: providerLabel });
   }
 
   return (
@@ -183,7 +186,7 @@ export default function ChatComposer({
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="Escribí un mensaje… (Enter envía, Shift+Enter nueva línea; arrastrá o pegá archivos para adjuntarlos)"
+          placeholder={t("composer.placeholder")}
         />
 
         {streaming ? (
@@ -193,18 +196,18 @@ export default function ChatComposer({
             className="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium bg-red-600 text-white hover:bg-red-500 shrink-0"
           >
             <Square size={16} />
-            Detener
+            {t("composer.stop")}
           </button>
         ) : (
           <button
             type="button"
             onClick={onSend}
             disabled={!canSend || busyWithAttachments}
-            title={busyWithAttachments ? "Esperando a que terminen de procesarse los adjuntos" : undefined}
+            title={busyWithAttachments ? t("composer.waitingAttachments") : undefined}
             className="flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium bg-glyvex-accent text-white hover:bg-glyvex-accent/90 disabled:opacity-50 shrink-0"
           >
             <Send size={16} />
-            Enviar
+            {t("composer.send")}
           </button>
         )}
       </div>

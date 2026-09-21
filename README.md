@@ -12,12 +12,11 @@ llama-server, Ollama, LM Studio) without relying on any cloud service.
 Everything runs on your own machine: the model inventory, the processes, the
 conversations and the benchmarks stay on your disk.
 
-Optimized for **NVIDIA GPUs (CUDA)** — it was developed on a workstation with
-an RTX 3090 (24GB) + Intel i9-12900K (16 cores) + 64GB RAM on Linux — but
-that's not a requirement: it runs on pure CPU on any modern machine, the GPU
-only speeds up large models, and the Launcher's hardware templates adapt the
-load to what the machine has. Without an NVIDIA GPU, the Monitor and the
-Launcher degrade gracefully (see the Modules section).
+Optimized for **NVIDIA GPUs (CUDA)**, but that's not a requirement: it runs
+on pure CPU on any modern machine, the GPU only speeds up large models, and
+the Launcher's hardware templates adapt the load to what the machine has.
+Without an NVIDIA GPU, the Monitor and the Launcher degrade gracefully
+(see the Modules section).
 
 **Product site:** [ai-suite.glyvexgroup.com](https://ai-suite.glyvexgroup.com/) — [Glyvex AI Division](https://ai.glyvexgroup.com/)
 
@@ -44,7 +43,15 @@ Launcher degrade gracefully (see the Modules section).
 - At least one of these inference backends, installed separately, depending
   on what you'll use: [`llama-server`](https://github.com/ggml-org/llama.cpp)
   (from llama.cpp), [Ollama](https://ollama.com), or [LM Studio](https://lmstudio.ai)
-  running in server mode.
+   running in server mode.
+
+## Platforms
+
+| Platform | Status | Notes |
+|---|---|---|
+| **Windows** | ✅ Development & testing | `start.cmd` (CMD) and `start.ps1` (PowerShell) scripts. |
+| **Linux** | ⏳ Coming soon | `start.sh` already exists; formal support (full testing and CI) is on the roadmap. |
+| **macOS** | ⏳ Coming soon | Shares `start.sh`; not tested in the current cycle. |
 
 ## Installation
 
@@ -237,20 +244,22 @@ The chat exposes two tools to the model, invoked natively via `tool_calls`
   blocked by default** (`tools.allow_private_hosts`).
 - `GET /api/chat/tools/status` tells the frontend which providers are active.
 
-## Docs
+## Documentation
 
 > Note: the detailed docs below are currently in **Spanish**.
 
-- [`docs/modulos.md`](docs/modulos.md) — per-module technical detail (M0–M8).
-- [`docs/launcher-params.md`](docs/launcher-params.md) — reference of the
-  `llama-server` launch parameters the Launcher manages.
-- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — common problems and
-  how to solve them.
-- [`docs/voz-a-texto.md`](docs/voz-a-texto.md) — chat microphone: Web Speech
-  API vs local Whisper, available models, security and packaging with Tauri.
-- [`docs/searxng/README.md`](docs/searxng/README.md) — web search providers
-  (DuckDuckGo, SearXNG, Brave, Tavily), `tools.*` configuration and
-  diagnostics.
+| Where to go | What you'll find |
+|---|---|
+| [README](README.md) | Full overview: modules (M0–M8), install, usage, security and release. |
+| [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | The shortest path to a running suite: prerequisites, install, startup and first run. |
+| [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Codebase map: processes, data flows and where state lives. |
+| [`docs/PRIVACIDAD.md`](docs/PRIVACIDAD.md) | What leaves your machine and what doesn't: 100% local, no outbound telemetry. |
+| [`docs/modulos.md`](docs/modulos.md) | Per-module technical detail (M0–M8). |
+| [`docs/launcher-params.md`](docs/launcher-params.md) | Reference of the `llama-server` launch parameters the Launcher manages. |
+| [`docs/voz-a-texto.md`](docs/voz-a-texto.md) | Chat microphone: Web Speech API vs local Whisper, models, security and packaging. |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Common problems and how to solve them. |
+| [`docs/searxng/README.md`](docs/searxng/README.md) | Web search providers (DuckDuckGo, SearXNG, Brave, Tavily) and `tools.*`. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute: branches, commits, tests and conventions. |
 
 ## Security
 
@@ -286,10 +295,11 @@ The chat exposes two tools to the model, invoked natively via `tool_calls`
 - [x] **M7** — SQLite database (conversations, benchmarks, templates, sets)
 - [x] **M8** — LLM server vitals (Prometheus `/metrics`, history in `metrics.db`)
 - [ ] AMD GPU support (the stack is today optimized for NVIDIA/CUDA)
+- [ ] Formal Linux (and macOS) support: full testing and CI
 
 ## Tests
 
-Automated test suite (pytest + pytest-asyncio + httpx, 296 tests, no
+Automated test suite (pytest + pytest-asyncio + httpx, 297 tests, no
 unittest, no requests, no GPU/models/real network — everything mocked: mock
 LLM server uvicorn on `:18080`, fake binaries, in-memory SQLite):
 

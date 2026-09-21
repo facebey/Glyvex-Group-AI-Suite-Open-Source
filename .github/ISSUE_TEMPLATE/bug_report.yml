@@ -1,0 +1,63 @@
+name: Reporte de bug
+description: Reportá un error o comportamiento inesperado.
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportar. Antes de enviar, revisá `docs/TROUBLESHOOTING.md`
+        por si es un caso conocido.
+  - type: textarea
+    id: descripcion
+    attributes:
+      label: Descripción
+      description: Qué pasó y qué esperabas que pasara.
+    validations:
+      required: true
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Pasos para reproducir
+      description: "1. Abrí...\n2. Tocá...\n3. ..."
+    validations:
+      required: true
+  - type: dropdown
+    id: vista
+    attributes:
+      label: Vista / módulo afectado
+      options:
+        - Chat
+        - Launcher
+        - Benchmark
+        - Monitor
+        - Reports
+        - Config
+        - Otro
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Versión de Glyvex-AI-Suite
+      description: Ej. 0.4.2 (ver /api/info).
+  - type: input
+    id: backend
+    attributes:
+      label: Backend de inferencia y build
+      description: Ej. llama-server b11009 / Ollama 0.x / LM Studio.
+  - type: input
+    id: os
+    attributes:
+      label: Sistema operativo
+      description: Ej. Windows 11 / Ubuntu 24.04.
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      description: Ej. RTX 3090 24GB, o "sin GPU (CPU)".
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Pegá los logs relevantes (launcher, terminal). Revisá que no haya datos sensibles.

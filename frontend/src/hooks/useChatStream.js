@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { consumeSSE } from "../lib/sse.js";
+import i18n from "../lib/i18n.js";
 
 /** Refresco de métricas: ~12 fps. Suficiente para leerse "en vivo" sin
  *  disparar un re-render extra por cada token del stream. */
@@ -135,8 +136,9 @@ export function useChatStream({ setNodes, onFinish, onError }) {
         });
       } catch (err) {
         if (err.name !== "AbortError") {
-          setError("Error de conexión con el endpoint de chat.");
-          onError?.("Error de conexión con el endpoint de chat.");
+          const message = i18n.t("chatErrors.connection");
+          setError(message);
+          onError?.(message);
         }
       } finally {
         if (metricsRef.current) setLiveMetrics(metricsRef.current);

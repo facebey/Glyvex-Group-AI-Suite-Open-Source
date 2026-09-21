@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useReducer, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { CheckCircle2, XCircle, AlertTriangle, Info, X } from "lucide-react";
 
 const MAX_TOASTS = 5;
@@ -81,6 +82,7 @@ export function useToast() {
 }
 
 function ToastStack({ toasts, onDismiss }) {
+  const { t } = useTranslation();
   if (toasts.length === 0) return null;
 
   return (
@@ -99,7 +101,7 @@ function ToastStack({ toasts, onDismiss }) {
               type="button"
               onClick={() => onDismiss(toast.id)}
               className="shrink-0 text-glyvex-muted hover:text-glyvex-text"
-              aria-label="Cerrar notificación"
+              aria-label={t("toast.close")}
             >
               <X size={14} />
             </button>

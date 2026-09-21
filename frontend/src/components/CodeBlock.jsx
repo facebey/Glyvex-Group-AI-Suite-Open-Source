@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, Copy, Download, WrapText } from "lucide-react";
 
 /**
@@ -37,6 +38,7 @@ export async function copyText(text) {
 
 /** Botón de copiar que muestra un tilde un segundo y medio. */
 export function CopyButton({ text, label, className = "", size = 13 }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -50,7 +52,7 @@ export function CopyButton({ text, label, className = "", size = 13 }) {
     <button
       type="button"
       onClick={handleCopy}
-      title={copied ? "Copiado" : label || "Copiar"}
+      title={copied ? t("code.copied") : label || t("code.copy")}
       className={
         "inline-flex items-center gap-1 rounded hover:bg-white/10 " +
         (copied ? "text-emerald-400 " : "text-glyvex-muted hover:text-glyvex-text ") +
@@ -73,8 +75,8 @@ const LANGUAGE_LABELS = {
   dockerfile: "Dockerfile", ini: "INI", diff: "Diff", md: "Markdown",
 };
 
-function labelFor(language) {
-  if (!language) return "texto";
+function labelFor(language, t) {
+  if (!language) return t("code.plainText");
   return LANGUAGE_LABELS[language.toLowerCase()] || language;
 }
 
@@ -114,13 +116,14 @@ function downloadText(filename, text) {
  * plano se ajusta solo.
  */
 export default function CodeBlock({ language, code, children, filename }) {
+  const { t } = useTranslation();
   const [wrap, setWrap] = useState(() => !language || WRAP_BY_DEFAULT.has(language.toLowerCase()));
 
   return (
     <div className="my-2 rounded-md border border-white/10 overflow-hidden bg-black/40 max-w-full min-w-0">
       <div className="flex items-center justify-between gap-2 px-3 py-1 border-b border-white/10 bg-black/30">
         <span className="text-xs text-glyvex-muted font-mono truncate min-w-0">
-          {labelFor(language)}
+          {labelFor(language, t)}
           {filename ? <span className="text-glyvex-text"> · {filename}</span> : null}
         </span>
         <span className="inline-flex items-center gap-0.5 shrink-0">
@@ -128,7 +131,7 @@ export default function CodeBlock({ language, code, children, filename }) {
             <button
               type="button"
               onClick={() => downloadText(filename, code)}
-              title={`Descargar ${filename}`}
+              title={t("code.download", { filename })}
               className="p-1 rounded hover:bg-white/10 text-glyvex-muted hover:text-glyvex-text"
             >
               <Download size={13} />
@@ -138,7 +141,7 @@ export default function CodeBlock({ language, code, children, filename }) {
             type="button"
             onClick={() => setWrap((v) => !v)}
             aria-pressed={wrap}
-            title={wrap ? "Mostrar líneas completas" : "Ajustar líneas al ancho"}
+            title={wrap ? t("code.showFullLines") : t("code.wrapLines")}
             className={
               "p-1 rounded hover:bg-white/10 " +
               (wrap ? "text-glyvex-accent" : "text-glyvex-muted hover:text-glyvex-text")
@@ -146,7 +149,7 @@ export default function CodeBlock({ language, code, children, filename }) {
           >
             <WrapText size={13} />
           </button>
-          <CopyButton text={code} label="Copiar bloque" className="p-1" />
+          <CopyButton text={code} label={t("code.copyBlock")} className="p-1" />
         </span>
       </div>
       {/* Sin ajuste, el scroll horizontal queda adentro del bloque. highlight.js

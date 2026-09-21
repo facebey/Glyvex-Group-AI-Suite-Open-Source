@@ -6,6 +6,7 @@ import ChatSettings from "../components/ChatSettings.jsx";
 import MetricsDisplaySettings from "../components/MetricsDisplaySettings.jsx";
 import MetricsExportSettings from "../components/MetricsExportSettings.jsx";
 import { CONFIG_SAVED_EVENT, PRESETS } from "../lib/metricsDisplay.js";
+import { useTranslation } from "react-i18next";
 import { formInputClasses as inputClasses } from "../lib/styles.js";
 
 const EMPTY_CONFIG = {
@@ -98,6 +99,7 @@ async function consumeScanStream(signal, onEvent) {
 }
 
 export default function Config() {
+  const { t } = useTranslation();
   const [config, setConfig] = useState(EMPTY_CONFIG);
   const [newDir, setNewDir] = useState("");
   const [loading, setLoading] = useState(true);
@@ -136,7 +138,7 @@ export default function Config() {
       });
     } catch (err) {
       if (err.name !== "AbortError") {
-        setMessage({ type: "error", text: "Error durante el escaneo de modelos." });
+        setMessage({ type: "error", text: t("config.scanError") });
       }
     } finally {
       setScanning(false);
@@ -152,7 +154,7 @@ export default function Config() {
         if (!cancelled) setConfig((prev) => ({ ...prev, ...data }));
       })
       .catch(() => {
-        if (!cancelled) setMessage({ type: "error", text: "No se pudo cargar la configuración." });
+        if (!cancelled) setMessage({ type: "error", text: t("config.loadError") });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -203,9 +205,9 @@ export default function Config() {
       const data = await res.json();
       setConfig((prev) => ({ ...prev, ...data }));
       notifyConfigSaved(data);
-      setMessage({ type: "success", text: "Configuración guardada." });
+      setMessage({ type: "success", text: t("config.saved") });
     } catch {
-      setMessage({ type: "error", text: "Error al guardar la configuración." });
+      setMessage({ type: "error", text: t("config.saveError") });
     } finally {
       setSaving(false);
     }
@@ -220,16 +222,16 @@ export default function Config() {
       const data = await res.json();
       setConfig(data);
       notifyConfigSaved(data);
-      setMessage({ type: "success", text: "Configuración restaurada a defaults." });
+      setMessage({ type: "success", text: t("config.restored") });
     } catch {
-      setMessage({ type: "error", text: "Error al restaurar defaults." });
+      setMessage({ type: "error", text: t("config.restoreError") });
     } finally {
       setSaving(false);
     }
   }
 
   if (loading) {
-    return <p className="text-glyvex-muted text-sm">Cargando configuración…</p>;
+    return <p className="text-glyvex-muted text-sm">{t("config.loading")}</p>;
   }
 
   return (
@@ -244,7 +246,7 @@ export default function Config() {
             className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-50"
           >
             <RotateCcw size={16} />
-            Restaurar defaults
+            {t("config.reset")}
           </button>
           <button
             type="button"
@@ -253,7 +255,7 @@ export default function Config() {
             className="flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-glyvex-accent text-white hover:bg-glyvex-accent/90 disabled:opacity-50"
           >
             <Save size={16} />
-            Guardar
+            {t("config.save")}
           </button>
         </div>
       </div>
@@ -297,7 +299,7 @@ export default function Config() {
         </Field>
       </Section>
 
-      <Section title="Directorios de modelos">
+      <Section title={t("config.modelDirs.section")}>
         <div className="flex gap-2">
           <input
             className={inputClasses}
@@ -312,11 +314,11 @@ export default function Config() {
             className="flex items-center gap-1 px-3 py-2 rounded-md text-sm bg-glyvex-accent text-white hover:bg-glyvex-accent/90 shrink-0"
           >
             <Plus size={16} />
-            Agregar
+            {t("config.modelDirs.add")}
           </button>
         </div>
         {config.model_dirs.length === 0 ? (
-          <p className="text-sm text-glyvex-muted">No hay directorios configurados.</p>
+          <p className="text-sm text-glyvex-muted">{t("config.modelDirs.empty")}</p>
         ) : (
           <ul className="space-y-2">
             {config.model_dirs.map((dir) => (
@@ -329,7 +331,7 @@ export default function Config() {
                   type="button"
                   onClick={() => removeModelDir(dir)}
                   className="text-glyvex-muted hover:text-red-400 shrink-0 ml-3"
-                  aria-label={`Quitar ${dir}`}
+                  aria-label={t("config.modelDirs.removeAria", { dir })}
                 >
                   <Trash2 size={16} />
                 </button>
@@ -346,20 +348,18 @@ export default function Config() {
             className="flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-glyvex-accent text-white hover:bg-glyvex-accent/90 disabled:opacity-50"
           >
             <ScanSearch size={16} className={scanning ? "animate-pulse" : ""} />
-            {scanning ? "Escaneando…" : "Escanear ahora"}
+            {scanning ? t("config.modelDirs.scanning") : t("config.modelDirs.scan")}
           </button>
 
           {scanning && scanProgress && (
             <p className="text-sm text-glyvex-muted">
-              Escaneando <span className="text-glyvex-text">{scanProgress.dir}</span> — {scanProgress.found} encontrados
-              en este directorio, {scanProgress.total_so_far} en total hasta ahora.
+              {t("config.modelDirs.progress", { dir: scanProgress.dir, found: scanProgress.found, total: scanProgress.total_so_far })}
             </p>
           )}
 
           {!scanning && scanSummary && (
             <p className="text-sm text-emerald-400">
-              {scanSummary.total} modelos encontrados, {scanSummary.new} nuevos, {scanSummary.removed} eliminados
-              ({scanSummary.duration_s}s).
+              {t("config.modelDirs.summary", { total: scanSummary.total, new: scanSummary.new, removed: scanSummary.removed, duration: scanSummary.duration_s })}
             </p>
           )}
         </div>
@@ -367,7 +367,7 @@ export default function Config() {
 
       <ChatSettings config={config} onChange={setConfig} />
 
-      <Section title="Perfil de hardware">
+      <Section title={t("config.hardware.section")}>
         <div className="grid grid-cols-2 gap-4">
           <Field label="GPU">
             <input
@@ -421,7 +421,7 @@ export default function Config() {
               }
             />
           </Field>
-          <Field label="Núcleos CPU">
+          <Field label={t("config.hardware.cpuCores")}>
             <input
               type="number"
               className={inputClasses}
@@ -437,9 +437,9 @@ export default function Config() {
         </div>
       </Section>
 
-      <Section title="Preferencias de la app">
+      <Section title={t("config.appPrefs.section")}>
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Puerto">
+          <Field label={t("config.appPrefs.port")}>
             <input
               type="number"
               className={inputClasses}
@@ -452,7 +452,7 @@ export default function Config() {
               }
             />
           </Field>
-          <Field label="Tema">
+          <Field label={t("config.appPrefs.theme")}>
             <select
               className={inputClasses}
               value={config.app.theme}
@@ -463,8 +463,8 @@ export default function Config() {
                 }))
               }
             >
-              <option value="dark">Oscuro</option>
-              <option value="light">Claro</option>
+              <option value="dark">{t("config.appPrefs.themeDark")}</option>
+              <option value="light">{t("config.appPrefs.themeLight")}</option>
             </select>
           </Field>
         </div>

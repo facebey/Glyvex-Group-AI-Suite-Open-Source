@@ -888,10 +888,12 @@ class BenchmarkManager:
                 if health.status_code >= 400:
                     raise RuntimeError(f"HTTP {health.status_code}")
         except Exception as exc:
-            run.status = "error"
             run.error = f"Endpoint no disponible: {exc}"
             run.finished_at = datetime.now(timezone.utc).isoformat()
+            # DB primero, como en el camino "completed": no exponer el
+            # status en memoria antes de que la fila ya lo tenga.
             await self._db_update_status(run_id, "error", run.finished_at)
+            run.status = "error"
             self._publish(run_id, {"type": "error", "message": run.error})
             return
 
@@ -957,9 +959,13 @@ class BenchmarkManager:
                 "error": error,
             })
 
-        run.status = "completed"
         run.finished_at = datetime.now(timezone.utc).isoformat()
         run.summary = self._summarize(run)
+        # El status en DB va ANTES de exponer "completed" en memoria: el
+        # endpoint lee el objeto compartido, y exponerlo primero dejaba una
+        # ventana en la que la API decía completed con la fila aún "running".
+        await self._db_update_status(run_id, "completed", run.finished_at)
+        run.status = "completed"
         await self._persist(run)
         self._publish(run_id, {"type": "complete", "summary": run.summary.model_dump()})
 

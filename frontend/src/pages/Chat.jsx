@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ArrowDown, Download, History, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
@@ -23,14 +24,9 @@ import {
 const SESSION_KEY = "glyvex_chat_messages";
 
 // Texto que se suma al system prompt cuando el toggle "convención de
-// archivos" está activo (ver appendFileConvention). Vive acá, no en el
-// textarea del usuario, para no pisarle lo que ya haya escrito: se
-// concatena, nunca reemplaza.
-const FILE_CONVENTION_PROMPT =
-  "Cuando generes el contenido completo de un archivo, abrí la cerca de " +
-  "código con el lenguaje, dos puntos y el nombre del archivo, por ejemplo " +
-  "```python:procesar_captura.py```. Si es un fragmento parcial o un " +
-  "ejemplo suelto, usá la cerca normal sin nombre.";
+// archivos" está activo (ver appendFileConvention). Vive en los locales
+// (chat.fileConventionPrompt), no en el textarea del usuario, para no
+// pisarle lo que ya haya escrito: se concatena, nunca reemplaza.
 
 const DEFAULT_PARAMS = {
   temperature: 0.7,
@@ -62,6 +58,7 @@ function assistantPlaceholder() {
 }
 
 export default function Chat() {
+  const { t } = useTranslation();
   const { addToast } = useToast();
 
   // -- configuración del endpoint -------------------------------------------
@@ -364,7 +361,7 @@ export default function Chat() {
   const handleSelectConversation = useCallback(
     async (id) => {
       if (streaming) {
-        addToast("Esperá a que termine la generación.", "info");
+        addToast(t("chat.waitGeneration"), "info");
         return;
       }
       try {
@@ -382,19 +379,19 @@ export default function Chat() {
         setToolsEnabled(Boolean(conv.config?.tools_enabled));
         history.setOpen(false);
       } catch {
-        addToast("No se pudo abrir la conversación.", "error");
+        addToast(t("chat.openFailed"), "error");
       }
     },
-    [streaming, models, addToast, setCurrentConvId, history, stream]
+    [streaming, models, addToast, setCurrentConvId, history, stream, t]
   );
 
   const handleDeleteConversation = useCallback(
     async (id) => {
-      if (!window.confirm("¿Eliminar esta conversación del historial?")) return;
+      if (!window.confirm(t("chat.deleteConfirm"))) return;
       const ok = await history.remove(id);
-      if (ok) addToast("Conversación eliminada.", "success");
+      if (ok) addToast(t("chat.deleted"), "success");
     },
-    [history, addToast]
+    [history, addToast, t]
   );
 
   const startNewConversation = useCallback(async () => {
@@ -406,14 +403,14 @@ export default function Chat() {
   const handleClear = useCallback(async () => {
     const { path: visible, currentConvId: convId } = stateRef.current;
     if (visible.length > 0 && !convId) {
-      if (window.confirm("¿Guardar esta conversación en el historial antes de limpiar?")) {
+      if (window.confirm(t("chat.saveBeforeClearConfirm"))) {
         await history.flushSave();
         await history.save();
       }
     }
     resetConversation();
     if (history.open) history.load(history.search);
-  }, [history, resetConversation]);
+  }, [history, resetConversation, t]);
 
   // -- adjuntos ---------------------------------------------------------------
   // Una tanda (selección múltiple, drop o paste) = un request por archivo,
@@ -456,11 +453,11 @@ export default function Chat() {
         const res = await fetch("/api/chat/attachments", { method: "POST", body: form });
         if (!res.ok) {
           const detail = await res.json().catch(() => ({}));
-          throw new Error(detail.detail || `El servidor respondió ${res.status}`);
+          throw new Error(detail.detail || t("chat.serverResponded", { status: res.status }));
         }
         const processed = (await res.json()).attachments || [];
         const result = processed[0];
-        if (!result) throw new Error("El servidor no devolvió el adjunto procesado.");
+        if (!result) throw new Error(t("chat.attachmentMissing"));
 
         // previewUrl se conserva: el backend devuelve su propia `url`, pero
         // el blob local ya está decodificado y evita un salto visual.
@@ -483,7 +480,7 @@ export default function Chat() {
         return null;
       }
     },
-    []
+    [t]
   );
 
   const addFiles = useCallback(
@@ -494,8 +491,7 @@ export default function Chat() {
       if (files.length > maxFilesPerMessage) {
         batch = files.slice(0, maxFilesPerMessage);
         addToast(
-          `Máximo ${maxFilesPerMessage} archivos por mensaje: ` +
-            `${files.length - batch.length} no se procesaron.`,
+          t("chat.maxFilesExceeded", { max: maxFilesPerMessage, skipped: files.length - batch.length }),
           "warning"
         );
       }
@@ -538,21 +534,13 @@ export default function Chat() {
       const skipped = done.filter((a) => a.status === "vision_unsupported").length;
 
       if (skipped > 0) {
-        addToast(
-          `El modelo activo no acepta imágenes: ${skipped} adjunto(s) no se van a enviar.`,
-          "warning"
-        );
+        addToast(t("chat.visionUnsupported", { count: skipped }), "warning");
       }
       if (failed > 0) {
-        addToast(
-          failed === 1
-            ? "Un adjunto no se pudo procesar."
-            : `${failed} adjuntos no se pudieron procesar.`,
-          "error"
-        );
+        addToast(failed === 1 ? t("chat.oneAttachmentFailed") : t("chat.attachmentsFailed", { count: failed }), "error");
       }
     },
-    [capabilities, uploadOne, addToast, maxFilesPerMessage]
+    [capabilities, uploadOne, addToast, maxFilesPerMessage, t]
   );
 
   const removeAttachment = useCallback((localId) => {
@@ -616,7 +604,7 @@ export default function Chat() {
       // antepone al primer mensaje del usuario en vez de perderse.
       const systemText = [
         systemPrompt.trim(),
-        appendFileConvention ? FILE_CONVENTION_PROMPT : "",
+        appendFileConvention ? t("chat.fileConventionPrompt") : "",
       ]
         .filter(Boolean)
         .join("\n\n");
@@ -650,7 +638,7 @@ export default function Chat() {
         tools_enabled: toolsEnabled,
       };
     },
-    [reasoning, systemPrompt, appendFileConvention, endpointUrl, apiKey, selectedModel, params, toolsEnabled, capabilities]
+    [reasoning, systemPrompt, appendFileConvention, endpointUrl, apiKey, selectedModel, params, toolsEnabled, capabilities, t]
   );
 
   const handleSend = useCallback(async () => {
@@ -659,9 +647,7 @@ export default function Chat() {
     if ((!text && ready.length === 0) || streaming || busyWithAttachments) return;
 
     if (estimate && !estimate.fits) {
-      const ok = window.confirm(
-        "Este envío supera el contexto del modelo y es probable que se trunque el historial. ¿Enviar igual?"
-      );
+      const ok = window.confirm(t("chat.contextOverflowConfirm"));
       if (!ok) return;
     }
 
@@ -694,7 +680,7 @@ export default function Chat() {
       .flatMap(toPayloadMessages);
 
     await stream.run({ request: buildRequest(payloadMessages), assistantId: ids[1] });
-  }, [input, attachments, busyWithAttachments, estimate, streaming, nodes, path, stream, buildRequest, revokePreview]);
+  }, [input, attachments, busyWithAttachments, estimate, streaming, nodes, path, stream, buildRequest, revokePreview, t]);
 
   /**
    * Editar un mensaje del usuario y reenviarlo.
@@ -792,7 +778,7 @@ export default function Chat() {
         stream.stop();
       } else if (ctrlOrCmd && (e.key === "l" || e.key === "L")) {
         e.preventDefault();
-        if (window.confirm("¿Limpiar la conversación actual?")) handleClear();
+        if (window.confirm(t("chat.clearConfirm"))) handleClear();
       } else if (ctrlOrCmd && (e.key === "e" || e.key === "E")) {
         e.preventDefault();
         setExportPanelOpen((prev) => !prev);
@@ -805,7 +791,7 @@ export default function Chat() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleSend, handleClear, streaming]);
+  }, [handleSend, handleClear, streaming, t]);
 
   function handleImportFile(event) {
     const file = event.target.files?.[0];
@@ -819,7 +805,7 @@ export default function Chat() {
           setCurrentConvId(null);
         }
       } catch {
-        stream.setError("El archivo importado no es un JSON de conversación válido.");
+        stream.setError(t("chat.invalidImport"));
       }
     };
     reader.readAsText(file);
@@ -862,7 +848,7 @@ export default function Chat() {
       >
         {dragging && (
           <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-2 bg-glyvex-accent/10 border-2 border-dashed border-glyvex-accent/60 pointer-events-none">
-            <span className="text-sm text-glyvex-text">Soltá los archivos para adjuntarlos</span>
+            <span className="text-sm text-glyvex-text">{t("chat.dropHint")}</span>
           </div>
         )}
 
@@ -881,7 +867,7 @@ export default function Chat() {
                 "flex items-center gap-1.5 px-3 text-xs " +
                 (history.open ? "text-glyvex-accent" : "text-glyvex-muted hover:text-glyvex-text")
               }
-              title="Historial de conversaciones (Ctrl+H)"
+              title={t("chat.historyTitle")}
             >
               <History size={15} />
             </button>
@@ -889,7 +875,7 @@ export default function Chat() {
               type="button"
               onClick={() => setCompact((v) => !v)}
               className="flex items-center gap-1.5 px-3 text-xs text-glyvex-muted hover:text-glyvex-text"
-              title={compact ? "Mostrar panel de configuración" : "Modo compacto"}
+              title={compact ? t("chat.showSettings") : t("chat.compactMode")}
             >
               {compact ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
             </button>
@@ -898,7 +884,7 @@ export default function Chat() {
 
         {exportPanelOpen && (
           <div className="flex items-center gap-2 px-4 py-2 border-b border-white/10 bg-black/20">
-            <span className="text-xs text-glyvex-muted mr-1">Exportar (Ctrl+E):</span>
+            <span className="text-xs text-glyvex-muted mr-1">{t("chat.exportLabel")}</span>
             <button
               type="button"
               onClick={() => exportAsJson(path, selectedModel)}
@@ -937,7 +923,7 @@ export default function Chat() {
         >
           {path.length === 0 ? (
             <p className="text-sm text-glyvex-muted text-center mt-10">
-              Escribí un mensaje para empezar la conversación.
+              {t("chat.emptyState")}
             </p>
           ) : (
             path.map((m, index) => {
@@ -971,11 +957,11 @@ export default function Chat() {
           <button
             type="button"
             onClick={() => scrollToBottom()}
-            title="Ir al final"
+            title={t("chat.goToBottom")}
             className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 bg-glyvex-card text-xs text-glyvex-text shadow-lg shadow-black/40 hover:bg-black/40"
           >
             <ArrowDown size={13} />
-            {streaming ? "Seguir la respuesta" : "Ir al final"}
+            {streaming ? t("chat.followAnswer") : t("chat.goToBottom")}
           </button>
         )}
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import i18n from "../lib/i18n.js";
 
 const HISTORY_PAGE_SIZE = 50;
 const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -33,7 +34,7 @@ export function useConversations({ stateRef, setCurrentConvId, onError }) {
       if (!res.ok) throw new Error(String(res.status));
       setConversations(await res.json());
     } catch {
-      onErrorRef.current?.("No se pudo cargar el historial.");
+      onErrorRef.current?.(i18n.t("chatErrors.historyLoad"));
     } finally {
       setLoading(false);
     }
@@ -108,7 +109,7 @@ export function useConversations({ stateRef, setCurrentConvId, onError }) {
       if (id === stateRef.current.currentConvId) setCurrentConvId(null);
       return true;
     } catch {
-      onErrorRef.current?.("No se pudo eliminar la conversación.");
+      onErrorRef.current?.(i18n.t("chatErrors.conversationDelete"));
       return false;
     }
   }, [stateRef, setCurrentConvId]);

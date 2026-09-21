@@ -3,6 +3,35 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
+## [0.4.3] — 2026-09-21
+
+### Agregado
+- **A3 — i18n ES/EN**: react-i18next con selector de idioma en la UI
+  (default español). Cubre Launcher, Chat, Monitor, Benchmark, Reports y
+  Config (706 keys por idioma); nombres y descripciones de sets de
+  benchmark bilingües (fallback al JSON); `frontend/package-lock.json`
+  versionado para installs reproducibles.
+- **P8 — Referencia de flags**: `docs/LAUNCH-FLAGS.md` (EN) +
+  `docs/LAUNCH-FLAGS.es.md` (ES) — ~45 flags en 14 grupos (qué hace,
+  impacto, default de la app, cuándo cambiarlo); etiquetas oficiales por
+  flag en la UI del Launcher vía el probe (`flag_help`).
+- **Docs (P7)**: índice central "Documentación" en README (EN/ES),
+  `docs/QUICKSTART.md`, `docs/ARQUITECTURA.md`, `docs/PRIVACIDAD.md`,
+  plantillas `.github` (issue bug/feature, config, PR template) y
+  `CONTRIBUTORS.md` + up-for-grabs en `CONTRIBUTING.md`.
+- **Dependabot**: `.github/dependabot.yml` (pip + npm, semanal, tope de 10
+  PRs abiertas por ecosistema).
+
+### Corregido
+- **K3**: race de persistencia del benchmark — el status final
+  (completed/error) se guarda en la DB antes de exponerlo en memoria.
+- **`--fit` toggle**: OFF ahora emite `--fit off` en vez de omitir el flag
+  (que dejaba el default `on` de la build).
+
+### Baseline
+- 297 tests en verde.
+
+
 ## [0.4.2] — 2026-09-20
 
 ### Corregido

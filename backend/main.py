@@ -38,7 +38,7 @@ if sys.platform == "win32":
 
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
-APP_VERSION = "0.4.2"
+APP_VERSION = "0.4.3"
 APP_NAME = "Glyvex-AI-Suite"
 APP_START_MONOTONIC = time.monotonic()
 

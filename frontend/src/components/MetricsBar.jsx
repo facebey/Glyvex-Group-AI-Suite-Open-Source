@@ -16,12 +16,13 @@
  * aparece solo cuando algo salió de la heurística de caracteres.
  */
 
+import { useTranslation } from "react-i18next";
 import { useDisplay } from "../lib/metricsDisplay.js";
 
-const SOURCE_LABEL = {
-  timings: "Medido por el servidor (timings).",
-  usage: "Tokens del servidor sobre el tiempo de generación medido.",
-  chunks: "Aproximado: el endpoint no informa tokens, se cuentan fragmentos del stream.",
+const SOURCE_KEYS = {
+  timings: "metricsBar.sourceTimings",
+  usage: "metricsBar.sourceUsage",
+  chunks: "metricsBar.sourceChunks",
 };
 
 function formatMs(ms) {
@@ -35,6 +36,7 @@ export default function MetricsBar({
   contextTotal = 0,
   streaming = false,
 }) {
+  const { t } = useTranslation();
   const tps = metrics?.tps ?? null;
   const ppTps = metrics?.pp_tps ?? null;
   const ttft = formatMs(metrics?.ttft_ms);
@@ -66,20 +68,20 @@ export default function MetricsBar({
   const contextTitle = estimate
     ? [
         estimate.base_tokens
-          ? `${estimate.base_tokens.toLocaleString()} tokens medidos por el servidor en la última respuesta (incluye plantilla, tools y razonamiento).`
+          ? t("metricsBar.contextMeasured", { count: estimate.base_tokens.toLocaleString() })
           : null,
         estimate.source === "measured"
           ? null
           : approx
-            ? "Lo nuevo está estimado por caracteres: el endpoint no expone /tokenize."
+            ? t("metricsBar.contextEstimated")
             : estimate.base_tokens
-              ? "Lo nuevo está contado con el tokenizer del modelo."
-              : "Contado con el tokenizer del modelo.",
+              ? t("metricsBar.contextTokenizedNew")
+              : t("metricsBar.contextTokenized"),
         estimate.image_count
-          ? `Incluye ${estimate.image_count} imagen(es) a ~${estimate.image_tokens.toLocaleString()} tokens.`
+          ? t("metricsBar.contextImages", { count: estimate.image_count, tokens: estimate.image_tokens.toLocaleString() })
           : null,
         estimate.headroom
-          ? `Margen tras la respuesta: ${estimate.headroom.toLocaleString()} tokens.`
+          ? t("metricsBar.contextHeadroom", { count: estimate.headroom.toLocaleString() })
           : null,
       ]
         .filter(Boolean)
@@ -87,23 +89,28 @@ export default function MetricsBar({
     : undefined;
 
   const tpsTitle = [
-    source ? SOURCE_LABEL[source] : null,
-    ppTps ? `Procesamiento de prompt: ${ppTps.toFixed(1)} t/s.` : null,
+    source ? t(SOURCE_KEYS[source]) : null,
+    ppTps ? t("metricsBar.promptProcessing", { value: ppTps.toFixed(1) }) : null,
   ]
     .filter(Boolean)
     .join(" ") || undefined;
 
   const ttftTitle = ttft
     ? [
-        "Tiempo hasta el primer token, razonamiento incluido.",
-        ttftAnswer && ttftAnswer !== ttft ? `Primera palabra de la respuesta: ${ttftAnswer}.` : null,
+        t("metricsBar.ttftHelp"),
+        ttftAnswer && ttftAnswer !== ttft
+          ? t("metricsBar.ttftFirstWord", { value: ttftAnswer })
+          : null,
       ]
         .filter(Boolean)
         .join(" ")
     : undefined;
 
   const tokensTitle = tokensThinking
-    ? `${tokensThinking.toLocaleString()} de razonamiento y ${Math.max(0, tokensTotal - tokensThinking).toLocaleString()} de respuesta.`
+    ? t("metricsBar.tokensBreakdown", {
+        thinking: tokensThinking.toLocaleString(),
+        answer: Math.max(0, tokensTotal - tokensThinking).toLocaleString(),
+      })
     : undefined;
 
   const { isVisible } = useDisplay();
@@ -117,10 +124,10 @@ export default function MetricsBar({
       title: tpsTitle,
     },
     { key: "chat.ttft", label: "TTFT", value: ttft || "—", title: ttftTitle },
-    { key: "chat.tokens", label: "Tokens", value: tokensTotal ? tokensTotal.toLocaleString() : "—", title: tokensTitle },
+    { key: "chat.tokens", label: t("metricsBar.tokens"), value: tokensTotal ? tokensTotal.toLocaleString() : "—", title: tokensTitle },
     {
       key: "chat.context",
-      label: "Contexto",
+      label: t("metricsBar.context"),
       value: contextValue,
       className: contextColor,
       title: contextTitle,
@@ -141,8 +148,8 @@ export default function MetricsBar({
           {item.live && streaming && (
             <span
               className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-0.5"
-              title="Generando"
-              aria-label="Generando"
+              title={t("metricsBar.generating")}
+              aria-label={t("metricsBar.generating")}
             />
           )}
         </div>

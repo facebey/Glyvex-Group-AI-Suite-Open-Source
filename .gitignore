@@ -8,9 +8,7 @@ venv/
 
 # Node
 node_modules/
-package-lock.json
 frontend/node_modules/
-frontend/package-lock.json
 vite.config.js.timestamp-*.mjs
 
 # Build

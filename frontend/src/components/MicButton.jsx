@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Mic, Loader2, Download } from "lucide-react";
 import {
   useSpeechRecognition,
@@ -41,6 +42,7 @@ function resolveEngine(configured, whisperInstalled) {
 }
 
 export default function MicButton({ status, onTranscript, onInterim, onError, disabled }) {
+  const { t } = useTranslation();
   const [warming, setWarming] = useState(false);
   const pressStartRef = useRef(0);
   const heldRef = useRef(false);
@@ -91,11 +93,11 @@ export default function MicButton({ status, onTranscript, onInterim, onError, di
           const res = await fetch("/api/stt/warmup", { method: "POST" });
           if (!res.ok) {
             const detail = await res.json().catch(() => ({}));
-            onError?.(detail.detail || "No se pudo cargar el modelo de voz.");
+            onError?.(detail.detail || t("mic.loadModel"));
             return;
           }
         } catch {
-          onError?.("No se pudo cargar el modelo de voz.");
+          onError?.(t("mic.loadModel"));
           return;
         } finally {
           setWarming(false);
@@ -141,10 +143,10 @@ export default function MicButton({ status, onTranscript, onInterim, onError, di
 
   if (engine === "none") {
     const reason = !mediaRecorderSupported()
-      ? "Este navegador no puede grabar audio."
+      ? t("mic.noRecording")
       : !window.isSecureContext
-        ? "El micrófono necesita https o localhost. Estás entrando por IP."
-        : whisper.reason || "No hay ningún motor de dictado disponible.";
+        ? t("mic.insecure")
+        : whisper.reason || t("mic.noEngine");
     return (
       <button
         type="button"
@@ -158,12 +160,12 @@ export default function MicButton({ status, onTranscript, onInterim, onError, di
   }
 
   const title = recording
-    ? "Soltá o hacé click para terminar el dictado"
+    ? t("mic.stopDictation")
     : engine === "whisper"
       ? whisper.loaded || whisper.cached
-        ? `Dictar (Whisper ${whisper.model}, local)`
-        : `Dictar (Whisper ${whisper.model} — el primer uso descarga ~${whisper.download_mb || "?"} MB)`
-      : "Dictar (motor del navegador — el audio sale a internet)";
+        ? t("mic.dictateWhisperLocal", { model: whisper.model })
+        : t("mic.dictateWhisperDownload", { model: whisper.model, mb: whisper.download_mb || "?" })
+      : t("mic.dictateBrowser");
 
   return (
     <button

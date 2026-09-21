@@ -12,6 +12,21 @@ Gracias por querer contribuir. Acá está cómo funciona el flujo.
 - **Idioma del código y los mensajes**: español (comentarios de intención,
   commits, PRs).
 
+## Buenas primeras contribuciones (up-for-grabs)
+
+Tareas acotadas, aptas para entrar al proyecto, que no rompen la regla de 100%
+local:
+
+- Traducir a inglés las docs nuevas: `QUICKSTART.md`, `ARQUITECTURA.md`,
+  `PRIVACIDAD.md` y `modulos.md` (hoy en español).
+- Ampliar `TROUBLESHOOTING.md` con casos reales que resuelvas.
+- Aumentar cobertura de tests en módulos con poca (ver `pytest --cov`).
+- Agregar un set de benchmark de ejemplo a `backend/prompts/` (con keywords de
+  scoring bien definidas).
+- Documentar el soporte formal de Linux/macOS (está en el roadmap del README).
+
+Mirá el [Roadmap](README.md#roadmap) para el contexto mayor.
+
 ## Setup
 
 ```bash
@@ -41,7 +56,7 @@ pytest tests/ -v
 - pytest + pytest-asyncio + httpx. Los fixtures compartidos viven en
   `tests/conftest.py`: binarios fake que responden `--help`/`--version`,
   un LLM server mock en `:18080` y estado aislado por test.
-- Baseline: **296 tests**.
+- Baseline: **297 tests**.
 
 ## Git
 
@@ -76,10 +91,12 @@ conoce se descartan y se reportan, no se rompe el lanzamiento.
 
 ## Documentación
 
-- `README.md` — detalle completo de módulos, seguridad y release.
-- `docs/` — docs de diseño: `modulos.md` (M0–M8), `launcher-params.md`
-  (referencia de parámetros), `TROUBLESHOOTING.md`, `voz-a-texto.md`,
-  `searxng/`.
+- `README.md` — detalle completo de módulos, seguridad y release; su sección
+  "Documentación" es el índice de todas las docs.
+- `docs/` — `QUICKSTART.md` (arranque rápido), `ARQUITECTURA.md` (mapa del
+  código), `modulos.md` (M0–M8), `launcher-params.md` (referencia de
+  parámetros), `PRIVACIDAD.md` (qué sale de la máquina), `TROUBLESHOOTING.md`,
+  `voz-a-texto.md`, `searxng/`.
 - Si tu cambio agrega comportamiento visible para el usuario, actualizá el
   README (o el doc correspondiente) en la misma PR.
 - `CHANGELOG.md` — el maintainer lo actualiza en cada release.

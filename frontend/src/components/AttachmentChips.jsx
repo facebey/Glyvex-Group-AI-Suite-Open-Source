@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   FileText, FileSpreadsheet, FileCode2, FileImage, Presentation,
   File as FileIcon, X, Loader2, AlertTriangle, EyeOff,
@@ -61,16 +62,16 @@ function StatusIcon({ attachment }) {
   return <Icon size={13} className="text-glyvex-muted shrink-0" />;
 }
 
-function chipTitle(attachment) {
+function chipTitle(attachment, t) {
   const lines = [attachment.filename];
   if (attachment.mime) lines.push(attachment.mime);
   if (attachment.error) lines.push(attachment.error);
   if (attachment.note) lines.push(attachment.note);
   if (attachment.status === "vision_unsupported") {
-    lines.push("El modelo activo no acepta imágenes, así que no se envía.");
+    lines.push(t("attachments.visionUnsupported"));
   }
   if (attachment.tokens_estimate) {
-    lines.push(`~${attachment.tokens_estimate.toLocaleString()} tokens`);
+    lines.push(t("attachments.estimate", { count: attachment.tokens_estimate.toLocaleString() }));
   }
   return lines.filter(Boolean).join("\n");
 }
@@ -80,6 +81,7 @@ function chipTitle(attachment) {
  * Cada uno muestra tipo, nombre truncado, tamaño y estado, y se puede quitar.
  */
 export default function AttachmentChips({ attachments, onRemove }) {
+  const { t } = useTranslation();
   if (!attachments || attachments.length === 0) return null;
 
   return (
@@ -88,7 +90,7 @@ export default function AttachmentChips({ attachments, onRemove }) {
         return (
           <div
             key={attachment.localId}
-            title={chipTitle(attachment)}
+            title={chipTitle(attachment, t)}
             className={
               "inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-md border text-xs " +
               (STATUS_STYLES[attachment.status] || STATUS_STYLES.ready)
@@ -115,7 +117,7 @@ export default function AttachmentChips({ attachments, onRemove }) {
             <button
               type="button"
               onClick={() => onRemove(attachment.localId)}
-              title={`Quitar ${attachment.filename}`}
+                title={t("attachments.remove", { filename: attachment.filename })}
               className="p-0.5 rounded hover:bg-white/10 hover:text-glyvex-text"
             >
               <X size={12} />

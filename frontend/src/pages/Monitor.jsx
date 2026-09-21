@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Cpu, MemoryStick, Gauge, History, RefreshCw, Server } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
+import { useTranslation } from "react-i18next";
 import { useLlmStream } from "../hooks/useLlmStream.js";
 import { useDisplay } from "../lib/metricsDisplay.js";
 
@@ -16,13 +17,22 @@ const SPARKLINE_POINTS = 60;
 // backend según el rango pedido (ver metrics_store.choose_tier). El rango
 // elegido acá decide cuántos segundos de "start" pedir.
 const RANGES = [
-  { id: "1h", label: "1 h", seconds: 3600 },
-  { id: "24h", label: "24 h", seconds: 24 * 3600 },
-  { id: "7d", label: "7 días", seconds: 7 * 86400 },
-  { id: "30d", label: "30 días", seconds: 30 * 86400 },
+  { id: "1h", seconds: 3600 },
+  { id: "24h", seconds: 24 * 3600 },
+  { id: "7d", seconds: 7 * 86400 },
+  { id: "30d", seconds: 30 * 86400 },
 ];
 
-const TIER_LABEL = { raw: "cada 5 s", "1m": "cada 1 min", "1h": "cada 1 h" };
+const TIER_LABELS = { raw: "monitor.history.tierRaw", "1m": "monitor.history.tier1m", "1h": "monitor.history.tier1h" };
+
+function rangeLabel(t, rangeId) {
+  return t(`monitor.history.range.${rangeId}`);
+}
+
+function tierLabel(t, tier) {
+  const key = TIER_LABELS[tier];
+  return key ? t(key) : tier;
+}
 
 // Series y colores de cada gráfico de histórico. Los colores repiten la
 // paleta que ya usa Sparkline para GPU/VRAM/CPU/RAM, así el histórico se
@@ -44,15 +54,19 @@ const LLM_KEYS = [
   "llm.requests_processing", "llm.requests_deferred",
 ];
 const LLM_SPEED_LEGEND = [
-  { key: "llm.tg_tps", name: "Generación", color: "#22c55e" },
+  { key: "llm.tg_tps", nameKey: "monitor.llm.legend.generation", color: "#22c55e" },
   { key: "llm.throughput_tps", name: "Throughput", color: "#7c3aed" },
 ];
-const LLM_CTX_PCT_LEGEND = [{ key: "llm.ctx_pct", name: "Contexto usado", color: "#06b6d4" }];
-const LLM_CTX_PEAK_LEGEND = [{ key: "llm.ctx_peak", name: "Pico de contexto", color: "#06b6d4" }];
+const LLM_CTX_PCT_LEGEND = [{ key: "llm.ctx_pct", nameKey: "monitor.llm.legend.contextUsed", color: "#06b6d4" }];
+const LLM_CTX_PEAK_LEGEND = [{ key: "llm.ctx_peak", nameKey: "monitor.llm.legend.contextPeak", color: "#06b6d4" }];
 const LLM_QUEUE_LEGEND = [
-  { key: "llm.requests_processing", name: "En curso", color: "#3b82f6" },
-  { key: "llm.requests_deferred", name: "En espera", color: "#f59e0b" },
+  { key: "llm.requests_processing", nameKey: "monitor.llm.legend.inProgress", color: "#3b82f6" },
+  { key: "llm.requests_deferred", nameKey: "monitor.llm.legend.waiting", color: "#f59e0b" },
 ];
+
+function translateLegend(legend, t) {
+  return legend.map((l) => (l.nameKey ? { ...l, name: t(l.nameKey) } : l));
+}
 // En vivo: WS /api/llm-metrics/{id}/stream (1 s mientras hay un cliente).
 const LLM_LIVE_WINDOW_S = 300;
 const LLM_LIVE_BUFFER = 330; // algo más que 5 min a 1 s
@@ -62,28 +76,28 @@ const LLM_LIVE_BUFFER = 330; // algo más que 5 min a 1 s
  * midió el backend (tg_tps_last, sin importar cuánto hace). Devuelve también
  * el tooltip con la antigüedad.
  */
-function tgDisplay(snaps) {
+function tgDisplay(snaps, t) {
   const last = snaps[snaps.length - 1] || null;
-  if (last?.tg_tps != null) return { value: last.tg_tps, live: true, title: "Velocidad de generación actual" };
+  if (last?.tg_tps != null) return { value: last.tg_tps, live: true, title: t("vitals.tgCurrent") };
   const fromBackend = last?.tg_tps_last ?? null;
   const fromBuffer = [...snaps].reverse().find((s) => s.tg_tps != null)?.tg_tps ?? null;
   const value = fromBackend ?? fromBuffer;
-  if (value == null) return { value: null, live: false, title: "Todavía no hubo generación en este proceso" };
+  if (value == null) return { value: null, live: false, title: t("vitals.tgNoneYet") };
   const at = last?.tg_tps_last_at ? Date.parse(String(last.tg_tps_last_at).replace(/(\.\d{3})\d+/, "$1")) : NaN;
   const seconds = Number.isNaN(at) ? null : Math.max(0, Math.round((Date.now() - at) / 1000));
-  const ago = seconds == null ? "" : seconds < 60 ? ` hace ${seconds} s` : seconds < 3600 ? ` hace ${Math.round(seconds / 60)} min` : ` hace ${Math.round(seconds / 3600)} h`;
-  return { value, live: false, title: `Sin generación ahora: última velocidad medida${ago}` };
+  const ago = seconds == null ? "" : seconds < 60 ? t("vitals.agoS", { n: seconds }) : seconds < 3600 ? t("vitals.agoMin", { n: Math.round(seconds / 60) }) : t("vitals.agoH", { n: Math.round(seconds / 3600) });
+  return { value, live: false, title: t("vitals.tgStale", { ago }) };
 }
 
-function contextTitle(snap) {
+function contextTitle(snap, t) {
   if (!snap || snap.ctx_used == null) {
-    return "Este build de llama-server no expone el contexto actual: se muestra el pico observado";
+    return t("vitals.ctxNoExpose");
   }
-  if (snap.ctx_source === "kv_cache") return "Tokens en el KV cache ahora";
+  if (snap.ctx_source === "kv_cache") return t("vitals.ctxKvCache");
   if (snap.slots_busy === 0) {
-    return "Secuencia de la última conversación, que sigue en el KV cache para reutilizarse (dato de /slots)";
+    return t("vitals.ctxLastConv");
   }
-  return "Tokens en la secuencia actual: prompt + generados hasta ahora (dato de /slots)";
+  return t("vitals.ctxCurrentSeq");
 }
 
 function formatDateShort(ts) {
@@ -257,10 +271,11 @@ function HistoryTooltip({ active, payload, label, legend, unit }) {
  */
 function HistoryChart({
   series, legend, unit = "", domain, rangeSeconds, height = 180,
-  emptyText = "Sin datos guardados todavía para este rango.",
+  emptyText,
   // false en vivo: un rato sin generar se ve como hueco, no como una recta.
   connectGaps = true,
 }) {
+  const { t } = useTranslation();
   const keys = useMemo(() => legend.map((l) => l.key), [legend]);
   const data = useMemo(() => mergeSeries(series, keys), [series, keys]);
   const hasData = data.length > 0;
@@ -269,7 +284,7 @@ function HistoryChart({
     <div style={{ height }}>
       {!hasData ? (
         <div className="h-full flex items-center justify-center text-xs text-glyvex-muted">
-          {emptyText}
+          {emptyText || t("monitor.history.noData")}
         </div>
       ) : (
         <ResponsiveContainer width="100%" height="100%">
@@ -410,6 +425,7 @@ function CoreHeatmap({ cores }) {
 const HISTORY_REFRESH_MS = 30_000;
 
 export default function Monitor() {
+  const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState(null);
   const [history, setHistory] = useState([]);
   const [connected, setConnected] = useState(false);
@@ -443,12 +459,12 @@ export default function Monitor() {
         setHistoryTier(data.tier || null);
         setHistoryError(null);
       } catch (err) {
-        if (err.name !== "AbortError") setHistoryError("No se pudo cargar el histórico.");
+        if (err.name !== "AbortError") setHistoryError(t("monitor.history.loadError"));
       } finally {
         setHistoryLoading(false);
       }
     },
-    [range, historyKeys]
+    [range, historyKeys, t]
   );
 
   useEffect(() => {
@@ -551,7 +567,11 @@ export default function Monitor() {
   }, [llmSelected]);
 
   const llmLast = llmLive[llmLive.length - 1] || null;
-  const llmTg = tgDisplay(llmLive);
+  const llmTg = tgDisplay(llmLive, t);
+  const llmSpeedLegend = useMemo(() => translateLegend(LLM_SPEED_LEGEND, t), [t]);
+  const llmCtxPctLegend = useMemo(() => translateLegend(LLM_CTX_PCT_LEGEND, t), [t]);
+  const llmCtxPeakLegend = useMemo(() => translateLegend(LLM_CTX_PEAK_LEGEND, t), [t]);
+  const llmQueueLegend = useMemo(() => translateLegend(LLM_QUEUE_LEGEND, t), [t]);
 
   // Últimos 5 minutos, medidos desde el último dato (no desde el reloj del navegador).
   const llmLiveWindow = useMemo(() => {
@@ -631,7 +651,7 @@ export default function Monitor() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Monitor</h1>
         <span className={`text-xs px-2 py-1 rounded-full border ${connected ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" : "text-glyvex-muted border-white/10"}`}>
-          {connected ? "● en vivo" : "○ desconectado"}
+          {connected ? t("monitor.header.live") : t("monitor.header.disconnected")}
         </span>
       </div>
 
@@ -639,14 +659,14 @@ export default function Monitor() {
       {show("monitor.alerts") && (
       <div className="flex flex-wrap items-center gap-2">
         <span className={`text-xs px-2.5 py-1 rounded-full border bg-glyvex-card ${tempClasses(gpu?.temperature_c)} border-white/10`}>
-          Temp GPU: {gpu?.temperature_c != null ? `${gpu.temperature_c}°C` : "—"}
+          {t("monitor.alerts.gpuTemp")} {gpu?.temperature_c != null ? `${gpu.temperature_c}°C` : "—"}
         </span>
         <span className="text-xs px-2.5 py-1 rounded-full border bg-glyvex-card border-white/10 text-glyvex-text">
-          VRAM libre: {gpu ? `${(gpu.vram_free_mb / 1024).toFixed(1)} GB` : "—"}
+          {t("monitor.alerts.freeVram")} {gpu ? `${(gpu.vram_free_mb / 1024).toFixed(1)} GB` : "—"}
         </span>
         {anyAlert && (
           <span className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-red-500/15 text-red-400 border border-red-500/30 font-medium">
-            <AlertTriangle size={12} /> ALERTA
+            <AlertTriangle size={12} /> {t("monitor.alerts.alert")}
           </span>
         )}
       </div>
@@ -662,7 +682,7 @@ export default function Monitor() {
 
         {!gpu ? (
           <p className="text-sm text-glyvex-muted">
-            {snapshot?.gpu_error || "GPU NVIDIA no detectada"}
+            {snapshot?.gpu_error || t("monitor.gpu.notDetected")}
           </p>
         ) : (
           <div className="space-y-4">
@@ -688,7 +708,7 @@ export default function Monitor() {
             {show("monitor.gpu.util") && (
             <div>
               <div className="flex justify-between text-xs text-glyvex-muted mb-1">
-                <span>Utilización GPU</span>
+                <span>{t("monitor.gpu.util")}</span>
                 <span>{gpu.gpu_utilization ?? "—"}%</span>
               </div>
               <ProgressBar value={gpu.gpu_utilization ?? 0} max={100} color={pctBarColor(gpu.gpu_utilization)} />
@@ -705,7 +725,7 @@ export default function Monitor() {
 
             {show("monitor.gpu.chart") && (
             <div>
-              <p className="text-xs text-glyvex-muted mb-1">Últimos 60s — GPU util % / VRAM %</p>
+              <p className="text-xs text-glyvex-muted mb-1">{t("monitor.gpu.last60s")}</p>
               <Sparkline data={history} dataKeys={["gpu", "vram"]} colors={["#3b82f6", "#06b6d4"]} height={100} />
             </div>
             )}
@@ -724,12 +744,12 @@ export default function Monitor() {
             <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">CPU</h2>
           </div>
           {!cpu ? (
-            <p className="text-sm text-glyvex-muted">{snapshot?.cpu_error || "psutil no disponible"}</p>
+            <p className="text-sm text-glyvex-muted">{snapshot?.cpu_error || t("monitor.cpu.psutilUnavailable")}</p>
           ) : (
             <>
               {(show("monitor.cpu.total") || show("monitor.cpu.freq")) && (
                 <div className="flex justify-between text-sm">
-                  <span>{show("monitor.cpu.total") && <>Utilización total: <b>{cpu.percent_total.toFixed(1)}%</b></>}</span>
+                  <span>{show("monitor.cpu.total") && <>{t("monitor.cpu.totalUtil")} <b>{cpu.percent_total.toFixed(1)}%</b></>}</span>
                   <span className="text-glyvex-muted">
                     {show("monitor.cpu.freq") && cpu.frequency_mhz ? `${cpu.frequency_mhz} MHz` : ""}
                   </span>
@@ -743,7 +763,7 @@ export default function Monitor() {
               )}
               {show("monitor.cpu.chart") && (
                 <div>
-                  <p className="text-xs text-glyvex-muted mb-1">Últimos 60s — CPU %</p>
+                  <p className="text-xs text-glyvex-muted mb-1">{t("monitor.cpu.last60s")}</p>
                   <Sparkline data={history} dataKeys={["cpu"]} colors={["#3b82f6"]} height={80} />
                 </div>
               )}
@@ -760,7 +780,7 @@ export default function Monitor() {
             <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">RAM</h2>
           </div>
           {!ram ? (
-            <p className="text-sm text-glyvex-muted">No disponible</p>
+            <p className="text-sm text-glyvex-muted">{t("monitor.ram.unavailable")}</p>
           ) : (
             <>
               <div>
@@ -772,7 +792,7 @@ export default function Monitor() {
               </div>
               <p className="text-xs text-glyvex-muted">Swap: {ram.swap_used_gb} GB / {ram.swap_total_gb} GB</p>
               <div>
-                <p className="text-xs text-glyvex-muted mb-1">Últimos 60s — RAM %</p>
+                <p className="text-xs text-glyvex-muted mb-1">{t("monitor.ram.last60s")}</p>
                 <Sparkline data={history} dataKeys={["ram"]} colors={["#06b6d4"]} height={80} />
               </div>
             </>
@@ -788,9 +808,9 @@ export default function Monitor() {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <History size={16} className="text-glyvex-muted" />
-            <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">Histórico</h2>
+            <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">{t("monitor.history.title")}</h2>
             {historyTier && (
-              <span className="text-xs text-glyvex-muted">· {TIER_LABEL[historyTier] || historyTier}</span>
+              <span className="text-xs text-glyvex-muted">· {tierLabel(t, historyTier)}</span>
             )}
           </div>
           <div className="flex items-center gap-1">
@@ -806,13 +826,13 @@ export default function Monitor() {
                     : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30")
                 }
               >
-                {r.label}
+                {rangeLabel(t, r.id)}
               </button>
             ))}
             <button
               type="button"
               onClick={() => { setHistoryLoading(true); fetchHistory(); }}
-              title="Actualizar"
+              title={t("monitor.history.refresh")}
               className="p-1.5 rounded-md text-glyvex-muted hover:text-glyvex-text hover:bg-black/30"
             >
               <RefreshCw size={13} className={historyLoading ? "animate-spin" : ""} />
@@ -822,14 +842,14 @@ export default function Monitor() {
 
         {!historyEnabled ? (
           <p className="text-sm text-glyvex-muted">
-            El histórico está deshabilitado (<code className="font-mono">monitor.history_enabled</code> en Config).
+            {t("monitor.history.disabledBefore")}<code className="font-mono">monitor.history_enabled</code>{t("monitor.history.disabledAfter")}
           </p>
         ) : historyError ? (
           <p className="text-sm text-red-400">{historyError}</p>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div>
-              <p className="text-xs text-glyvex-muted mb-1">Temperaturas (°C)</p>
+              <p className="text-xs text-glyvex-muted mb-1">{t("monitor.history.chartTemp")}</p>
               <ChartLegend legend={TEMP_LEGEND} />
               <HistoryChart
                 series={historySeries}
@@ -839,7 +859,7 @@ export default function Monitor() {
               />
             </div>
             <div>
-              <p className="text-xs text-glyvex-muted mb-1">Carga (%)</p>
+              <p className="text-xs text-glyvex-muted mb-1">{t("monitor.history.chartLoad")}</p>
               <ChartLegend legend={LOAD_LEGEND} />
               <HistoryChart
                 series={historySeries}
@@ -850,7 +870,7 @@ export default function Monitor() {
               />
             </div>
             <div>
-              <p className="text-xs text-glyvex-muted mb-1">RAM (%)</p>
+              <p className="text-xs text-glyvex-muted mb-1">{t("monitor.history.chartRam")}</p>
               <HistoryChart
                 series={historySeries}
                 legend={RAM_LEGEND}
@@ -873,7 +893,7 @@ export default function Monitor() {
             <Server size={16} className="text-glyvex-muted" />
             <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">LLM Server</h2>
             {llmTier && llmSelected && (
-              <span className="text-xs text-glyvex-muted">· {TIER_LABEL[llmTier] || llmTier} · rango {RANGES.find((r) => r.id === range)?.label}</span>
+              <span className="text-xs text-glyvex-muted">· {tierLabel(t, llmTier)} · {t("monitor.llm.rangeLabel")} {rangeLabel(t, range)}</span>
             )}
           </div>
           {!show("monitor.history") && show("monitor.llm.history") && (
@@ -890,7 +910,7 @@ export default function Monitor() {
                       : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30")
                   }
                 >
-                  {r.label}
+                  {rangeLabel(t, r.id)}
                 </button>
               ))}
             </div>
@@ -900,12 +920,12 @@ export default function Monitor() {
               value={llmSelected || ""}
               onChange={(e) => setLlmSelected(e.target.value)}
               className="text-xs bg-black/30 border border-white/10 rounded-md px-2 py-1 text-glyvex-text max-w-full"
-              aria-label="Proceso a mostrar"
+              aria-label={t("monitor.llm.selectAria")}
             >
               {llmOptions.map((o) => (
                 <option key={o.process_id} value={o.process_id}>
                   {o.model_name || o.process_id}
-                  {o.live ? " — en vivo" : o.last_ts ? ` — hasta ${formatDateShort(o.last_ts)}` : ""}
+                  {o.live ? t("monitor.llm.optLive") : o.last_ts ? t("monitor.llm.optUntil", { date: formatDateShort(o.last_ts) }) : ""}
                 </option>
               ))}
             </select>
@@ -914,21 +934,20 @@ export default function Monitor() {
 
         {llmOptions.length === 0 ? (
           <p className="text-sm text-glyvex-muted">
-            Lanzá un modelo con llama-server desde el Launcher para ver sus métricas. Si el proceso ya estaba
-            corriendo antes de esta versión, relanzalo: necesita el flag <code className="font-mono">--metrics</code>.
+            {t("monitor.llm.noProcessBefore")}<code className="font-mono">--metrics</code>{t("monitor.llm.noProcessAfter")}
           </p>
         ) : (
           <>
             {llmSelectedOption?.live && !llmStreamConnected && llmLast && (
-              <p className="text-xs text-amber-400" title="Los valores mostrados son del último snap recibido">
-                Stream de métricas caído: reconectando… (valores obsoletos)
+              <p className="text-xs text-amber-400" title={t("vitals.streamDownTitle")}>
+                {t("vitals.streamDown")}
               </p>
             )}
             {llmSelectedOption?.live && show("monitor.llm.live") && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <div className="flex justify-between text-xs text-glyvex-muted mb-1">
-                    <span>Generación</span>
+                    <span>{t("monitor.llm.liveGeneration")}</span>
                     <span
                       className={`font-medium tabular-nums ${llmLast?.tg_tps != null ? "text-glyvex-text" : "text-glyvex-muted"}`}
                       title={llmTg.title}
@@ -941,8 +960,8 @@ export default function Monitor() {
                   </p>
                 </div>
                 <div>
-                  <div className="flex justify-between text-xs text-glyvex-muted mb-1" title={contextTitle(llmLast)}>
-                    <span>{llmLast?.ctx_used != null ? "Contexto" : "Contexto (pico)"}</span>
+                  <div className="flex justify-between text-xs text-glyvex-muted mb-1" title={contextTitle(llmLast, t)}>
+                    <span>{llmLast?.ctx_used != null ? t("monitor.llm.liveContext") : t("monitor.llm.liveContextPeak")}</span>
                     <span className="text-glyvex-text font-medium tabular-nums">
                       {llmLast?.ctx_used != null
                         ? `${llmLast.ctx_used.toLocaleString()} / ${llmLast.ctx_total?.toLocaleString() ?? "—"}`
@@ -955,23 +974,23 @@ export default function Monitor() {
                 </div>
                 <div>
                   <div className="flex justify-between text-xs text-glyvex-muted mb-1">
-                    <span>Cola</span>
+                    <span>{t("monitor.llm.liveQueue")}</span>
                     <span className="text-glyvex-text font-medium tabular-nums">
-                      {llmLast?.requests_processing ?? "—"} en curso
-                      {llmLast?.requests_deferred ? <span className="text-amber-400"> · {llmLast.requests_deferred} en espera</span> : null}
+                      {llmLast?.requests_processing ?? "—"}{t("vitals.inProgress")}
+                      {llmLast?.requests_deferred ? <span className="text-amber-400"> · {t("vitals.waitingCount", { n: llmLast.requests_deferred })}</span> : null}
                     </span>
                   </div>
                   {(llmLast?.cache_hit_pct_total != null || llmLast?.spec_accept_pct_total != null) && (
                     <p className="text-xs text-glyvex-muted mt-1.5 tabular-nums">
                       {llmLast.cache_hit_pct_total != null && (
-                        <span title="Tokens de prompt reutilizados del caché desde el arranque">
-                          Caché {llmLast.cache_hit_pct_total.toFixed(1)} %
+                        <span title={t("vitals.cacheTitle")}>
+                          {t("vitals.cacheLabel")} {llmLast.cache_hit_pct_total.toFixed(1)} %
                         </span>
                       )}
                       {llmLast.cache_hit_pct_total != null && llmLast.spec_accept_pct_total != null && " · "}
                       {llmLast.spec_accept_pct_total != null && (
-                        <span title="Tokens del draft (MTP) aceptados desde el arranque">
-                          MTP {llmLast.spec_accept_pct_total.toFixed(1)} % aceptado
+                        <span title={t("vitals.mtpTitle")}>
+                          MTP {t("vitals.mtpAccepted", { n: llmLast.spec_accept_pct_total.toFixed(1) })}
                         </span>
                       )}
                     </p>
@@ -986,35 +1005,35 @@ export default function Monitor() {
             {llmSelectedOption?.live && show("monitor.llm.live_charts") && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                 <div>
-                  <p className="text-xs text-glyvex-muted mb-1">Últimos 5 min · velocidad (t/s)</p>
-                  <ChartLegend legend={LLM_SPEED_LEGEND} />
+                  <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.liveChartSpeed")}</p>
+                  <ChartLegend legend={llmSpeedLegend} />
                   <HistoryChart
-                    series={llmLiveWindow} legend={LLM_SPEED_LEGEND} unit=" t/s"
+                    series={llmLiveWindow} legend={llmSpeedLegend} unit=" t/s"
                     rangeSeconds={LLM_LIVE_WINDOW_S} height={130} connectGaps={false}
-                    emptyText="Esperando datos en vivo…"
+                    emptyText={t("monitor.llm.liveWaiting")}
                   />
                 </div>
                 <div>
                   <p className="text-xs text-glyvex-muted mb-1">
-                    Últimos 5 min · {llmHasCtxPct ? "contexto (%)" : "pico de contexto"}
+                    {llmHasCtxPct ? t("monitor.llm.liveChartCtxPct") : t("monitor.llm.liveChartCtxPeak")}
                   </p>
-                  <ChartLegend legend={llmHasCtxPct ? LLM_CTX_PCT_LEGEND : LLM_CTX_PEAK_LEGEND} />
+                  <ChartLegend legend={llmHasCtxPct ? llmCtxPctLegend : llmCtxPeakLegend} />
                   <HistoryChart
                     series={llmLiveWindow}
-                    legend={llmHasCtxPct ? LLM_CTX_PCT_LEGEND : LLM_CTX_PEAK_LEGEND}
+                    legend={llmHasCtxPct ? llmCtxPctLegend : llmCtxPeakLegend}
                     unit={llmHasCtxPct ? "%" : ""}
                     domain={llmHasCtxPct ? [0, 100] : undefined}
                     rangeSeconds={LLM_LIVE_WINDOW_S} height={130} connectGaps={false}
-                    emptyText="Esperando datos en vivo…"
+                    emptyText={t("monitor.llm.liveWaiting")}
                   />
                 </div>
                 <div>
-                  <p className="text-xs text-glyvex-muted mb-1">Últimos 5 min · cola</p>
-                  <ChartLegend legend={LLM_QUEUE_LEGEND} />
+                  <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.liveChartQueue")}</p>
+                  <ChartLegend legend={llmQueueLegend} />
                   <HistoryChart
-                    series={llmLiveWindow} legend={LLM_QUEUE_LEGEND}
+                    series={llmLiveWindow} legend={llmQueueLegend}
                     rangeSeconds={LLM_LIVE_WINDOW_S} height={130} connectGaps={false}
-                    emptyText="Esperando datos en vivo…"
+                    emptyText={t("monitor.llm.liveWaiting")}
                   />
                 </div>
               </div>
@@ -1022,33 +1041,33 @@ export default function Monitor() {
 
             {show("monitor.llm.history") && (<>
             <p className="text-xs text-glyvex-muted uppercase tracking-wide pt-1">
-              Histórico · {RANGES.find((r) => r.id === range)?.label}
-              {llmSelectedOption?.live ? " · el último tramo se completa en vivo" : ""}
+              {t("monitor.llm.historyTitle", { label: rangeLabel(t, range) })}
+              {llmSelectedOption?.live ? t("monitor.llm.liveTail") : ""}
             </p>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <div>
-                <p className="text-xs text-glyvex-muted mb-1">Velocidad (t/s)</p>
-                <ChartLegend legend={LLM_SPEED_LEGEND} />
-                <HistoryChart series={llmSeriesWithTail} legend={LLM_SPEED_LEGEND} unit=" t/s" rangeSeconds={rangeSeconds} />
+                <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.histChartSpeed")}</p>
+                <ChartLegend legend={llmSpeedLegend} />
+                <HistoryChart series={llmSeriesWithTail} legend={llmSpeedLegend} unit=" t/s" rangeSeconds={rangeSeconds} />
               </div>
               <div>
                 <p className="text-xs text-glyvex-muted mb-1">
-                  {llmHasCtxPct ? "Uso de contexto (%)" : "Pico de contexto (tokens)"}
+                  {llmHasCtxPct ? t("monitor.llm.histChartCtxPct") : t("monitor.llm.histChartCtxPeak")}
                 </p>
-                <ChartLegend legend={llmHasCtxPct ? LLM_CTX_PCT_LEGEND : LLM_CTX_PEAK_LEGEND} />
+                <ChartLegend legend={llmHasCtxPct ? llmCtxPctLegend : llmCtxPeakLegend} />
                 <HistoryChart
                   series={llmSeriesWithTail}
-                  legend={llmHasCtxPct ? LLM_CTX_PCT_LEGEND : LLM_CTX_PEAK_LEGEND}
+                  legend={llmHasCtxPct ? llmCtxPctLegend : llmCtxPeakLegend}
                   unit={llmHasCtxPct ? "%" : ""}
                   domain={llmHasCtxPct ? [0, 100] : undefined}
                   rangeSeconds={rangeSeconds}
                 />
               </div>
               <div>
-                <p className="text-xs text-glyvex-muted mb-1">Cola de requests</p>
-                <ChartLegend legend={LLM_QUEUE_LEGEND} />
-                <HistoryChart series={llmSeriesWithTail} legend={LLM_QUEUE_LEGEND} rangeSeconds={rangeSeconds} height={140} />
+                <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.histChartQueue")}</p>
+                <ChartLegend legend={llmQueueLegend} />
+                <HistoryChart series={llmSeriesWithTail} legend={llmQueueLegend} rangeSeconds={rangeSeconds} height={140} />
               </div>
             </div>
             </>)}
@@ -1060,16 +1079,16 @@ export default function Monitor() {
       {/* Card procesos */}
       {show("monitor.processes") && (
       <div className="bg-glyvex-card rounded-lg border border-white/10 p-5">
-        <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide mb-3">Procesos activos</h2>
+        <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide mb-3">{t("monitor.processes.title")}</h2>
         {processes.length === 0 ? (
-          <p className="text-sm text-glyvex-muted">No hay procesos de llama-server/ollama corriendo.</p>
+          <p className="text-sm text-glyvex-muted">{t("monitor.processes.empty")}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-glyvex-muted">
                   <th className="px-3 py-1.5 font-medium">PID</th>
-                  <th className="px-3 py-1.5 font-medium">Nombre</th>
+                    <th className="px-3 py-1.5 font-medium">{t("monitor.processes.colName")}</th>
                   <th className="px-3 py-1.5 font-medium">CPU %</th>
                   <th className="px-3 py-1.5 font-medium">RAM MB</th>
                   <th className="px-3 py-1.5 font-medium">Threads</th>

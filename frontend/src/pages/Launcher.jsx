@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useLlmStream } from "../hooks/useLlmStream.js";
 import { useDisplay } from "../lib/metricsDisplay.js";
+import { useTranslation } from "react-i18next";
 
 // Espejo de SAMPLING_PRESETS de backend/launcher.py. Vive acá para poder
 // previsualizar los valores sin round-trip; si cambian en el backend, hay
@@ -121,7 +122,8 @@ const DEFAULT_LAUNCH_CONFIG = {
   // Token budget nativo del server para el reasoning (-1 = sin límite).
   reasoning_budget: -1,
   // -- P1.5: toggles por flag -------------------------------------------
-  // fit = "ajusta los args sin fijar a la VRAM" (default on en la build).
+  // fit = "ajusta los args sin fijar a la VRAM" (default on en la build;
+  // OFF envía --fit off explícito, porque faltar el flag deja el default on).
   fit: true,
   // Modo automático (F4): comando estricto, solo modelo + puerto.
   auto_mode: false,
@@ -161,12 +163,18 @@ const TOGGLE_GROUPS = {
 const DEFAULT_TOGGLES = Object.fromEntries(Object.keys(TOGGLE_GROUPS).map((k) => [k, true]));
 
 // La config serializada de un proceso vivo trae null justo donde el toggle
-// estaba OFF: se deduce el estado para restaurarlo al re-montar.
+// estaba OFF: se deduce el estado para restaurarlo al re-montar. Excepción:
+// fit, cuyo OFF se serializa como false (no null) porque --fit es on|off y
+// el default de la build es 'on' (faltar el flag no lo apaga).
 function togglesFromConfig(cfg) {
   const out = {};
   for (const [id, group] of Object.entries(TOGGLE_GROUPS)) {
     const known = group.fields.filter((f) => f in cfg);
     if (known.length === 0) continue;
+    if (id === "fit") {
+      out[id] = cfg.fit !== false;
+      continue;
+    }
     out[id] = !known.some((f) => cfg[f] === null);
   }
   return out;
@@ -244,12 +252,13 @@ function Panel({ icon: Icon, title, children }) {
   );
 }
 
-function Field({ label, children, hint }) {
+function Field({ label, children, hint, flagHelp }) {
   return (
     <label className="block">
       <span className="block text-sm text-glyvex-muted mb-1">{label}</span>
       {children}
       {hint && <span className="block text-xs text-glyvex-muted/70 mt-1">{hint}</span>}
+      {flagHelp && <span className="block text-xs text-glyvex-muted/50 mt-0.5 leading-snug">{flagHelp}</span>}
     </label>
   );
 }
@@ -261,7 +270,7 @@ const inputClasses =
 
 // El wrapper es un <span class="flex"> (no un <label>) para poder anidarlo
 // dentro de otros labels/rows sin generar HTML inválido.
-function Toggle({ label, checked, onChange, disabled = false, title }) {
+function Toggle({ label, checked, onChange, disabled = false, title, help }) {
   function handleToggle() {
     if (disabled) return;
     onChange(!checked);
@@ -277,11 +286,16 @@ function Toggle({ label, checked, onChange, disabled = false, title }) {
       onClick={handleToggle}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleToggle(); } }}
       className={
-        "flex items-center gap-3 select-none " +
-        (disabled ? "opacity-50 cursor-not-allowed " : "cursor-pointer ") +
-        (label ? "justify-between" : "")
+        "block select-none " +
+        (disabled ? "opacity-50 cursor-not-allowed " : "cursor-pointer ")
       }
     >
+      <span
+        className={
+          "flex items-center gap-3 " +
+          (label ? "justify-between" : "")
+        }
+      >
       {label && <span className="text-sm text-glyvex-text">{label}</span>}
       <span
         className={
@@ -296,13 +310,15 @@ function Toggle({ label, checked, onChange, disabled = false, title }) {
           }
         />
       </span>
+      </span>
+      {help && <span className="block text-xs text-glyvex-muted/50 leading-snug mt-1">{help}</span>}
     </span>
   );
 }
 
-function SamplingSlider({ label, value, min, max, step, digits = 2, onChange }) {
+function SamplingSlider({ label, value, min, max, step, digits = 2, onChange, flagHelp }) {
   return (
-    <Field label={`${label}: ${Number(value).toFixed(digits)}`}>
+    <Field label={`${label}: ${Number(value).toFixed(digits)}`} flagHelp={flagHelp}>
       <input
         type="range"
         min={min}
@@ -317,9 +333,9 @@ function SamplingSlider({ label, value, min, max, step, digits = 2, onChange }) 
 }
 
 const SORT_OPTIONS = [
-  { value: "name", label: "Nombre" },
-  { value: "size_gb", label: "Tamaño" },
-  { value: "family", label: "Familia" },
+  { value: "name" },
+  { value: "size_gb" },
+  { value: "family" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -364,6 +380,7 @@ function argvToLines(argv) {
  * la api-key ya viene enmascarada por el backend (mask_command).
  */
 function CommandBlock({ argv, emptyHint }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const lines = useMemo(() => argvToLines(argv), [argv]);
   const oneLiner = useMemo(() => (argv || []).map(shellQuote).join(" "), [argv]);
@@ -385,7 +402,7 @@ function CommandBlock({ argv, emptyHint }) {
   }, [oneLiner]);
 
   if (!argv?.length) {
-    return <p className="text-xs text-glyvex-muted">{emptyHint || "Sin comando disponible."}</p>;
+    return <p className="text-xs text-glyvex-muted">{emptyHint || t("commandBlock.emptyDefault")}</p>;
   }
 
   return (
@@ -393,11 +410,11 @@ function CommandBlock({ argv, emptyHint }) {
       <button
         type="button"
         onClick={copy}
-        title="Copiar el comando completo en una línea"
+        title={t("commandBlock.copyTitle")}
         className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-1 rounded text-xs border border-white/10 bg-glyvex-card text-glyvex-muted hover:text-glyvex-text"
       >
         {copied ? <Check size={12} /> : <Copy size={12} />}
-        {copied ? "Copiado" : "Copiar"}
+        {copied ? t("commandBlock.copied") : t("commandBlock.copy")}
       </button>
       {/* overflow-x-auto: en ventanas angostas el comando scrollea dentro de
           su caja en vez de estirar el panel entero. */}
@@ -429,6 +446,7 @@ function BackendBadge({ backend }) {
 }
 
 function ModelTable({ modelList, selectedId, onSelect }) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [familyFilter, setFamilyFilter] = useState("all");
   const [quantFilter, setQuantFilter] = useState("all");
@@ -485,41 +503,41 @@ function ModelTable({ modelList, selectedId, onSelect }) {
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-glyvex-muted" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por nombre…"
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("modelTable.searchPlaceholder")}
             className="w-full bg-black/30 border border-white/10 rounded-md pl-8 pr-3 py-1.5 text-sm text-glyvex-text placeholder:text-glyvex-muted/60 focus:outline-none focus:ring-2 focus:ring-glyvex-accent/60" />
         </div>
         <select className={selectClasses} value={familyFilter} onChange={(e) => setFamilyFilter(e.target.value)}>
-          <option value="all">Todas las familias</option>
+          <option value="all">{t("modelTable.allFamilies")}</option>
           {families.map((f) => <option key={f} value={f}>{f}</option>)}
         </select>
         <select className={selectClasses} value={quantFilter} onChange={(e) => setQuantFilter(e.target.value)}>
-          <option value="all">Todas las cuantizaciones</option>
+          <option value="all">{t("modelTable.allQuants")}</option>
           {quantizations.map((q) => <option key={q} value={q}>{q}</option>)}
         </select>
         <select className={selectClasses} value={backendFilter} onChange={(e) => setBackendFilter(e.target.value)}>
-          <option value="all">Todos los backends</option>
+          <option value="all">{t("modelTable.allBackends")}</option>
           {backends.map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
         <select className={selectClasses} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-          {SORT_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>Ordenar por {opt.label}</option>)}
+          {SORT_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{t("modelTable.sortBy", { name: t(`modelTable.sort.${opt.value}`) })}</option>)}
         </select>
       </div>
       {modelList.length === 0 ? (
-        <p className="text-sm text-glyvex-muted">No hay modelos en el inventario todavía.</p>
+        <p className="text-sm text-glyvex-muted">{t("modelTable.emptyInventory")}</p>
       ) : filtered.length === 0 ? (
-        <p className="text-sm text-glyvex-muted">Ningún modelo coincide con los filtros.</p>
+        <p className="text-sm text-glyvex-muted">{t("modelTable.noMatch")}</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-white/10">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-glyvex-card text-left text-glyvex-muted">
-                <th className="px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-glyvex-text">Nombre <ArrowUpDown size={12} /></button></th>
-                <th className="px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("family")} className="flex items-center gap-1 hover:text-glyvex-text">Familia <ArrowUpDown size={12} /></button></th>
-                <th className="px-3 py-2 font-medium">Parámetros</th>
-                <th className="px-3 py-2 font-medium">Cuantización</th>
-                <th className="px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("size_gb")} className="flex items-center gap-1 hover:text-glyvex-text">Tamaño <ArrowUpDown size={12} /></button></th>
-                <th className="px-3 py-2 font-medium">Formato</th>
-                <th className="px-3 py-2 font-medium">Backends</th>
+                <th className="px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("name")} className="flex items-center gap-1 hover:text-glyvex-text">{t("modelTable.colName")} <ArrowUpDown size={12} /></button></th>
+                <th className="px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("family")} className="flex items-center gap-1 hover:text-glyvex-text">{t("modelTable.colFamily")} <ArrowUpDown size={12} /></button></th>
+                <th className="px-3 py-2 font-medium">{t("modelTable.colParams")}</th>
+                <th className="px-3 py-2 font-medium">{t("modelTable.colQuant")}</th>
+                <th className="px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("size_gb")} className="flex items-center gap-1 hover:text-glyvex-text">{t("modelTable.colSize")} <ArrowUpDown size={12} /></button></th>
+                <th className="px-3 py-2 font-medium">{t("modelTable.colFormat")}</th>
+                <th className="px-3 py-2 font-medium">{t("modelTable.colBackends")}</th>
                 <th className="px-3 py-2 font-medium"></th>
               </tr>
             </thead>
@@ -536,7 +554,7 @@ function ModelTable({ modelList, selectedId, onSelect }) {
                   <td className="px-3 py-2">
                     <button type="button" onClick={() => onSelect(m.id)}
                       className={"px-3 py-1 rounded-md text-xs shrink-0 " + (m.id === selectedId ? "bg-glyvex-accent text-white" : "border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card")}>
-                      {m.id === selectedId ? "Seleccionado" : "Seleccionar"}
+                      {m.id === selectedId ? t("modelTable.selected") : t("modelTable.select")}
                     </button>
                   </td>
                 </tr>
@@ -583,6 +601,7 @@ function SourcePicker({ value, options, onChange }) {
 }
 
 function GroupCard({ group, onSelect }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [selectedBaseId, setSelectedBaseId] = useState(group.base_models[0]?.id ?? null);
   const [useMtp, setUseMtp] = useState(false);
@@ -610,14 +629,14 @@ function GroupCard({ group, onSelect }) {
   // emergencia, aunque el scanner haya detectado algo — el detector puede
   // equivocarse, o el usuario simplemente puede preferir otro archivo.
   const mtpOptions = [
-    ...(hasEmbeddedMtp ? [["embedded", "Incluido en el modelo"]] : []),
-    ...(hasSidecarMtp ? [["sidecar", "Archivo detectado en la carpeta"]] : []),
-    ["manual", "Path manual"],
+    ...(hasEmbeddedMtp ? [["embedded", t("groupCard.embeddedInModel")]] : []),
+    ...(hasSidecarMtp ? [["sidecar", t("groupCard.detectedInFolder")]] : []),
+    ["manual", t("groupCard.manualPath")],
   ];
   const visionOptions = [
-    ...(hasEmbeddedVision ? [["embedded", "Incluido en el modelo"]] : []),
-    ...(hasSidecarVision ? [["sidecar", "Archivo detectado en la carpeta"]] : []),
-    ["manual", "Path manual"],
+    ...(hasEmbeddedVision ? [["embedded", t("groupCard.embeddedInModel")]] : []),
+    ...(hasSidecarVision ? [["sidecar", t("groupCard.detectedInFolder")]] : []),
+    ["manual", t("groupCard.manualPath")],
   ];
 
   // Default sugerido: si el modelo lo trae adentro, esa es la opción; si no,
@@ -684,9 +703,9 @@ function GroupCard({ group, onSelect }) {
         <div className="min-w-0">
           <p className="text-sm font-medium truncate">{group.name}</p>
           <p className="text-xs text-glyvex-muted truncate">
-            {group.base_models.length} cuantización{group.base_models.length !== 1 ? "es" : ""}
+            {t("groupCard.quantizations", { count: group.base_models.length })}
             {group.mtp_models.length > 0 ? ` · ${group.mtp_models.length} MTP` : ""}
-            {group.mmproj_models.length > 0 ? ` · ${group.mmproj_models.length} visión` : ""}
+            {group.mmproj_models.length > 0 ? ` · ${group.mmproj_models.length} ${t("groupCard.vision")}` : ""}
           </p>
         </div>
         {expanded ? <ChevronDown size={16} className="shrink-0 text-glyvex-muted" /> : <ChevronRight size={16} className="shrink-0 text-glyvex-muted" />}
@@ -694,7 +713,7 @@ function GroupCard({ group, onSelect }) {
       {expanded && (
         <div className="border-t border-white/10 p-4 space-y-4">
           <div>
-            <p className="text-xs text-glyvex-muted uppercase tracking-wide mb-2">Cuantización base</p>
+            <p className="text-xs text-glyvex-muted uppercase tracking-wide mb-2">{t("groupCard.baseQuant")}</p>
             <div className="space-y-1.5">
               {group.base_models.map((m) => (
                 <label key={m.id} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -722,7 +741,7 @@ function GroupCard({ group, onSelect }) {
                   }}
                   className="accent-glyvex-accent" />
                 MTP draft model
-                {useMtp && mtpSource === "embedded" && <DetectedBadge>detectado · incluido en el modelo</DetectedBadge>}
+                {useMtp && mtpSource === "embedded" && <DetectedBadge>{t("groupCard.detectedEmbedded")}</DetectedBadge>}
               </label>
               {useMtp && (
                 <SourcePicker value={mtpSource} options={mtpOptions}
@@ -739,7 +758,7 @@ function GroupCard({ group, onSelect }) {
                 <input className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text placeholder:text-glyvex-muted/60"
                   value={manualMtpPath}
                   onChange={(e) => { mtpTouchedRef.current = true; setManualMtpPath(e.target.value); emitSelection({ mtpManual: e.target.value }); }}
-                  placeholder="C:\ruta\a\tu-draft.gguf" />
+                  placeholder={t("groupCard.draftPathPlaceholder")} />
               )}
             </div>
           )}
@@ -758,8 +777,8 @@ function GroupCard({ group, onSelect }) {
                     emitSelection({ vision: checked, visionSource: src });
                   }}
                   className="accent-glyvex-accent" />
-                Módulo de visión (mmproj)
-                {useMmproj && mmprojSource === "embedded" && <DetectedBadge>detectado · incluido en el modelo</DetectedBadge>}
+                {t("groupCard.visionModule")}
+                {useMmproj && mmprojSource === "embedded" && <DetectedBadge>{t("groupCard.detectedEmbedded")}</DetectedBadge>}
               </label>
               {useMmproj && (
                 <SourcePicker value={mmprojSource} options={visionOptions}
@@ -776,13 +795,13 @@ function GroupCard({ group, onSelect }) {
                 <input className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text placeholder:text-glyvex-muted/60"
                   value={manualMmprojPath}
                   onChange={(e) => { mmprojTouchedRef.current = true; setManualMmprojPath(e.target.value); emitSelection({ mmprojManual: e.target.value }); }}
-                  placeholder="C:\ruta\a\tu-mmproj.gguf" />
+                  placeholder={t("groupCard.mmprojPathPlaceholder")} />
               )}
             </div>
           )}
           <button type="button" onClick={handleConfigureClick} disabled={!selectedBaseId}
             className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium border border-glyvex-accent/40 bg-glyvex-accent/15 text-glyvex-accent hover:bg-glyvex-accent/25 disabled:opacity-50">
-            Configurar
+            {t("groupCard.configure")}
             <ChevronRight size={14} />
           </button>
         </div>
@@ -803,28 +822,28 @@ const STRIP_KEYS = ["launcher.tg", "launcher.ctx", "launcher.queue", "launcher.c
  * midió el backend (tg_tps_last, sin importar cuánto hace). Devuelve también
  * el tooltip con la antigüedad.
  */
-function tgDisplay(snaps) {
+function tgDisplay(snaps, t) {
   const last = snaps[snaps.length - 1] || null;
-  if (last?.tg_tps != null) return { value: last.tg_tps, live: true, title: "Velocidad de generación actual" };
+  if (last?.tg_tps != null) return { value: last.tg_tps, live: true, title: t("vitals.tgCurrent") };
   const fromBackend = last?.tg_tps_last ?? null;
   const fromBuffer = [...snaps].reverse().find((s) => s.tg_tps != null)?.tg_tps ?? null;
   const value = fromBackend ?? fromBuffer;
-  if (value == null) return { value: null, live: false, title: "Todavía no hubo generación en este proceso" };
+  if (value == null) return { value: null, live: false, title: t("vitals.tgNoneYet") };
   const at = last?.tg_tps_last_at ? Date.parse(String(last.tg_tps_last_at).replace(/(\.\d{3})\d+/, "$1")) : NaN;
   const seconds = Number.isNaN(at) ? null : Math.max(0, Math.round((Date.now() - at) / 1000));
-  const ago = seconds == null ? "" : seconds < 60 ? ` hace ${seconds} s` : seconds < 3600 ? ` hace ${Math.round(seconds / 60)} min` : ` hace ${Math.round(seconds / 3600)} h`;
-  return { value, live: false, title: `Sin generación ahora: última velocidad medida${ago}` };
+  const ago = seconds == null ? "" : seconds < 60 ? t("vitals.agoS", { n: seconds }) : seconds < 3600 ? t("vitals.agoMin", { n: Math.round(seconds / 60) }) : t("vitals.agoH", { n: Math.round(seconds / 3600) });
+  return { value, live: false, title: t("vitals.tgStale", { ago }) };
 }
 
-function contextTitle(snap) {
+function contextTitle(snap, t) {
   if (!snap || snap.ctx_used == null) {
-    return "Este build de llama-server no expone el contexto actual: se muestra el pico observado";
+    return t("vitals.ctxNoExpose");
   }
-  if (snap.ctx_source === "kv_cache") return "Tokens en el KV cache ahora";
+  if (snap.ctx_source === "kv_cache") return t("vitals.ctxKvCache");
   if (snap.slots_busy === 0) {
-    return "Secuencia de la última conversación, que sigue en el KV cache para reutilizarse (dato de /slots)";
+    return t("vitals.ctxLastConv");
   }
-  return "Tokens en la secuencia actual: prompt + generados hasta ahora (dato de /slots)";
+  return t("vitals.ctxCurrentSeq");
 }
 
 function vitalsCtxColor(ratio) {
@@ -875,6 +894,7 @@ function MiniSpark({ values, color = "#06b6d4", width = 72, height = 20 }) {
  * obsoletos si cae la conexión.
  */
 function ServerVitalsStrip({ processId, state }) {
+  const { t } = useTranslation();
   const [snaps, setSnaps] = useState([]);
   const { isVisible: show, anyVisible, ready: displayReady } = useDisplay();
   const stripVisible = anyVisible(STRIP_KEYS);
@@ -895,7 +915,7 @@ function ServerVitalsStrip({ processId, state }) {
 
   const last = snaps[snaps.length - 1] || null;
   const tgValues = snaps.map((s) => s.tg_tps ?? null);
-  const tg = tgDisplay(snaps);
+  const tg = tgDisplay(snaps, t);
 
   // Todo oculto en Config: ni tira ni WebSocket (ver active de useLlmStream).
   if (!stripVisible) return null;
@@ -903,7 +923,7 @@ function ServerVitalsStrip({ processId, state }) {
   if (state !== "running" && !last) {
     return (
       <div className="px-3 py-2 rounded-md border border-white/10 bg-black/30 text-xs text-glyvex-muted">
-        Vitales del servidor: disponibles cuando el proceso esté listo.
+        {t("vitals.waitingReady")}
       </div>
     );
   }
@@ -922,8 +942,8 @@ function ServerVitalsStrip({ processId, state }) {
   return (
     <div className="px-3 py-2 rounded-md border border-white/10 bg-black/30 text-xs space-y-1.5" aria-live="off">
       {state === "running" && !connected && last && (
-        <p className="text-amber-400" title="Los valores mostrados son del último snap recibido">
-          Stream de métricas caído: reconectando… (valores obsoletos)
+        <p className="text-amber-400" title={t("vitals.streamDownTitle")}>
+          {t("vitals.streamDown")}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -943,7 +963,7 @@ function ServerVitalsStrip({ processId, state }) {
         {show("launcher.ctx") && (
         <div
           className="flex items-center gap-2"
-          title={contextTitle(last)}
+          title={contextTitle(last, t)}
         >
           <span className="text-glyvex-muted">ctx</span>
           {ctxUsed != null ? (
@@ -962,7 +982,7 @@ function ServerVitalsStrip({ processId, state }) {
             </>
           ) : (
             <span className="font-medium tabular-nums text-glyvex-text">
-              {ctxPeak != null ? `pico ${ctxPeak.toLocaleString()}` : "—"}
+              {ctxPeak != null ? t("vitals.peak", { n: ctxPeak.toLocaleString() }) : "—"}
               {ctxTotal ? <span className="text-glyvex-muted font-normal"> / {ctxTotal.toLocaleString()}</span> : null}
             </span>
           )}
@@ -970,13 +990,13 @@ function ServerVitalsStrip({ processId, state }) {
         )}
 
         {show("launcher.queue") && (
-        <div className="flex items-center gap-2" title="Requests procesándose y esperando un slot libre">
+        <div className="flex items-center gap-2" title={t("vitals.queueTitle")}>
           <span className="text-glyvex-muted">cola</span>
           <span className="font-medium tabular-nums text-glyvex-text">
             {processing ?? "—"}
-            <span className="text-glyvex-muted font-normal"> en curso</span>
+            <span className="text-glyvex-muted font-normal">{t("vitals.inProgress")}</span>
             {deferred ? (
-              <span className="text-amber-400"> · {deferred} en espera</span>
+              <span className="text-amber-400"> · {t("vitals.waitingCount", { n: deferred })}</span>
             ) : null}
           </span>
         </div>
@@ -986,11 +1006,11 @@ function ServerVitalsStrip({ processId, state }) {
           <div
             className="flex items-center gap-2"
             title={
-              "Tokens de prompt reutilizados del caché desde que arrancó el servidor" +
-              (cacheInterval != null ? `. Último request: ${cacheInterval.toFixed(1)} %` : "")
+              t("vitals.cacheTitle") +
+              (cacheInterval != null ? t("vitals.cacheLast", { n: cacheInterval.toFixed(1) }) : "")
             }
           >
-            <span className="text-glyvex-muted">caché</span>
+            <span className="text-glyvex-muted">{t("vitals.cacheLabel")}</span>
             <span className="font-medium tabular-nums text-glyvex-text">{cacheTotal.toFixed(1)} %</span>
           </div>
         )}
@@ -999,12 +1019,12 @@ function ServerVitalsStrip({ processId, state }) {
           <div
             className="flex items-center gap-2"
             title={
-              "Tokens propuestos por el draft (MTP) que el modelo aceptó, desde que arrancó" +
-              (specInterval != null ? `. Último intervalo: ${specInterval.toFixed(1)} %` : "")
+              t("vitals.mtpTitle") +
+              (specInterval != null ? t("vitals.mtpLast", { n: specInterval.toFixed(1) }) : "")
             }
           >
             <span className="text-glyvex-muted">MTP</span>
-            <span className="font-medium tabular-nums text-glyvex-text">{specTotal.toFixed(1)} % aceptado</span>
+            <span className="font-medium tabular-nums text-glyvex-text">{t("vitals.mtpAccepted", { n: specTotal.toFixed(1) })}</span>
           </div>
         )}
       </div>
@@ -1017,6 +1037,7 @@ function ServerVitalsStrip({ processId, state }) {
 }
 
 function LogTerminal({ processId }) {
+  const { t } = useTranslation();
   const [lines, setLines] = useState([]);
   const containerRef = useRef(null);
 
@@ -1056,7 +1077,7 @@ function LogTerminal({ processId }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-glyvex-muted">Terminal de logs</span>
+        <span className="text-xs text-glyvex-muted">{t("logTerminal.title")}</span>
         <button
           type="button"
           onClick={handleDownload}
@@ -1064,17 +1085,18 @@ function LogTerminal({ processId }) {
           className="flex items-center gap-1 px-2 py-1 rounded text-xs border border-glyvex-border text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Download size={12} />
-          Descargar log
+          {t("logTerminal.download")}
         </button>
       </div>
       <div ref={containerRef} className="bg-black/50 border border-white/10 rounded-md p-3 h-64 overflow-y-auto font-mono text-xs text-glyvex-muted space-y-0.5">
-        {lines.length === 0 ? <p className="text-glyvex-muted/60">Sin logs todavía.</p> : lines.map((line, i) => <div key={i}>{line}</div>)}
+        {lines.length === 0 ? <p className="text-glyvex-muted/60">{t("logTerminal.empty")}</p> : lines.map((line, i) => <div key={i}>{line}</div>)}
       </div>
     </div>
   );
 }
 
 export default function Launcher() {
+  const { t } = useTranslation();
   const [modelList, setModelList] = useState([]);
   const [groupList, setGroupList] = useState([]);
   const [viewMode, setViewMode] = useState("group");
@@ -1134,16 +1156,20 @@ export default function Launcher() {
   const toggleTitle = (id) => {
     const flag = TOGGLE_GROUPS[id].flag;
     if (isBuildUnavailable(id)) {
-      return `No disponible en esta build (${backendInfo?.build || "?"}): ${flag} no está en el --help del binario`;
+      return t("launcher.toggleUnavailable", { build: backendInfo?.build || "?", flag });
     }
-    return backendInfo?.flag_help?.[flag] || undefined;
+    return probeHelp(flag);
   };
+  // P8: ayuda oficial del flag (del probe de /backend-info) como etiqueta
+  // visible. Sin probe o flag ausente en la build -> "" (no se muestra nada).
+  const probeHelp = (flag) => backendInfo?.flag_help?.[flag] || "";
   // OFF -> null en los campos del grupo (el builder salta lo que es None).
   const applyToggles = useCallback((cfg) => {
     const out = { ...cfg };
     for (const [id, group] of Object.entries(TOGGLE_GROUPS)) {
       if (toggles[id]) continue;
-      for (const f of group.fields) out[f] = null;
+      // fit OFF debe enviar false (no null): el builder lo mapea a --fit off.
+      for (const f of group.fields) out[f] = id === "fit" ? false : null;
     }
     return out;
   }, [toggles]);
@@ -1199,7 +1225,7 @@ export default function Launcher() {
         setGroupList(groups);
         setTemplateList(Array.isArray(tpls) ? tpls : []);
       } catch {
-        if (!cancelled) setError("No se pudo cargar el inventario de modelos o los templates.");
+        if (!cancelled) setError(t("launcher.errLoadInventory"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -1347,7 +1373,7 @@ export default function Launcher() {
     try {
       const tpls = await fetch("/api/launcher/templates").then((r) => r.json());
       setTemplateList(Array.isArray(tpls) ? tpls : []);
-    } catch { setActionError("No se pudo recargar la lista de templates."); }
+    } catch { setActionError(t("launcher.errReloadTemplates")); }
   }, []);
 
   function applyTemplate(name) {
@@ -1394,7 +1420,7 @@ export default function Launcher() {
       setNewTemplateName("");
       setSelectedTemplate(saved.name);
     } catch (err) {
-      setActionError(typeof err.message === "string" && err.message !== "save_template_failed" ? err.message : "No se pudo guardar el template.");
+      setActionError(typeof err.message === "string" && err.message !== "save_template_failed" ? err.message : t("launcher.errSaveTemplate"));
     }
   }
 
@@ -1404,12 +1430,12 @@ export default function Launcher() {
       const res = await fetch(`/api/launcher/templates/${encodeURIComponent(name)}`, { method: "DELETE" });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || "No se pudo eliminar el template.");
+        throw new Error(data.detail || t("launcher.errDeleteTemplate"));
       }
       await reloadTemplates();
       if (selectedTemplate === name) setSelectedTemplate("");
     } catch (err) {
-      setActionError(typeof err.message === "string" ? err.message : "No se pudo eliminar el template.");
+      setActionError(typeof err.message === "string" ? err.message : t("launcher.errDeleteTemplate"));
     }
   }
 
@@ -1479,7 +1505,7 @@ export default function Launcher() {
       if (!res.ok) throw new Error(data.detail || "launch_failed");
       setProcessInfo(data);
     } catch (err) {
-      setActionError(typeof err.message === "string" ? err.message : "Error al lanzar el modelo.");
+      setActionError(typeof err.message === "string" ? err.message : t("launcher.errLaunch"));
     } finally { setLaunching(false); }
   }, [launchConfig, selectedModel, applyToggles]);
 
@@ -1491,7 +1517,7 @@ export default function Launcher() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "stop_failed");
       setProcessInfo(data && data.state ? data : null);
-    } catch { setActionError("Error al detener el proceso."); }
+    } catch { setActionError(t("launcher.errStop")); }
   }
 
   async function handleRestart() {
@@ -1502,7 +1528,7 @@ export default function Launcher() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "restart_failed");
       setProcessInfo(data);
-    } catch { setActionError("Error al reiniciar el proceso."); }
+    } catch { setActionError(t("launcher.errRestart")); }
   }
 
   const isProcessActive = processInfo && processInfo.state !== "stopped";
@@ -1554,16 +1580,22 @@ export default function Launcher() {
       {showSamplingSliders && (
         <div className="space-y-3">
           <SamplingSlider label="Temperature" value={launchConfig.temperature} min={0} max={2} step={0.05}
+            flagHelp={probeHelp("--temp")}
             onChange={(v) => updateSampling({ temperature: v })} />
           <SamplingSlider label="Top P" value={launchConfig.top_p} min={0} max={1} step={0.01}
+            flagHelp={probeHelp("--top-p")}
             onChange={(v) => updateSampling({ top_p: v })} />
           <SamplingSlider label="Top K" value={launchConfig.top_k} min={0} max={100} step={1} digits={0}
+            flagHelp={probeHelp("--top-k")}
             onChange={(v) => updateSampling({ top_k: v })} />
           <SamplingSlider label="Min P" value={launchConfig.min_p} min={0} max={1} step={0.01}
+            flagHelp={probeHelp("--min-p")}
             onChange={(v) => updateSampling({ min_p: v })} />
           <SamplingSlider label="Presence penalty" value={launchConfig.presence_penalty} min={0} max={2} step={0.05}
+            flagHelp={probeHelp("--presence-penalty")}
             onChange={(v) => updateSampling({ presence_penalty: v })} />
           <SamplingSlider label="Repeat penalty" value={launchConfig.repeat_penalty} min={1} max={2} step={0.05}
+            flagHelp={probeHelp("--repeat-penalty")}
             onChange={(v) => updateSampling({ repeat_penalty: v })} />
         </div>
       )}
@@ -1571,25 +1603,24 @@ export default function Launcher() {
         <div className="space-y-1 pt-1 border-t border-white/10">
           {modelMeta.error ? (
             <p className="text-xs text-glyvex-muted-2">
-              No se pudo leer la metadata del GGUF: {modelMeta.error}
+              {t("launcher.ggufMetaError", { error: modelMeta.error })}
             </p>
           ) : (
             <>
               {nativeCtx && (
                 <p className="text-xs text-glyvex-muted">
-                  Contexto nativo del modelo: {nativeCtx.toLocaleString()} tokens
+                  {t("launcher.nativeCtxTokens", { ctx: nativeCtx.toLocaleString() })}
                 </p>
               )}
               {ctxOverflow && (
                 <p className="text-xs text-amber-400">
-                  ⚠ n_ctx ({Number(launchConfig.n_ctx).toLocaleString()}) supera el contexto nativo
-                  del modelo ({nativeCtx.toLocaleString()})
+                  {t("launcher.ctxOverflowWarning", { nCtx: Number(launchConfig.n_ctx).toLocaleString(), native: nativeCtx.toLocaleString() })}
                 </p>
               )}
               {modelMeta.architecture && (
                 <p className="text-xs text-glyvex-muted-2">
-                  Arquitectura: {modelMeta.architecture}
-                  {modelMeta.thinking_support ? " · Soporta thinking ✓" : ""}
+                  {t("launcher.architecture", { arch: modelMeta.architecture })}
+                  {modelMeta.thinking_support ? t("launcher.supportsThinking") : ""}
                 </p>
               )}
             </>
@@ -1600,20 +1631,20 @@ export default function Launcher() {
         <div className="mt-2 rounded-md bg-black/20 border border-white/10 p-3 space-y-1">
           <div className="flex items-center gap-2 text-sm">
             <span className={`inline-block w-2.5 h-2.5 rounded-full ${VRAM_STATE_DOT[vramEstimate.state] || VRAM_STATE_DOT.unknown}`} />
-            <span className="font-medium">VRAM estimada: {vramEstimate.total_gb} GB</span>
+            <span className="font-medium">{t("launcher.vramEstimated", { total: vramEstimate.total_gb })}</span>
             {vramEstimate.pct !== null && (
               <span className="text-glyvex-muted">/ {vramEstimate.gpu_vram_gb} GB ({vramEstimate.pct}%)</span>
             )}
           </div>
           <p className="text-xs text-glyvex-muted">
-            Pesos {vramEstimate.weights_gb} GB · KV cache {vramEstimate.kv_gb} GB
-            {vramEstimate.ssm_gb ? ` · SSM ${vramEstimate.ssm_gb} GB` : ""} · Cómputo {vramEstimate.compute_gb} GB
+            {t("launcher.vramWeightsKv", { w: vramEstimate.weights_gb, kv: vramEstimate.kv_gb })}
+            {vramEstimate.ssm_gb ? ` · SSM ${vramEstimate.ssm_gb} GB` : ""} · {t("launcher.vramCompute", { c: vramEstimate.compute_gb })}
             {vramEstimate.n_parallel > 1 ? ` · ${vramEstimate.n_parallel} slots` : ""}
           </p>
           {Array.isArray(vramEstimate.legend) && vramEstimate.legend.length > 0 && (
             <div className="pt-1.5 border-t border-white/10">
               <p className="text-[11px] text-glyvex-muted-2 mb-1">
-                VRAM según contexto (misma cuantización):
+                {t("launcher.vramByContext")}
               </p>
               <div className="flex flex-wrap gap-x-3 gap-y-0.5">
                 {vramEstimate.legend.map((row) => (
@@ -1632,22 +1663,22 @@ export default function Launcher() {
           )}
           {vramEstimate.state === "no_cabe" && (
             <p className="text-xs text-red-400">
-              No cabe en la VRAM de la GPU: probá una cuantización más baja, un n_ctx menor u offload de MoE a CPU.
+              {t("launcher.vramNoFit")}
             </p>
           )}
           {vramEstimate.state === "justo" && (
             <p className="text-xs text-amber-400">
-              Cabe, pero justo al límite: considerá reducir n_ctx o usar fit_target.
+              {t("launcher.vramJustFit")}
             </p>
           )}
           {vramEstimate.state === "unknown" && (
             <p className="text-xs text-glyvex-muted-2">
-              Declará la VRAM de tu GPU en Configuración para saber si cabe.
+              {t("launcher.vramUnknown")}
             </p>
           )}
           {vramEstimate.is_moe && (
             <p className="text-xs text-glyvex-muted-2">
-              MoE: los pesos son los parámetros totales (por token solo corren los activos).
+              {t("launcher.vramMoE")}
             </p>
           )}
         </div>
@@ -1655,7 +1686,7 @@ export default function Launcher() {
     </Panel>
   );
 
-  if (loading) return <p className="text-glyvex-muted text-sm">Cargando modelos…</p>;
+  if (loading) return <p className="text-glyvex-muted text-sm">{t("launcher.loadingModels")}</p>;
 
   return (
     <div className="space-y-6">
@@ -1665,15 +1696,15 @@ export default function Launcher() {
           {backendInfo && (
             <span
               className="text-xs font-mono px-2 py-0.5 rounded border border-white/10 text-glyvex-muted"
-              title={
-                backendInfo.probed
-                  ? `${backendInfo.version_line || "llama-server"}\n${backendInfo.flags?.length ?? 0} flags soportados\n${backendInfo.path}`
-                  : "No se pudo leer --help/--version del binario: no se filtran flags no soportados"
-              }
-            >
-              {backendInfo.probed
-                ? `llama.cpp ${backendInfo.build || "build desconocida"}`
-                : "⚠ binario sin detectar"}
+                title={
+                  backendInfo.probed
+                    ? `${backendInfo.version_line || "llama-server"}\n${t("launcher.probeTitleFlags", { n: backendInfo.flags?.length ?? 0 })}\n${backendInfo.path}`
+                    : t("launcher.probeTitleFail")
+                }
+              >
+                {backendInfo.probed
+                  ? `llama.cpp ${backendInfo.build || t("launcher.buildUnknown")}`
+                  : t("launcher.binaryNotDetected")}
             </span>
           )}
         </div>
@@ -1687,7 +1718,7 @@ export default function Launcher() {
 
       {viewMode === "group" ? (
         groupList.length === 0 ? (
-          <p className="text-sm text-glyvex-muted">No hay modelos en el inventario todavía.</p>
+          <p className="text-sm text-glyvex-muted">{t("modelTable.emptyInventory")}</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {groupList.map((g) => <GroupCard key={g.group_id} group={g} onSelect={handleSelectModel} />)}
@@ -1700,27 +1731,27 @@ export default function Launcher() {
       {selectedModel && (
         <div ref={configPanelRef} className="space-y-6 scroll-mt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-glyvex-muted">Configurando lanzamiento para <span className="text-glyvex-text">{selectedModel.name}</span></p>
+            <p className="text-sm text-glyvex-muted">{t("launcher.configuringFor")} <span className="text-glyvex-text">{selectedModel.name}</span></p>
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-2 text-sm">
-                <span className="text-glyvex-muted">Auto</span>
+                <span className="text-glyvex-muted">{t("launcher.auto")}</span>
                 <Toggle checked={autoMode} onChange={(v) => updateConfig({ auto_mode: v })}
                   disabled={advancedMode}
-                  title="Comando estricto: solo modelo + puerto (defaults de la build). Conserva la infra: --verbosity y --metrics." />
+                  title={t("launcher.autoTitle")} />
               </span>
               <span className="flex items-center gap-2 text-sm">
-                <span className="text-glyvex-muted">Avanzado</span>
+                <span className="text-glyvex-muted">{t("launcher.advanced")}</span>
                 <Toggle checked={advancedMode}
                   onChange={(v) => { setAdvancedMode(v); if (v) updateConfig({ auto_mode: false }); }} />
               </span>
               <button
                 type="button"
                 onClick={() => setShowCommand((v) => !v)}
-                title="Ver el comando de llama-server que se va a ejecutar"
+                title={t("launcher.viewCommandTitle")}
                 className={"flex items-center gap-2 px-3 py-2 rounded-md text-sm border " + (showCommand ? "border-glyvex-accent/60 text-glyvex-text bg-glyvex-card" : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card")}
               >
                 <Terminal size={16} />
-                Comando
+                {t("launcher.command")}
                 {showCommand ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </button>
               {isProcessActive && (
@@ -1729,7 +1760,7 @@ export default function Launcher() {
               {isProcessActive ? (
                 <button type="button" onClick={handleStop} className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-red-600 text-white hover:bg-red-500"><Square size={16} />STOP</button>
               ) : (
-                <button type="button" onClick={handleLaunch} disabled={launching} className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50"><Play size={16} />{launching ? "Lanzando…" : "LAUNCH"}</button>
+                <button type="button" onClick={handleLaunch} disabled={launching} className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50"><Play size={16} />{launching ? t("launcher.launching") : t("launcher.launch")}</button>
               )}
             </div>
           </div>
@@ -1737,23 +1768,23 @@ export default function Launcher() {
           {actionError && <p className="text-sm text-red-400">{actionError}</p>}
 
           {showCommand && (
-            <Panel icon={Terminal} title="Comando de lanzamiento">
+            <Panel icon={Terminal} title={t("launcher.commandPanelTitle")}>
               {commandError ? (
                 <p className="text-xs text-red-400">{commandError}</p>
               ) : (
                 <>
                   <p className="text-xs text-glyvex-muted">
-                    Lo que se va a ejecutar con la config actual
-                    {commandPreview?.build ? ` (build detectada: ${commandPreview.build})` : ""}.
-                    La api-key se muestra enmascarada.
+                    {t("launcher.commandPreviewDesc")}
+                    {commandPreview?.build ? t("launcher.commandPreviewBuild", { build: commandPreview.build }) : ""}
+                    {t("launcher.commandPreviewMasked")}
                   </p>
                   <CommandBlock
                     argv={commandPreview?.command}
-                    emptyHint="LM Studio corre su propio servidor: no hay comando que lanzar desde acá."
+                    emptyHint={t("launcher.lmstudioEmpty")}
                   />
                   {commandPreview?.dropped?.length > 0 && (
                     <p className="text-xs text-amber-400">
-                      ⚠ Esta build no soporta {commandPreview.dropped.length} flag(s), se omiten:{" "}
+                      {t("launcher.droppedFlags", { n: commandPreview.dropped.length })}{" "}
                       <span className="font-mono">{commandPreview.dropped.join(", ")}</span>
                     </p>
                   )}
@@ -1764,12 +1795,12 @@ export default function Launcher() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
             <Panel icon={Sliders} title="Template">
-              <Field label="Template predefinido o guardado">
+              <Field label={t("launcher.templateLabel")}>
                 <div className="relative" ref={templateBoxRef}>
                   <button type="button" onClick={() => setTemplateOpen((v) => !v)}
                     className={selectClasses + " flex items-center justify-between text-left"}>
                     <span className={selectedTemplate ? "truncate" : "truncate text-glyvex-muted"}>
-                      {selectedTemplate || "— Elegir template —"}
+                      {selectedTemplate || t("launcher.templateChoose")}
                     </span>
                     <ChevronDown size={14} className="shrink-0 text-glyvex-muted" />
                   </button>
@@ -1778,22 +1809,22 @@ export default function Launcher() {
                       <button type="button"
                         onClick={() => { setSelectedTemplate(""); setTemplateOpen(false); }}
                         className="w-full px-3 py-2 text-left text-sm text-glyvex-muted hover:bg-white/5">
-                        — Elegir template —
+                        {t("launcher.templateChoose")}
                       </button>
                       {templateList.length === 0 && (
-                        <p className="px-3 py-2 text-sm text-glyvex-muted">Todavía no hay templates guardados.</p>
+                        <p className="px-3 py-2 text-sm text-glyvex-muted">{t("launcher.templateEmpty")}</p>
                       )}
-                      {templateList.map((t) => (
-                        <div key={t.name} className={"flex items-center gap-1 pr-1 hover:bg-white/5 " + (t.name === selectedTemplate ? "bg-glyvex-accent/10" : "")}>
+                      {templateList.map((tpl) => (
+                        <div key={tpl.name} className={"flex items-center gap-1 pr-1 hover:bg-white/5 " + (tpl.name === selectedTemplate ? "bg-glyvex-accent/10" : "")}>
                           <button type="button"
-                            onClick={() => { applyTemplate(t.name); setNewTemplateName(t.name); setTemplateOpen(false); }}
+                            onClick={() => { applyTemplate(tpl.name); setNewTemplateName(tpl.name); setTemplateOpen(false); }}
                             className="flex-1 min-w-0 px-3 py-2 text-left text-sm text-glyvex-text">
-                            <span className="truncate block">{t.name}</span>
-                            {t.builtin && <span className="text-xs text-glyvex-muted">predefinido</span>}
+                            <span className="truncate block">{tpl.name}</span>
+                            {tpl.builtin && <span className="text-xs text-glyvex-muted">{t("launcher.templateBuiltin")}</span>}
                           </button>
-                          {!t.builtin && (
-                            <button type="button" title={`Eliminar ${t.name}`}
-                              onClick={(e) => { e.stopPropagation(); deleteTemplate(t.name); }}
+                          {!tpl.builtin && (
+                            <button type="button" title={t("launcher.templateDelete", { name: tpl.name })}
+                              onClick={(e) => { e.stopPropagation(); deleteTemplate(tpl.name); }}
                               className="p-2 rounded text-glyvex-muted hover:text-red-400 hover:bg-red-500/10 shrink-0">
                               <Trash2 size={14} />
                             </button>
@@ -1805,16 +1836,16 @@ export default function Launcher() {
                 </div>
               </Field>
               <div className="flex gap-2">
-                <input className={inputClasses} value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} placeholder="Nombre para guardar como template…" />
-                <button type="button" onClick={saveTemplate} className="flex items-center gap-1 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card shrink-0"><Save size={14} />Guardar</button>
+                <input className={inputClasses} value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} placeholder={t("launcher.templateNamePlaceholder")} />
+                <button type="button" onClick={saveTemplate} className="flex items-center gap-1 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card shrink-0"><Save size={14} />{t("launcher.save")}</button>
               </div>
             </Panel>
 
-            <Panel icon={Cpu} title="Contexto">
+            <Panel icon={Cpu} title={t("launcher.context")}>
               <Toggle label="n_ctx (--ctx-size)" checked={toggles.n_ctx}
                 onChange={(v) => setToggle("n_ctx", v)}
                 disabled={isToggleUnavailable("n_ctx")} title={toggleTitle("n_ctx")} />
-              <Field label="n_ctx (tamaño de contexto)">
+              <Field label={t("launcher.ctxSizeLabel")} flagHelp={probeHelp("--ctx-size")}>
                 <select className={selectClasses}
                   disabled={!toggles.n_ctx || isToggleUnavailable("n_ctx")}
                   value={showCustomCtx ? "custom" : launchConfig.n_ctx}
@@ -1828,11 +1859,11 @@ export default function Launcher() {
                     }
                   }}>
                   {N_CTX_PRESETS.map((v) => <option key={v} value={v}>{N_CTX_LABELS[v]}</option>)}
-                  <option value="custom">Custom…</option>
+                  <option value="custom">{t("launcher.custom")}</option>
                 </select>
               </Field>
               {showCustomCtx && (
-                <Field label="n_ctx custom" hint="Cualquier valor mayor a 0 (en tokens).">
+                <Field label={t("launcher.ctxCustomLabel")} hint={t("launcher.ctxCustomHint")}>
                   <input type="number" min={1} className={inputClasses}
                     disabled={!toggles.n_ctx || isToggleUnavailable("n_ctx")}
                     value={launchConfig.n_ctx || ""}
@@ -1841,14 +1872,13 @@ export default function Launcher() {
               )}
               {nativeCtx && (
                 <p className={"text-xs " + (ctxOverflow ? "text-amber-400" : "text-glyvex-muted")}>
-                  Contexto nativo: {nativeCtx.toLocaleString()} tokens
-                  {` (n_ctx actual: ${Number(launchConfig.n_ctx).toLocaleString()})`}
+                  {t("launcher.nativeCtx", { native: nativeCtx.toLocaleString(), current: Number(launchConfig.n_ctx).toLocaleString() })}
                 </p>
               )}
               <Toggle label="n_batch (--batch-size)" checked={toggles.n_batch}
                 onChange={(v) => setToggle("n_batch", v)}
                 disabled={isToggleUnavailable("n_batch")} title={toggleTitle("n_batch")} />
-              <Field label="n_batch" hint="2048 (default de llama.cpp) rinde más en prompt processing que 512 en GPUs anchas.">
+              <Field label="n_batch" hint={t("launcher.nBatchHint")} flagHelp={probeHelp("--batch-size")}>
                 <input type="number" className={inputClasses}
                   disabled={!toggles.n_batch || isToggleUnavailable("n_batch")}
                   value={launchConfig.n_batch} onChange={(e) => updateConfig({ n_batch: Number(e.target.value) })} />
@@ -1856,15 +1886,15 @@ export default function Launcher() {
               <Toggle label="n_ubatch (--ubatch-size)" checked={toggles.n_ubatch}
                 onChange={(v) => setToggle("n_ubatch", v)}
                 disabled={isToggleUnavailable("n_ubatch")} title={toggleTitle("n_ubatch")} />
-              <Field label="n_ubatch" hint="Tamaño del compute buffer por paso. 512 no lo infla; más rinde en CPUs.">
+              <Field label="n_ubatch" hint={t("launcher.nUbatchHint")} flagHelp={probeHelp("--ubatch-size")}>
                 <input type="number" min={1} className={inputClasses}
                   disabled={!toggles.n_ubatch || isToggleUnavailable("n_ubatch")}
                   value={launchConfig.n_ubatch} onChange={(e) => updateConfig({ n_ubatch: Number(e.target.value) })} />
               </Field>
             </Panel>
 
-            <Panel icon={GaugeIcon} title="Aceleración">
-              <Field label="Modo">
+            <Panel icon={GaugeIcon} title={t("launcher.acceleration")}>
+              <Field label={t("launcher.mode")}>
                 <div className="flex gap-2">
                   {["gpu_only", "cpu_only", "hybrid"].map((mode) => (
                     <button key={mode} type="button"
@@ -1875,14 +1905,14 @@ export default function Launcher() {
                   ))}
                 </div>
               </Field>
-              <Field label={`n_gpu_layers: ${launchConfig.n_gpu_layers === -1 ? "todas" : launchConfig.n_gpu_layers}`}>
+              <Field label={t("launcher.gpuLayersLabel", { value: launchConfig.n_gpu_layers === -1 ? t("launcher.gpuLayersAll") : launchConfig.n_gpu_layers })} flagHelp={probeHelp("--n-gpu-layers")}>
                 <input type="range" min={-1} max={100} value={launchConfig.n_gpu_layers} disabled={launchConfig.gpu_mode === "cpu_only"} onChange={(e) => updateConfig({ n_gpu_layers: Number(e.target.value) })} className="w-full accent-glyvex-accent" />
               </Field>
             </Panel>
 
             {advancedMode && (
               <>
-                <Panel icon={Sliders} title="Memoria / Precisión">
+                <Panel icon={Sliders} title={t("launcher.memPrecision")}>
                   <div className="grid grid-cols-2 gap-3">
                     <Toggle label="cache_type_k" checked={toggles.cache_type_k}
                       onChange={(v) => setToggle("cache_type_k", v)}
@@ -1892,62 +1922,63 @@ export default function Launcher() {
                       disabled={isToggleUnavailable("cache_type_v")} title={toggleTitle("cache_type_v")} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <Field label="cache_type_k"><select className={selectClasses}
+                    <Field label="cache_type_k" flagHelp={probeHelp("--cache-type-k")}><select className={selectClasses}
                       disabled={!toggles.cache_type_k || isToggleUnavailable("cache_type_k")}
                       value={launchConfig.cache_type_k} onChange={(e) => updateConfig({ cache_type_k: e.target.value })}>{CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
-                    <Field label="cache_type_v"><select className={selectClasses}
+                    <Field label="cache_type_v" flagHelp={probeHelp("--cache-type-v")}><select className={selectClasses}
                       disabled={!toggles.cache_type_v || isToggleUnavailable("cache_type_v")}
                       value={launchConfig.cache_type_v} onChange={(e) => updateConfig({ cache_type_v: e.target.value })}>{CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
                   </div>
                   {launchConfig.flash_attn && launchConfig.cache_type_k !== launchConfig.cache_type_v && (
                     <p className="text-xs text-red-400">
-                      ⚠ Con flash_attn=on el KV cache debe ser simétrico y estar en
-                      q4_0/q4_0, q8_0/q8_0, f16/f16 o bf16/bf16 (FA_QUANTS de la build).
+                      {t("launcher.faQuantsWarning")}
                     </p>
                   )}
-                  <Toggle label="flash_attn" checked={launchConfig.flash_attn} onChange={(v) => updateConfig({ flash_attn: v })} />
-                  <Field label="load_mode" hint="Reemplaza a mlock/mmap: cómo carga el binario el archivo del modelo (--load-mode).">
+                  <Toggle label="flash_attn" checked={launchConfig.flash_attn} onChange={(v) => updateConfig({ flash_attn: v })} help={probeHelp("--flash-attn")} />
+                  <Field label="load_mode" hint={t("launcher.loadModeHint")} flagHelp={probeHelp("--load-mode")}>
                     <select className={selectClasses} value={launchConfig.load_mode} onChange={(e) => updateConfig({ load_mode: e.target.value })}>
                       {LOAD_MODE_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
                     </select>
                   </Field>
                 </Panel>
 
-                <Panel icon={Puzzle} title="Módulos opcionales">
+                <Panel icon={Puzzle} title={t("launcher.optionalModules")}>
                   {selectedModel.mtp_embedded && (
                     <Toggle
-                      label={`MTP incluido en el modelo${selectedModel.mtp_embedded_layers ? ` (${selectedModel.mtp_embedded_layers} capa${selectedModel.mtp_embedded_layers !== 1 ? "s" : ""} nextn)` : ""}`}
-                      checked={launchConfig.mtp_embedded}
-                      onChange={(v) => updateConfig({ mtp_embedded: v })}
-                    />
+                      label={t("launcher.mtpEmbeddedLabel") + (selectedModel.mtp_embedded_layers ? t("launcher.mtpLayers", { count: selectedModel.mtp_embedded_layers }) : "")}
+                       checked={launchConfig.mtp_embedded}
+                       onChange={(v) => updateConfig({ mtp_embedded: v })}
+                       help={probeHelp("--spec-type")}
+                     />
                   )}
                   <div className="grid grid-cols-2 gap-3">
                     <Field
                       label="MTP draft model (path)"
-                      hint={launchConfig.mtp_embedded ? "El modelo ya trae la cabeza MTP: no necesita un archivo aparte." : undefined}>
+                      hint={launchConfig.mtp_embedded ? t("launcher.mtpEmbeddedHint") : undefined}
+                      flagHelp={probeHelp("--spec-draft-model")}>
                       <input className={inputClasses}
                         value={launchConfig.mtp_draft_model || ""}
                         onChange={(e) => updateConfig({ mtp_draft_model: e.target.value })}
-                        placeholder={launchConfig.mtp_embedded ? "No requiere path" : "/models/draft.gguf"}
+                        placeholder={launchConfig.mtp_embedded ? t("launcher.noPathRequired") : "/models/draft.gguf"}
                         disabled={launchConfig.mtp_embedded} />
                     </Field>
-                    <Field label="n_draft" hint="Tokens a especular por paso (--spec-draft-n-max).">
+                      <Field label="n_draft" hint={t("launcher.nDraftHint")} flagHelp={probeHelp("--spec-draft-n-max")}>
                       <input type="number" className={inputClasses} value={launchConfig.n_draft} onChange={(e) => updateConfig({ n_draft: Number(e.target.value) })} />
                     </Field>
                   </div>
                   {(launchConfig.mtp_embedded || launchConfig.mtp_draft_model) && (
                     <div className="grid grid-cols-2 gap-3">
-                      <Field label="cache_type_k (draft)" hint="q8_0 ahorra ~50% de VRAM del draft vs el default f16 de llama-server.">
+                      <Field label="cache_type_k (draft)" hint={t("launcher.draftKvHint")} flagHelp={probeHelp("--spec-draft-type-k")}>
                         <select className={selectClasses} value={launchConfig.cache_type_k_draft}
                           onChange={(e) => updateConfig({ cache_type_k_draft: e.target.value })}>
-                          <option value="">Automático (f16)</option>
+                          <option value="">{t("launcher.autoF16")}</option>
                           {CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </Field>
-                      <Field label="cache_type_v (draft)">
+                      <Field label="cache_type_v (draft)" flagHelp={probeHelp("--spec-draft-type-v")}>
                         <select className={selectClasses} value={launchConfig.cache_type_v_draft}
                           onChange={(e) => updateConfig({ cache_type_v_draft: e.target.value })}>
-                          <option value="">Automático (f16)</option>
+                          <option value="">{t("launcher.autoF16")}</option>
                           {CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </Field>
@@ -1957,9 +1988,7 @@ export default function Launcher() {
                     launchConfig.flash_attn &&
                     (launchConfig.cache_type_k_draft || "f16") !== (launchConfig.cache_type_v_draft || "f16") && (
                       <p className="text-xs text-red-400 -mt-2">
-                        ⚠ El KV del draft también cae bajo FA_QUANTS: con flash_attn=on
-                        k y v deben ser iguales (o ambos en Automático). El backend
-                        rechaza el lanzamiento si difieren.
+                        {t("launcher.draftFaQuantsWarning")}
                       </p>
                     )}
                   <Toggle label="mmproj (--mmproj)" checked={toggles.mmproj}
@@ -1973,62 +2002,64 @@ export default function Launcher() {
                     }}
                     disabled={isToggleUnavailable("mmproj")} title={toggleTitle("mmproj")} />
                   <Field
-                    label="Módulo de visión — mmproj (path)"
+                    label={t("launcher.visionModulePath")}
                     hint={
                       selectedModel.has_vision_embedded
-                        ? "Este modelo trae el encoder de visión adentro: no necesita un mmproj aparte."
+                        ? t("launcher.visionEmbeddedHint")
                         : selectedModel.has_mmproj
-                          ? "Este modelo tiene un mmproj detectado en el scan."
+                          ? t("launcher.visionDetectedHint")
                           : undefined
-                    }>
+                    }
+                    flagHelp={probeHelp("--mmproj")}>
                     <input className={inputClasses}
                       disabled={!toggles.mmproj || isToggleUnavailable("mmproj")}
                       value={launchConfig.mmproj_path || (selectedModel.has_vision_embedded ? "" : (selectedModel.mmproj_path ?? ""))}
                       onChange={(e) => updateConfig({ mmproj_path: e.target.value })}
-                      placeholder={selectedModel.has_vision_embedded ? "No requiere path" : "/models/mmproj.gguf"} />
+                      placeholder={selectedModel.has_vision_embedded ? t("launcher.noPathRequired") : "/models/mmproj.gguf"} />
                   </Field>
-                  <Field label="LoRA (path)"><input className={inputClasses} value={launchConfig.lora_path || ""} onChange={(e) => updateConfig({ lora_path: e.target.value })} placeholder="/models/lora.gguf" /></Field>
-                  <Field label={`lora_scale: ${Number(launchConfig.lora_scale).toFixed(2)}`}><input type="range" min={0} max={2} step={0.05} value={launchConfig.lora_scale} onChange={(e) => updateConfig({ lora_scale: Number(e.target.value) })} className="w-full accent-glyvex-accent" /></Field>
+                  <Field label="LoRA (path)" flagHelp={probeHelp("--lora")}><input className={inputClasses} value={launchConfig.lora_path || ""} onChange={(e) => updateConfig({ lora_path: e.target.value })} placeholder="/models/lora.gguf" /></Field>
+                  <Field label={`lora_scale: ${Number(launchConfig.lora_scale).toFixed(2)}`} flagHelp={probeHelp("--lora-scale")}><input type="range" min={0} max={2} step={0.05} value={launchConfig.lora_scale} onChange={(e) => updateConfig({ lora_scale: Number(e.target.value) })} className="w-full accent-glyvex-accent" /></Field>
                 </Panel>
 
-                <Panel icon={BrainCircuit} title="Razonamiento">
+                <Panel icon={BrainCircuit} title={t("launcher.reasoning")}>
                   <Toggle
                     label="thinking_enabled"
                     checked={launchConfig.thinking_enabled}
                     onChange={(v) => updateConfig({ thinking_enabled: v })}
                     disabled={thinkingUnsupported}
                     title={thinkingUnsupported ? (modelMeta.thinking_support
-                      ? "El template de este modelo no usa enable_thinking"
-                      : "Este modelo no soporta thinking") : undefined}
+                      ? t("launcher.thinkingTitleNoKwarg")
+                      : t("launcher.thinkingTitleUnsupported")) : undefined}
+                    help={probeHelp("--reasoning")}
                   />
                   {thinkingUnsupported && (
                     <p className="text-xs text-glyvex-muted-2">
                       {modelMeta.thinking_support
-                        ? "El template de este modelo no usa enable_thinking: el thinking no se puede controlar desde aquí."
-                        : "Este modelo no soporta thinking."}
+                        ? t("launcher.thinkingNoKwargNote")
+                        : t("launcher.thinkingUnsupportedNote")}
                     </p>
                   )}
                   {launchConfig.backend === "ollama" && (
                     <p className="text-xs text-amber-400">
-                      ⚠ Ollama no soporta reasoning_effort ni chat templates nativos.
+                      {t("launcher.ollamaNoReasoning")}
                     </p>
                   )}
-                  <Field label={`budget_tokens: ${launchConfig.budget_tokens === -1 ? "∞" : launchConfig.budget_tokens}`}>
+                  <Field label={`budget_tokens: ${launchConfig.budget_tokens === -1 ? "∞" : launchConfig.budget_tokens}`} flagHelp={probeHelp("--reasoning-budget")}>
                     <select className={selectClasses} disabled={!launchConfig.thinking_enabled || thinkingUnsupported} value={launchConfig.budget_tokens} onChange={(e) => updateConfig({ budget_tokens: Number(e.target.value) })}>
                       {BUDGET_PRESETS.map((v) => <option key={v} value={v}>{v.toLocaleString()}</option>)}
-                      <option value={-1}>∞ (sin límite)</option>
+                      <option value={-1}>{t("launcher.budgetUnlimited")}</option>
                     </select>
                   </Field>
                   <p className="text-xs text-glyvex-muted -mt-2">
-                    Se envía como --reasoning-budget (solo con thinking enabled;
-                    si reasoning_budget está explícito, ese gana).
+                    {t("launcher.budgetTokensNote")}
                   </p>
                   <Toggle
-                    label="--jinja (requerido para reasoning_effort)"
+                    label={t("launcher.jinjaLabel")}
                     checked={launchConfig.jinja}
                     onChange={(v) => updateConfig({ jinja: v })}
+                    help={probeHelp("--jinja")}
                   />
-                  <Field label="reasoning_effort">
+                  <Field label="reasoning_effort" flagHelp={probeHelp("--reasoning-effort")}>
                     <div className="flex gap-2 flex-wrap">
                       {["none", "low", "medium", "high", "xhigh"].map((level) => (
                         <button key={level} type="button"
@@ -2046,29 +2077,28 @@ export default function Launcher() {
                       ))}
                     </div>
                     <p className="text-xs text-glyvex-muted mt-1">
-                      Solo llama-server con --jinja. No compatible con Ollama.
+                      {t("launcher.jinjaNote")}
                     </p>
                   </Field>
                   <Toggle
-                    label="no_reasoning_preserve (ahorra tokens)"
+                    label={t("launcher.noReasoningPreserveLabel")}
                     checked={launchConfig.no_reasoning_preserve}
                     disabled={thinkingUnsupported}
                     onChange={(v) => updateConfig({ no_reasoning_preserve: v })}
+                    help={probeHelp("--no-reasoning-preserve")}
                   />
                   <p className="text-xs text-glyvex-muted -mt-2">
-                    La build 11003 preserva el razonamiento en cada turno por defecto
-                    (gasta tokens extra); activarlo agrega --no-reasoning-preserve.
+                    {t("launcher.noReasoningPreserveNote")}
                   </p>
-                  <Field label={`reasoning_budget: ${launchConfig.reasoning_budget === -1 ? "∞" : launchConfig.reasoning_budget}`}>
+                  <Field label={`reasoning_budget: ${launchConfig.reasoning_budget === -1 ? "∞" : launchConfig.reasoning_budget}`} flagHelp={probeHelp("--reasoning-budget")}>
                     <select className={selectClasses} disabled={thinkingUnsupported} value={launchConfig.reasoning_budget} onChange={(e) => updateConfig({ reasoning_budget: Number(e.target.value) })}>
-                      <option value={-1}>∞ (sin límite)</option>
-                      <option value={0}>0 (fin inmediato)</option>
+                      <option value={-1}>{t("launcher.budgetUnlimited")}</option>
+                      <option value={0}>{t("launcher.budgetImmediate")}</option>
                       {BUDGET_PRESETS.map((v) => <option key={v} value={v}>{v.toLocaleString()}</option>)}
                     </select>
                   </Field>
                   <p className="text-xs text-glyvex-muted -mt-2">
-                    Token budget nativo del server (--reasoning-budget). Controla el
-                    razonamiento en todos los requests, no solo con thinking enabled.
+                    {t("launcher.reasoningBudgetNote")}
                   </p>
                 </Panel>
               </>
@@ -2078,7 +2108,7 @@ export default function Launcher() {
 
             {advancedMode && (
               <>
-                <Panel icon={Server} title="Servidor">
+                <Panel icon={Server} title={t("launcher.server")}>
                   <div className="grid grid-cols-2 gap-3">
                     <Toggle label="n_parallel (--parallel)" checked={toggles.n_parallel}
                       onChange={(v) => setToggle("n_parallel", v)}
@@ -2088,36 +2118,35 @@ export default function Launcher() {
                       disabled={isToggleUnavailable("n_threads")} title={toggleTitle("n_threads")} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <Field label="Host"><input className={inputClasses} value={launchConfig.host} onChange={(e) => updateConfig({ host: e.target.value })} /></Field>
-                    <Field label="Port"><input type="number" className={inputClasses} value={launchConfig.port} onChange={(e) => updateConfig({ port: Number(e.target.value) })} /></Field>
-                    <Field label="n_parallel (1–8)"><input type="number" min={1} max={8} className={inputClasses}
+                    <Field label="Host" flagHelp={probeHelp("--host")}><input className={inputClasses} value={launchConfig.host} onChange={(e) => updateConfig({ host: e.target.value })} /></Field>
+                    <Field label="Port" flagHelp={probeHelp("--port")}><input type="number" className={inputClasses} value={launchConfig.port} onChange={(e) => updateConfig({ port: Number(e.target.value) })} /></Field>
+                    <Field label="n_parallel (1–8)" flagHelp={probeHelp("--parallel")}><input type="number" min={1} max={8} className={inputClasses}
                       disabled={!toggles.n_parallel || isToggleUnavailable("n_parallel")}
                       value={launchConfig.n_parallel} onChange={(e) => updateConfig({ n_parallel: Number(e.target.value) })} /></Field>
-                    <Field label="n_threads (-1 = auto)"><input type="number" className={inputClasses}
+                    <Field label="n_threads (-1 = auto)" flagHelp={probeHelp("--threads")}><input type="number" className={inputClasses}
                       disabled={!toggles.n_threads || isToggleUnavailable("n_threads")}
                       value={launchConfig.n_threads} onChange={(e) => updateConfig({ n_threads: Number(e.target.value) })} /></Field>
                   </div>
                   {launchConfig.n_parallel > 1 && !launchConfig.kv_unified && (
                     <p className="text-xs text-amber-400">
-                      ⚠ Con n_parallel &gt; 1 y kv_unified apagado, cada slot reserva su
-                      propio KV cache completo (x{launchConfig.n_parallel} la VRAM de contexto).
+                      {t("launcher.kvParallelWarning", { n: launchConfig.n_parallel })}
                     </p>
                   )}
-                  <Field label="API key (opcional)"><input className={inputClasses} value={launchConfig.api_key} onChange={(e) => updateConfig({ api_key: e.target.value })} placeholder="Dejar vacío para no requerir auth" /></Field>
+                  <Field label={t("launcher.apiKeyLabel")}><input className={inputClasses} value={launchConfig.api_key} onChange={(e) => updateConfig({ api_key: e.target.value })} placeholder={t("launcher.apiKeyPlaceholder")} /></Field>
                 </Panel>
 
-                <Panel icon={Settings} title="Parámetros avanzados">
+                <Panel icon={Settings} title={t("launcher.advancedParams")}>
                   <Toggle label="RoPE (--rope-scaling, grupo)" checked={toggles.rope}
                     onChange={(v) => setToggle("rope", v)}
                     disabled={isToggleUnavailable("rope")} title={toggleTitle("rope")} />
                   <div className="grid grid-cols-2 gap-4">
-                    <Field label="rope_freq_base" hint="0 = auto">
+                    <Field label="rope_freq_base" hint="0 = auto" flagHelp={probeHelp("--rope-freq-base")}>
                       <input type="number" min={0} step={1000} className={inputClasses}
                         disabled={!toggles.rope || isToggleUnavailable("rope")}
                         value={launchConfig.rope_freq_base}
                         onChange={(e) => updateConfig({ rope_freq_base: Number(e.target.value) })} />
                     </Field>
-                    <Field label="rope_scaling_type">
+                    <Field label="rope_scaling_type" flagHelp={probeHelp("--rope-scaling")}>
                       <select className={selectClasses}
                         disabled={!toggles.rope || isToggleUnavailable("rope")}
                         value={launchConfig.rope_scaling_type}
@@ -2127,20 +2156,20 @@ export default function Launcher() {
                     </Field>
                   </div>
                   {launchConfig.rope_scaling_type === "yarn" && (
-                    <Field label="yarn_ext_factor" hint="-1 = auto">
+                    <Field label="yarn_ext_factor" hint="-1 = auto" flagHelp={probeHelp("--yarn-ext-factor")}>
                       <input type="number" step={0.1} className={inputClasses}
                         disabled={!toggles.rope || isToggleUnavailable("rope")}
                         value={launchConfig.yarn_ext_factor}
                         onChange={(e) => updateConfig({ yarn_ext_factor: Number(e.target.value) })} />
                     </Field>
                   )}
-                  <Toggle label="numa" checked={launchConfig.numa} onChange={(v) => updateConfig({ numa: v })} />
-                  <Toggle label="no_kv_offload" checked={launchConfig.no_kv_offload} onChange={(v) => updateConfig({ no_kv_offload: v })} />
+                  <Toggle label="numa" checked={launchConfig.numa} onChange={(v) => updateConfig({ numa: v })} help={probeHelp("--numa")} />
+                  <Toggle label="no_kv_offload" checked={launchConfig.no_kv_offload} onChange={(v) => updateConfig({ no_kv_offload: v })} help={probeHelp("--no-kv-offload")} />
 
                   <Toggle label="cache_reuse (--cache-reuse)" checked={toggles.cache_reuse}
                     onChange={(v) => setToggle("cache_reuse", v)}
                     disabled={isToggleUnavailable("cache_reuse")} title={toggleTitle("cache_reuse")} />
-                  <Field label={`cache_reuse: ${launchConfig.cache_reuse === 0 ? "0 (desactivado)" : launchConfig.cache_reuse}`}>
+                  <Field label={`cache_reuse: ${launchConfig.cache_reuse === 0 ? t("launcher.cacheReuseDisabled") : launchConfig.cache_reuse}`} flagHelp={probeHelp("--cache-reuse")}>
                     <input type="range" min={0} max={256} step={1} value={launchConfig.cache_reuse}
                       disabled={!toggles.cache_reuse || isToggleUnavailable("cache_reuse")}
                       onChange={(e) => updateConfig({ cache_reuse: Number(e.target.value) })}
@@ -2149,8 +2178,9 @@ export default function Launcher() {
                   <Toggle label="defrag_thold (--defrag-thold)" checked={toggles.defrag_thold}
                     onChange={(v) => setToggle("defrag_thold", v)}
                     disabled={isToggleUnavailable("defrag_thold")} title={toggleTitle("defrag_thold")} />
-                  <Field label={`defrag_thold: ${launchConfig.defrag_thold < 0 ? "-1 (desactivado)" : Number(launchConfig.defrag_thold).toFixed(2)}`}
-                    hint="Marcado DEPRECATED en el --help del binario; el backend lo sigue enviando por ahora.">
+                  <Field label={`defrag_thold: ${launchConfig.defrag_thold < 0 ? t("launcher.defragDisabled") : Number(launchConfig.defrag_thold).toFixed(2)}`}
+                    hint={t("launcher.defragDeprecatedHint")}
+                    flagHelp={probeHelp("--defrag-thold")}>
                     <input type="range" min={-1} max={1} step={0.01} value={launchConfig.defrag_thold}
                       disabled={!toggles.defrag_thold || isToggleUnavailable("defrag_thold")}
                       onChange={(e) => updateConfig({ defrag_thold: Number(e.target.value) })}
@@ -2161,13 +2191,13 @@ export default function Launcher() {
                     onChange={(v) => setToggle("grp_attn", v)}
                     disabled={isToggleUnavailable("grp_attn")} title={toggleTitle("grp_attn")} />
                   <div className="grid grid-cols-2 gap-4">
-                    <Field label="grp_attn_n" hint="1 = desactivado">
+                      <Field label="grp_attn_n" hint={t("launcher.oneDisabled")} flagHelp={probeHelp("--grp-attn-n")}>
                       <input type="number" min={1} className={inputClasses} value={launchConfig.grp_attn_n}
                         disabled={!toggles.grp_attn || isToggleUnavailable("grp_attn")}
                         onChange={(e) => updateConfig({ grp_attn_n: Number(e.target.value) })} />
                     </Field>
                     {launchConfig.grp_attn_n > 1 && (
-                      <Field label="grp_attn_w">
+                      <Field label="grp_attn_w" flagHelp={probeHelp("--grp-attn-w")}>
                         <input type="number" min={1} className={inputClasses} value={launchConfig.grp_attn_w}
                           disabled={!toggles.grp_attn || isToggleUnavailable("grp_attn")}
                           onChange={(e) => updateConfig({ grp_attn_w: Number(e.target.value) })} />
@@ -2176,7 +2206,7 @@ export default function Launcher() {
                   </div>
                   <div className="border-t border-white/10 pt-4 space-y-4">
                     <p className="text-xs text-glyvex-muted uppercase tracking-wide">
-                      Checkpoints y memoria (build 11003+)
+                      {t("launcher.checkpointsMemory")}
                     </p>
                     <div className="grid grid-cols-2 gap-3">
                       <Toggle label="ctx_checkpoints" checked={toggles.ctx_checkpoints}
@@ -2191,45 +2221,45 @@ export default function Launcher() {
                       <Toggle label="fit_target (--fit-target)" checked={toggles.fit_target}
                         onChange={(v) => setToggle("fit_target", v)}
                         disabled={isToggleUnavailable("fit_target")} title={toggleTitle("fit_target")} />
-                      <Toggle label="fit (--fit on)" checked={toggles.fit}
+                      <Toggle label="fit (--fit)" checked={toggles.fit}
                         onChange={(v) => setToggle("fit", v)}
-                        disabled={isToggleUnavailable("fit")} title={toggleTitle("fit")} />
+                        disabled={isToggleUnavailable("fit")} title={toggleTitle("fit")} help={probeHelp("--fit")} />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
-                      <Field label="ctx_checkpoints" hint="Máx. checkpoints de contexto por slot (~150 MiB de VRAM c/u). Default de la build: 32.">
+                      <Field label="ctx_checkpoints" hint={t("launcher.ctxCheckpointsHint")} flagHelp={probeHelp("--ctx-checkpoints")}>
                         <input type="number" min={0} className={inputClasses} value={launchConfig.ctx_checkpoints}
                           disabled={!toggles.ctx_checkpoints || isToggleUnavailable("ctx_checkpoints")}
                           onChange={(e) => updateConfig({ ctx_checkpoints: Number(e.target.value) })} />
                       </Field>
-                      <Field label="checkpoint_min_step" hint="Espaciado mínimo entre checkpoints (tokens). Default de la build: 8192.">
+                      <Field label="checkpoint_min_step" hint={t("launcher.checkpointMinStepHint")} flagHelp={probeHelp("--checkpoint-min-step")}>
                         <input type="number" min={512} step={512} className={inputClasses} value={launchConfig.checkpoint_min_step}
                           disabled={!toggles.checkpoint_min_step || isToggleUnavailable("checkpoint_min_step")}
                           onChange={(e) => updateConfig({ checkpoint_min_step: Number(e.target.value) })} />
                       </Field>
-                      <Field label="cache_ram_mib" hint="Límite del prompt cache en RAM del sistema (0 = desactivado).">
+                      <Field label="cache_ram_mib" hint={t("launcher.cacheRamHint")} flagHelp={probeHelp("--cache-ram")}>
                         <input type="number" min={0} step={1024} className={inputClasses} value={launchConfig.cache_ram_mib}
                           disabled={!toggles.cache_ram || isToggleUnavailable("cache_ram")}
                           onChange={(e) => updateConfig({ cache_ram_mib: Number(e.target.value) })} />
                       </Field>
-                      <Field label="fit_target_mib" hint="Margen de VRAM a reservar por dispositivo (0 = off).">
+                      <Field label="fit_target_mib" hint={t("launcher.fitTargetHint")} flagHelp={probeHelp("--fit-target")}>
                         <input type="number" min={0} step={512} className={inputClasses} value={launchConfig.fit_target_mib}
                           disabled={!toggles.fit_target || isToggleUnavailable("fit_target")}
                           onChange={(e) => updateConfig({ fit_target_mib: Number(e.target.value) })} />
                       </Field>
                     </div>
-                    <Toggle label="kv_unified (KV compartido entre slots)" checked={launchConfig.kv_unified}
-                      onChange={(v) => updateConfig({ kv_unified: v })} />
-                    <Field label="kv_unified_per_slot" hint="Contexto por slot con kv_unified activo (0 = sin límite, usa n_ctx).">
+                    <Toggle label={t("launcher.kvUnifiedLabel")} checked={launchConfig.kv_unified}
+                      onChange={(v) => updateConfig({ kv_unified: v })} help={probeHelp("--kv-unified")} />
+                    <Field label="kv_unified_per_slot" hint={t("launcher.kvUnifiedPerSlotHint")} flagHelp={probeHelp("--kv-unified-per-slot")}>
                       <input type="number" min={0} step={4096} className={inputClasses} value={launchConfig.kv_unified_per_slot}
                         onChange={(e) => updateConfig({ kv_unified_per_slot: Number(e.target.value) })} />
                     </Field>
-                    <Field label="sleep_idle_seconds" hint="Segundos de inactividad hasta que el server libera VRAM (0 = off).">
+                    <Field label="sleep_idle_seconds" hint={t("launcher.sleepIdleHint")} flagHelp={probeHelp("--sleep-idle-seconds")}>
                       <input type="number" min={0} step={60} className={inputClasses} value={launchConfig.sleep_idle_seconds}
                         onChange={(e) => updateConfig({ sleep_idle_seconds: Number(e.target.value) })} />
                     </Field>
-                    <Toggle label="warmup (corrida vacía al arrancar)" checked={launchConfig.warmup}
-                      onChange={(v) => updateConfig({ warmup: v })} />
-                    <Field label="lazy_mode" hint="Lectura bajo demanda de tensores grandes (auto = solo >4GiB).">
+                    <Toggle label={t("launcher.warmupLabel")} checked={launchConfig.warmup}
+                      onChange={(v) => updateConfig({ warmup: v })} help={probeHelp("--warmup")} />
+                    <Field label="lazy_mode" hint={t("launcher.lazyModeHint")} flagHelp={probeHelp("--lazy-mode")}>
                       <select className={selectClasses} value={launchConfig.lazy_mode} onChange={(e) => updateConfig({ lazy_mode: e.target.value })}>
                         {["auto", "on", "off"].map((m) => <option key={m} value={m}>{m}</option>)}
                       </select>
@@ -2240,16 +2270,16 @@ export default function Launcher() {
             )}
           </div>
 
-          <Panel icon={GaugeIcon} title="Estado del proceso">
+          <Panel icon={GaugeIcon} title={t("launcher.processState")}>
             {!processInfo ? (
-              <p className="text-sm text-glyvex-muted">Sin proceso activo para este modelo.</p>
+              <p className="text-sm text-glyvex-muted">{t("launcher.noActiveProcess")}</p>
             ) : (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-3">
                   {badge && <span className={`px-2 py-1 rounded border text-xs font-medium ${badge.classes}`}>{badge.label}</span>}
                   {processInfo.pid && <span className="text-sm text-glyvex-muted">PID {processInfo.pid}</span>}
                   <span className="text-sm text-glyvex-muted">{processInfo.host}:{processInfo.port}</span>
-                  {processInfo.state === "running" && <span className="text-sm text-emerald-400">✓ Servidor listo</span>}
+                    {processInfo.state === "running" && <span className="text-sm text-emerald-400">{t("launcher.serverReady")}</span>}
                 </div>
                 {processInfo.warning && <p className="text-sm text-amber-400">{processInfo.warning}</p>}
                 {processInfo.error_message && <p className="text-sm text-red-400">{processInfo.error_message}</p>}
@@ -2260,7 +2290,7 @@ export default function Launcher() {
                   <details className="group">
                     <summary className="flex items-center gap-2 cursor-pointer text-xs text-glyvex-muted hover:text-glyvex-text select-none">
                       <Terminal size={13} />
-                      Comando ejecutado
+                      {t("launcher.commandExecuted")}
                       <ChevronRight size={12} className="group-open:rotate-90 transition-transform" />
                     </summary>
                     <div className="mt-2">

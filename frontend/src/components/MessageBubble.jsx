@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   FileText, EyeOff, AlertTriangle, Pencil, RefreshCw, ChevronLeft, ChevronRight,
   X, Check, CornerDownRight,
@@ -31,6 +32,7 @@ function formatSize(bytes) {
  * el resto como una etiqueta con el nombre y el tamaño.
  */
 function MessageAttachments({ attachments }) {
+  const { t } = useTranslation();
   if (!attachments || attachments.length === 0) return null;
 
   // Se muestra la miniatura de toda imagen que tenga archivo servible, no
@@ -55,7 +57,7 @@ function MessageAttachments({ attachments }) {
                 href={a.url}
                 target="_blank"
                 rel="noreferrer"
-                title={skipped ? `${a.filename} — no se envió al modelo` : a.filename}
+                title={skipped ? t("message.notSent", { filename: a.filename }) : a.filename}
                 className="relative block"
               >
                 <img
@@ -70,7 +72,7 @@ function MessageAttachments({ attachments }) {
                 {skipped && (
                   <span
                     className="absolute bottom-1 right-1 p-0.5 rounded bg-black/70 text-amber-300"
-                    title="El modelo activo no acepta imágenes: no se envió"
+                    title={t("message.visionNotSent")}
                   >
                     <EyeOff size={12} />
                   </span>
@@ -114,6 +116,7 @@ function MessageAttachments({ attachments }) {
 
 /** Navegación entre ramas: "< 2/3 >". Solo aparece si hay más de una. */
 function BranchNav({ branch, onSwitch }) {
+  const { t } = useTranslation();
   if (!branch || branch.total <= 1) return null;
   return (
     <span className="inline-flex items-center gap-0.5 text-xs text-glyvex-muted">
@@ -121,7 +124,7 @@ function BranchNav({ branch, onSwitch }) {
         type="button"
         onClick={() => onSwitch(-1)}
         disabled={branch.index <= 1}
-        title="Versión anterior"
+        title={t("message.prevVersion")}
         className="p-0.5 rounded hover:bg-white/10 hover:text-glyvex-text disabled:opacity-30"
       >
         <ChevronLeft size={12} />
@@ -133,7 +136,7 @@ function BranchNav({ branch, onSwitch }) {
         type="button"
         onClick={() => onSwitch(1)}
         disabled={branch.index >= branch.total}
-        title="Versión siguiente"
+        title={t("message.nextVersion")}
         className="p-0.5 rounded hover:bg-white/10 hover:text-glyvex-text disabled:opacity-30"
       >
         <ChevronRight size={12} />
@@ -144,6 +147,7 @@ function BranchNav({ branch, onSwitch }) {
 
 /** Editor inline de un mensaje del usuario. */
 function EditBox({ initial, onSubmit, onCancel }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState(initial);
   const ref = useRef(null);
 
@@ -175,14 +179,14 @@ function EditBox({ initial, onSubmit, onCancel }) {
       />
       <div className="flex items-center justify-end gap-2 mt-1.5">
         <span className="text-xs text-glyvex-muted mr-auto">
-          Se guarda como una versión nueva; la anterior no se pierde.
+          {t("message.editNote")}
         </span>
         <button
           type="button"
           onClick={onCancel}
           className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30"
         >
-          <X size={12} /> Cancelar
+          <X size={12} /> {t("message.cancel")}
         </button>
         <button
           type="button"
@@ -190,7 +194,7 @@ function EditBox({ initial, onSubmit, onCancel }) {
           disabled={!draft.trim()}
           className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs bg-glyvex-accent text-white hover:bg-glyvex-accent/90 disabled:opacity-50"
         >
-          <Check size={12} /> Enviar
+          <Check size={12} /> {t("message.send")}
         </button>
       </div>
     </div>
@@ -212,6 +216,7 @@ export default function MessageBubble({
   livePhase = null,
   liveTools = null,
 }) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   // Nivel de razonamiento con el que se va a regenerar. Arranca en el de la
   // conversación y se puede cambiar sin afectar al próximo mensaje.
@@ -284,8 +289,8 @@ export default function MessageBubble({
         {!isUser && !streaming && !hasText && (
           <p className="text-xs italic text-glyvex-muted px-1">
             {message.thinking || message.tool_activity?.length
-              ? "El modelo no escribió texto de respuesta."
-              : "Respuesta detenida antes de empezar."}
+              ? t("message.noText")
+              : t("message.stoppedEarly")}
           </p>
         )}
 
@@ -315,11 +320,11 @@ export default function MessageBubble({
           <button
             type="button"
             onClick={() => onContinue?.(message)}
-            title="La respuesta se cortó por el límite de tokens"
+            title={t("message.continueTitle")}
             className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
           >
             <CornerDownRight size={12} />
-            Continuar — se cortó por max_tokens
+            {t("message.continue")}
           </button>
         )}
 
@@ -344,14 +349,14 @@ export default function MessageBubble({
           ) : null}
 
           {!streaming && message.content && (
-            <CopyButton text={message.content} label="Copiar mensaje" className="p-0.5" size={12} />
+            <CopyButton text={message.content} label={t("message.copyMessage")} className="p-0.5" size={12} />
           )}
 
           {isUser && !streaming && !busy && (
             <button
               type="button"
               onClick={() => setEditing(true)}
-              title="Editar y reenviar"
+              title={t("message.editTitle")}
               className="p-0.5 rounded text-glyvex-muted hover:text-glyvex-text hover:bg-white/10"
             >
               <Pencil size={12} />
@@ -366,7 +371,7 @@ export default function MessageBubble({
               <button
                 type="button"
                 onClick={() => onRegenerate?.(message, regenReasoning)}
-                title="Regenerar respuesta con el razonamiento elegido"
+                title={t("message.regenerateTitle")}
                 className="p-0.5 rounded text-glyvex-muted hover:text-glyvex-text hover:bg-white/10"
               >
                 <RefreshCw size={12} />

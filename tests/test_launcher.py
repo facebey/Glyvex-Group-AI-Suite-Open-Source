@@ -1165,13 +1165,20 @@ def test_toggle_roundtrip_default_sends_none_omits(field, flag):
     assert flag not in cmd_off
 
 
-def test_fit_default_on_off_omits():
+def test_fit_toggle_on_off_none():
+    # Default (fit=True) -> --fit on.
     cmd = launcher_module.build_llama_server_command(
         launcher_module.LaunchConfig(model_id="m"), "/opt/llama-server", "/models/m.gguf")
     assert _toggled_flag_value(cmd, "--fit") == "on"
+    # Toggle OFF -> --fit off EXPLÍCITO. El default de la build es 'on', así
+    # que dejar el flag ausente NO apagaría fit (era el bug).
     cmd_off = launcher_module.build_llama_server_command(
+        _all_toggles_off_config(fit=False), "/opt/llama-server", "/models/m.gguf")
+    assert _toggled_flag_value(cmd_off, "--fit") == "off"
+    # fit=None (modo manual) -> no se emite el flag (default de la build).
+    cmd_none = launcher_module.build_llama_server_command(
         _all_toggles_off_config(fit=None), "/opt/llama-server", "/models/m.gguf")
-    assert "--fit" not in cmd_off
+    assert "--fit" not in cmd_none
 
 
 def test_rope_group_off_sends_nothing_even_with_values():

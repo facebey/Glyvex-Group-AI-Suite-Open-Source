@@ -3,6 +3,7 @@ import { Check, Copy, Loader2 } from "lucide-react";
 import Section from "./ui/Section.jsx";
 import Field from "./ui/Field.jsx";
 import { formInputClasses } from "../lib/styles.js";
+import { useTranslation } from "react-i18next";
 
 const INFLUX_DEFAULTS = {
   enabled: false, version: "v2", url: "http://127.0.0.1:8086", token: "", org: "",
@@ -29,6 +30,7 @@ function Toggle({ checked, onChange, label, hint }) {
  * que usa los valores del formulario todavía sin guardar.
  */
 export default function MetricsExportSettings({ exportsConfig, port, onChange }) {
+  const { t } = useTranslation();
   const exp = exportsConfig || {};
   const influx = { ...INFLUX_DEFAULTS, ...(exp.influx || {}) };
   const [copied, setCopied] = useState(false);
@@ -67,16 +69,16 @@ export default function MetricsExportSettings({ exportsConfig, port, onChange })
       });
       setTestResult(res.ok ? await res.json() : { ok: false, detail: `HTTP ${res.status}` });
     } catch {
-      setTestResult({ ok: false, detail: "no se pudo contactar al backend" });
+      setTestResult({ ok: false, detail: t("config.export.testNoBackend") });
     } finally {
       setTesting(false);
     }
   }
 
   return (
-    <Section title="Exportar métricas">
+    <Section title={t("config.export.section")}>
       <p className="text-xs text-glyvex-muted">
-        Se exportan todas las métricas, también las ocultas en pantalla. Los cambios se aplican al guardar.
+        {t("config.export.intro")}
       </p>
 
       {/* Prometheus */}
@@ -85,20 +87,20 @@ export default function MetricsExportSettings({ exportsConfig, port, onChange })
           checked={Boolean(exp.prometheus_enabled)}
           onChange={(v) => set({ prometheus_enabled: v })}
           label="Prometheus"
-          hint="Expone GET /api/metrics/prometheus para Prometheus, Telegraf o VictoriaMetrics."
+          hint={t("config.export.promHint")}
         />
         {exp.prometheus_enabled && (
           <>
-            <Field label="Token (opcional)" hint="Si tiene valor, el endpoint exige Authorization: Bearer <token>. Útil si el backend queda expuesto en la red.">
+            <Field label={t("config.export.token")} hint={t("config.export.tokenHint")}>
               <input type="password" autoComplete="off" className={formInputClasses}
                 value={exp.prometheus_token || ""} onChange={(e) => set({ prometheus_token: e.target.value })} />
             </Field>
             <div>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm text-glyvex-muted">Ejemplo para Telegraf</span>
+                <span className="text-sm text-glyvex-muted">{t("config.export.telegrafExample")}</span>
                 <button type="button" onClick={copySnippet}
                   className="inline-flex items-center gap-1 text-xs text-glyvex-muted hover:text-glyvex-text">
-                  {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? "Copiado" : "Copiar"}
+                  {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? t("config.export.copied") : t("config.export.copy")}
                 </button>
               </div>
               <pre className="text-xs font-mono bg-black/40 border border-white/10 rounded-md p-2 overflow-x-auto">{telegraf}</pre>
@@ -113,12 +115,12 @@ export default function MetricsExportSettings({ exportsConfig, port, onChange })
           checked={influx.enabled}
           onChange={(v) => setInflux({ enabled: v })}
           label="InfluxDB"
-          hint="Envía ventanas de 5 s (promedio, mínimo y máximo), las mismas que guarda el histórico."
+          hint={t("config.export.influxHint")}
         />
         {influx.enabled && (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="Versión">
+              <Field label={t("config.export.version")}>
                 <select className={formInputClasses} value={influx.version}
                   onChange={(e) => setInflux({ version: e.target.value })}>
                   <option value="v2">InfluxDB 2.x / 3</option>
@@ -132,37 +134,37 @@ export default function MetricsExportSettings({ exportsConfig, port, onChange })
 
               {influx.version === "v2" ? (
                 <>
-                  <Field label="Organización">
+                  <Field label={t("config.export.org")}>
                     <input className={formInputClasses} value={influx.org} onChange={(e) => setInflux({ org: e.target.value })} />
                   </Field>
                   <Field label="Bucket">
                     <input className={formInputClasses} value={influx.bucket} onChange={(e) => setInflux({ bucket: e.target.value })} />
                   </Field>
-                  <Field label="Token" hint="La variable de entorno GLYVEX_INFLUX_TOKEN tiene prioridad; dejarlo acá lo guarda en config.json.">
+                  <Field label="Token" hint={t("config.export.tokenEnvHint")}>
                     <input type="password" autoComplete="off" className={formInputClasses} value={influx.token}
                       onChange={(e) => setInflux({ token: e.target.value })} />
                   </Field>
                 </>
               ) : (
                 <>
-                  <Field label="Base de datos">
+                  <Field label={t("config.export.database")}>
                     <input className={formInputClasses} value={influx.database} onChange={(e) => setInflux({ database: e.target.value })} />
                   </Field>
-                  <Field label="Usuario (opcional)">
+                  <Field label={t("config.export.username")}>
                     <input className={formInputClasses} value={influx.username} onChange={(e) => setInflux({ username: e.target.value })} />
                   </Field>
-                  <Field label="Contraseña (opcional)">
+                  <Field label={t("config.export.password")}>
                     <input type="password" autoComplete="off" className={formInputClasses} value={influx.password}
                       onChange={(e) => setInflux({ password: e.target.value })} />
                   </Field>
                 </>
               )}
 
-              <Field label="Intervalo de envío (s)">
+              <Field label={t("config.export.interval")}>
                 <input type="number" min={1} className={formInputClasses} value={influx.interval_s}
                   onChange={(e) => setInflux({ interval_s: Math.max(1, Number(e.target.value) || 10) })} />
               </Field>
-              <Field label="Prefijo de measurement" hint="Se escribe en <prefijo>_hw y <prefijo>_llm.">
+              <Field label={t("config.export.prefix")} hint={t("config.export.prefixHint")}>
                 <input className={formInputClasses} value={influx.measurement_prefix}
                   onChange={(e) => setInflux({ measurement_prefix: e.target.value })} />
               </Field>
@@ -172,18 +174,18 @@ export default function MetricsExportSettings({ exportsConfig, port, onChange })
               <button type="button" onClick={testInflux} disabled={testing}
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-text hover:bg-black/30 disabled:opacity-50">
                 {testing && <Loader2 size={14} className="animate-spin" />}
-                Probar conexión
+                {t("config.export.test")}
               </button>
               {testResult && (
                 <span className={`text-sm ${testResult.ok ? "text-emerald-400" : "text-red-400"}`}>
-                  {testResult.ok ? "Escritura aceptada" : "Falló"}
+                  {testResult.ok ? t("config.export.testOk") : t("config.export.testFail")}
                   {testResult.status_code ? ` (HTTP ${testResult.status_code})` : ""}
                   {!testResult.ok && testResult.detail ? `: ${testResult.detail}` : ""}
                 </span>
               )}
             </div>
             <p className="text-xs text-glyvex-muted">
-              Si activás InfluxDB con el histórico apagado, reiniciá el backend para que empiece a medir.
+              {t("config.export.influxNote")}
             </p>
           </>
         )}

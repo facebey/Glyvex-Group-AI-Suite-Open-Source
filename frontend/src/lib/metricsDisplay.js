@@ -9,49 +9,50 @@ import { useEffect, useState } from "react";
  * hace que el backend deje de recorrer los procesos del sistema.
  */
 
+// `page` y `labelKey`/`hintKey` son claves i18n (locales/es.json y en.json).
 export const DISPLAY_CATALOG = [
   {
-    page: "Monitor",
+    page: "nav.monitor",
     items: [
-      { key: "monitor.alerts", label: "Barra de alertas" },
-      { key: "monitor.gpu.vram", label: "GPU · VRAM" },
-      { key: "monitor.gpu.util", label: "GPU · utilización" },
-      { key: "monitor.gpu.temp", label: "GPU · temperatura" },
-      { key: "monitor.gpu.power_clocks", label: "GPU · potencia y clocks" },
-      { key: "monitor.gpu.chart", label: "GPU · gráfico 60 s" },
-      { key: "monitor.cpu.total", label: "CPU · utilización total" },
-      { key: "monitor.cpu.cores", label: "CPU · núcleos" },
-      { key: "monitor.cpu.freq", label: "CPU · frecuencia" },
-      { key: "monitor.cpu.chart", label: "CPU · gráfico 60 s" },
-      { key: "monitor.ram", label: "RAM" },
-      { key: "monitor.history", label: "Histórico de hardware" },
-      { key: "monitor.llm.live", label: "LLM Server · valores en vivo" },
-      { key: "monitor.llm.live_charts", label: "LLM Server · gráficos de 5 min" },
-      { key: "monitor.llm.history", label: "LLM Server · histórico" },
+      { key: "monitor.alerts", labelKey: "display.items.monitor.alerts" },
+      { key: "monitor.gpu.vram", labelKey: "display.items.monitor.gpu.vram" },
+      { key: "monitor.gpu.util", labelKey: "display.items.monitor.gpu.util" },
+      { key: "monitor.gpu.temp", labelKey: "display.items.monitor.gpu.temp" },
+      { key: "monitor.gpu.power_clocks", labelKey: "display.items.monitor.gpu.power_clocks" },
+      { key: "monitor.gpu.chart", labelKey: "display.items.monitor.gpu.chart" },
+      { key: "monitor.cpu.total", labelKey: "display.items.monitor.cpu.total" },
+      { key: "monitor.cpu.cores", labelKey: "display.items.monitor.cpu.cores" },
+      { key: "monitor.cpu.freq", labelKey: "display.items.monitor.cpu.freq" },
+      { key: "monitor.cpu.chart", labelKey: "display.items.monitor.cpu.chart" },
+      { key: "monitor.ram", labelKey: "display.items.monitor.ram" },
+      { key: "monitor.history", labelKey: "display.items.monitor.history" },
+      { key: "monitor.llm.live", labelKey: "display.items.monitor.llm.live" },
+      { key: "monitor.llm.live_charts", labelKey: "display.items.monitor.llm.live_charts" },
+      { key: "monitor.llm.history", labelKey: "display.items.monitor.llm.history" },
       {
         key: "monitor.processes",
-        label: "Procesos activos",
-        hint: "Oculto, el backend además deja de recorrer los procesos del sistema.",
+        labelKey: "display.items.monitor.processes",
+        hintKey: "display.items.monitor.processesHint",
       },
     ],
   },
   {
-    page: "Chat",
+    page: "nav.chat",
     items: [
-      { key: "chat.tps", label: "t/s" },
-      { key: "chat.ttft", label: "TTFT" },
-      { key: "chat.tokens", label: "Tokens" },
-      { key: "chat.context", label: "Contexto" },
+      { key: "chat.tps", labelKey: "display.items.chat.tps" },
+      { key: "chat.ttft", labelKey: "display.items.chat.ttft" },
+      { key: "chat.tokens", labelKey: "display.items.chat.tokens" },
+      { key: "chat.context", labelKey: "display.items.chat.context" },
     ],
   },
   {
-    page: "Launcher",
+    page: "nav.launcher",
     items: [
-      { key: "launcher.tg", label: "tg (velocidad)" },
-      { key: "launcher.ctx", label: "ctx (contexto)" },
-      { key: "launcher.queue", label: "cola" },
-      { key: "launcher.cache", label: "caché" },
-      { key: "launcher.mtp", label: "MTP (solo si está activo)" },
+      { key: "launcher.tg", labelKey: "display.items.launcher.tg" },
+      { key: "launcher.ctx", labelKey: "display.items.launcher.ctx" },
+      { key: "launcher.queue", labelKey: "display.items.launcher.queue" },
+      { key: "launcher.cache", labelKey: "display.items.launcher.cache" },
+      { key: "launcher.mtp", labelKey: "display.items.launcher.mtp" },
     ],
   },
 ];
@@ -71,11 +72,12 @@ export const PRESETS = {
   full: [],
 };
 
+// Claves i18n de cada plantilla (ver locales/es.json y en.json).
 export const PRESET_LABELS = {
-  default: "Predeterminada",
-  minimal: "Mínima",
-  full: "Completa",
-  custom: "Personalizada",
+  default: "display.presetDefault",
+  minimal: "display.presetMinimal",
+  full: "display.presetFull",
+  custom: "display.presetCustom",
 };
 
 /**

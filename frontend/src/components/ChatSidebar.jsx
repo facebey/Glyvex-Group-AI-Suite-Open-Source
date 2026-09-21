@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Download, Trash2, Upload } from "lucide-react";
 import CollapsibleSection from "./ui/CollapsibleSection.jsx";
 import Slider from "./ui/Slider.jsx";
@@ -62,6 +63,7 @@ export default function ChatSidebar({
   onExportMarkdown,
   onImport,
 }) {
+  const { t } = useTranslation();
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [manualEndpoint, setManualEndpoint] = useState("");
@@ -87,7 +89,7 @@ export default function ChatSidebar({
     <aside className="w-[300px] shrink-0 overflow-y-auto space-y-3 pr-2">
       <div className="bg-glyvex-card rounded-lg border border-white/10 p-4 space-y-3">
         <div>
-          <span className="block text-sm text-glyvex-muted mb-1">Endpoint</span>
+          <span className="block text-sm text-glyvex-muted mb-1">{t("chatSidebar.endpoint")}</span>
           <div className="flex items-center gap-2">
             <span className={`w-2 h-2 rounded-full shrink-0 ${pingColor}`} />
             <select
@@ -111,26 +113,26 @@ export default function ChatSidebar({
               value={manualEndpoint}
               onChange={(e) => setManualEndpoint(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && useManualEndpoint()}
-              placeholder="http://host:puerto"
+              placeholder={t("chatSidebar.endpointPlaceholder")}
             />
             <button
               type="button"
               onClick={useManualEndpoint}
               className="px-2 py-1.5 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30 shrink-0"
             >
-              Usar
+              {t("chatSidebar.use")}
             </button>
           </div>
         </div>
 
         <label className="block">
-          <span className="block text-sm text-glyvex-muted mb-1">Modelo</span>
+          <span className="block text-sm text-glyvex-muted mb-1">{t("chatSidebar.model")}</span>
           <select
             className={inputClasses}
             value={selectedModel}
             onChange={(e) => onModelChange(e.target.value)}
           >
-            {models.length === 0 && <option value="">(sin detectar)</option>}
+            {models.length === 0 && <option value="">{t("chatSidebar.noModel")}</option>}
             {models.map((m) => (
               <option key={m} value={m}>
                 {m}
@@ -140,16 +142,16 @@ export default function ChatSidebar({
           {capabilities && (
             <span className="block text-xs text-glyvex-muted mt-1 tabular-nums">
               {contextSize > 0
-                ? `Contexto: ${contextSize.toLocaleString()} tokens`
-                : "Contexto: sin detectar"}
-              {capabilities.vision ? " · visión" : ""}
-              {capabilities.tools ? " · tools" : ""}
-              {capabilities.parallel_tool_calls ? " · paralelo" : ""}
-              {capabilities.reasoning_effort ? " · effort" : ""}
+                ? t("chatSidebar.context", { count: contextSize.toLocaleString() })
+                : t("chatSidebar.contextUnknown")}
+              {capabilities.vision ? t("chatSidebar.vision") : ""}
+              {capabilities.tools ? t("chatSidebar.tools") : ""}
+              {capabilities.parallel_tool_calls ? t("chatSidebar.parallel") : ""}
+              {capabilities.reasoning_effort ? t("chatSidebar.effort") : ""}
               {capabilities.source === "heuristic" && (
-                <span title="El endpoint no expone /props: esto se dedujo del nombre del modelo.">
+                <span title={t("chatSidebar.estimatedTitle")}>
                   {" "}
-                  · estimado
+                  {t("chatSidebar.estimated")}
                 </span>
               )}
             </span>
@@ -157,7 +159,7 @@ export default function ChatSidebar({
         </label>
 
         <label className="block">
-          <span className="block text-sm text-glyvex-muted mb-1">API key (opcional)</span>
+          <span className="block text-sm text-glyvex-muted mb-1">{t("chatSidebar.apiKey")}</span>
           <input
             className={inputClasses}
             value={apiKey}
@@ -168,7 +170,7 @@ export default function ChatSidebar({
       </div>
 
       <CollapsibleSection
-        title="System prompt"
+        title={t("chatSidebar.systemPrompt")}
         open={systemPromptOpen}
         onToggle={() => setSystemPromptOpen((v) => !v)}
       >
@@ -176,7 +178,7 @@ export default function ChatSidebar({
           className={inputClasses + " min-h-[80px] resize-y"}
           value={systemPrompt}
           onChange={(e) => onSystemPromptChange(e.target.value)}
-          placeholder="Instrucciones de sistema…"
+          placeholder={t("chatSidebar.systemPromptPlaceholder")}
         />
         <label className="flex items-start gap-2 mt-2.5 cursor-pointer select-none">
           <MiniToggle
@@ -184,19 +186,18 @@ export default function ChatSidebar({
             onChange={onAppendFileConventionChange}
           />
           <span className="text-xs text-glyvex-muted leading-snug">
-            Nombrar archivos generados
+            {t("chatSidebar.fileConvention")}
             <span className="block text-[11px] opacity-70">
-              Se suma a lo de arriba: le pide al modelo poner
-              {" "}<code className="text-glyvex-text">lenguaje:nombre.ext</code>{" "}
-              en la cerca de código cuando genera un archivo completo, para
-              poder descargarlo con su nombre real.
+              {t("chatSidebar.fileConventionHintBefore")}
+              <code className="text-glyvex-text">lenguaje:nombre.ext</code>
+              {t("chatSidebar.fileConventionHintAfter")}
             </span>
           </span>
         </label>
       </CollapsibleSection>
 
       <CollapsibleSection
-        title="Parámetros"
+        title={t("chatSidebar.params")}
         open={paramsOpen}
         onToggle={() => setParamsOpen((v) => !v)}
       >
@@ -215,7 +216,7 @@ export default function ChatSidebar({
           />
         </label>
         <label className="block">
-          <span className="block text-xs text-glyvex-muted mb-1">Seed (-1 = aleatorio)</span>
+          <span className="block text-xs text-glyvex-muted mb-1">{t("chatSidebar.seed")}</span>
           <input
             type="number"
             className={inputClasses}
@@ -232,7 +233,7 @@ export default function ChatSidebar({
           className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
         >
           <Trash2 size={14} />
-          Limpiar conversación
+          {t("chatSidebar.clearConversation")}
         </button>
         <div className="flex gap-2">
           <button
@@ -256,7 +257,7 @@ export default function ChatSidebar({
           className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
         >
           <Upload size={14} />
-          Importar
+          {t("chatSidebar.import")}
         </button>
         <input
           ref={importInputRef}

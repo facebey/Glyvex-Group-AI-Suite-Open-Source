@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createBrowserRouter, RouterProvider, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   MessageSquare, Rocket, Gauge, Activity, FileBarChart, Settings,
@@ -7,6 +8,7 @@ import {
 import { ToastProvider } from "./components/ToastNotification.jsx";
 import { useLocalStorage } from "./hooks/useLocalStorage.js";
 import StatusWidget from "./components/StatusWidget.jsx";
+import LanguageSelector from "./components/LanguageSelector.jsx";
 import Chat from "./pages/Chat.jsx";
 import Launcher from "./pages/Launcher.jsx";
 import Benchmark from "./pages/Benchmark.jsx";
@@ -15,12 +17,12 @@ import Reports from "./pages/Reports.jsx";
 import Config from "./pages/Config.jsx";
 
 const NAV_ITEMS = [
-  { to: "/", label: "Chat", icon: MessageSquare, end: true },
-  { to: "/launcher", label: "Launcher", icon: Rocket },
-  { to: "/benchmark", label: "Benchmark", icon: Gauge },
-  { to: "/monitor", label: "Monitor", icon: Activity },
-  { to: "/reports", label: "Reports", icon: FileBarChart },
-  { to: "/config", label: "Config", icon: Settings },
+  { to: "/", labelKey: "nav.chat", icon: MessageSquare, end: true },
+  { to: "/launcher", labelKey: "nav.launcher", icon: Rocket },
+  { to: "/benchmark", labelKey: "nav.benchmark", icon: Gauge },
+  { to: "/monitor", labelKey: "nav.monitor", icon: Activity },
+  { to: "/reports", labelKey: "nav.reports", icon: FileBarChart },
+  { to: "/config", labelKey: "nav.config", icon: Settings },
 ];
 
 /**
@@ -97,6 +99,7 @@ function GlyvexAiWatermark({ size = 400 }) {
 }
 
 function OnboardingScreen({ onDismiss }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [cfg, setCfg] = useState(null);
   const [modelsCount, setModelsCount] = useState(0);
@@ -130,9 +133,9 @@ function OnboardingScreen({ onDismiss }) {
   const step3Done = hasActiveProcess;
 
   const steps = [
-    { n: 1, label: "Configurar paths de backends", done: step1Done, to: "/config" },
-    { n: 2, label: "Agregar directorio de modelos y escanear", done: step2Done, to: "/config" },
-    { n: 3, label: "Lanzar el primer modelo", done: step3Done, to: "/launcher" },
+    { n: 1, label: t("onboarding.step1"), done: step1Done, to: "/config" },
+    { n: 2, label: t("onboarding.step2"), done: step2Done, to: "/config" },
+    { n: 3, label: t("onboarding.step3"), done: step3Done, to: "/launcher" },
   ];
 
   function goTo(to) { navigate(to); onDismiss(); }
@@ -141,9 +144,9 @@ function OnboardingScreen({ onDismiss }) {
     <div className="fixed inset-0 z-40 bg-glyvex-bg/95 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-glyvex-card border border-glyvex-border rounded-lg p-6 space-y-5">
         <div>
-          <h2 className="text-lg font-semibold">Bienvenido a Glyvex AI Suite</h2>
+          <h2 className="text-lg font-semibold">{t("onboarding.title")}</h2>
           <p className="text-sm text-glyvex-muted mt-1">
-            Seguí estos 3 pasos para tener tu primer modelo corriendo.
+            {t("onboarding.subtitle")}
           </p>
         </div>
         <div className="space-y-2">
@@ -161,7 +164,7 @@ function OnboardingScreen({ onDismiss }) {
         </div>
         <button type="button" onClick={onDismiss}
           className="w-full text-center text-sm text-glyvex-muted hover:text-glyvex-text">
-          Saltar por ahora
+          {t("onboarding.skip")}
         </button>
       </div>
     </div>
@@ -174,6 +177,7 @@ function OnboardingScreen({ onDismiss }) {
 const WIDE_ROUTES = new Set(["/"]);
 
 function Layout() {
+  const { t } = useTranslation();
   const { pathname } = useLocation();
   const mainWidth = WIDE_ROUTES.has(pathname) ? "max-w-[1800px]" : "max-w-6xl";
   const [shouldShowOnboarding, setShouldShowOnboarding] = useState(false);
@@ -216,19 +220,20 @@ function Layout() {
             </span>
           </a>
           <nav className="flex items-center gap-1">
-            {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
+            {NAV_ITEMS.map(({ to, labelKey, icon: Icon, end }) => (
               <NavLink key={to} to={to} end={end} className={navLinkClasses}>
                 <Icon size={16} />
-                {label}
+                {t(labelKey)}
               </NavLink>
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-3">
             <StatusWidget />
+            <LanguageSelector />
             <button
               type="button"
               onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-              title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+              title={theme === "dark" ? t("common.themeLight") : t("common.themeDark")}
               className="p-1.5 rounded-md text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card transition-colors"
             >
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
@@ -253,7 +258,7 @@ function Layout() {
       <footer className="border-t border-glyvex-border bg-glyvex-bg-2 py-3 px-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between text-xs text-glyvex-muted-2">
           <span>
-            Desarrollado por{" "}
+            {t("footer.developedBy")}{" "}
             <a
               href="https://ai.glyvexgroup.com"
               target="_blank"
@@ -272,7 +277,7 @@ function Layout() {
               Glyvex Group
             </a>
           </span>
-          <span>© {new Date().getFullYear()} Glyvex Group · Todos los derechos reservados</span>
+          <span>{t("footer.rights", { year: new Date().getFullYear() })}</span>
         </div>
       </footer>
 
