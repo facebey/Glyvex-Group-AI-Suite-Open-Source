@@ -1,0 +1,13 @@
+# Declaracion de metadatos del proyecto. No hay packaging: nadie hace
+# `pip install .`; el archivo existe para fijar la version minima de
+# Python de forma maquina-legible (lo documentan README.md y
+# CONTRIBUTING.md, pero nada lo declaraba).
+#
+# Por que >=3.11: backend/benchmark.py usa `async with asyncio.timeout(...)`
+# (disponible solo desde Python 3.11). Cuando exista CI (L1/L2), este campo
+# es el que el workflow usara para seleccionar el interpreter.
+
+[project]
+name = "glyvex-ai-suite"
+description = "Suite 100% local para gestionar, lanzar, chatear y benchear modelos LLM locales (llama-server, Ollama, LM Studio)"
+requires-python = ">=3.11"
