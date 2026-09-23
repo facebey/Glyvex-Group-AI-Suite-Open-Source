@@ -8,7 +8,7 @@ sqlalchemy>=2.0
 aiosqlite>=0.20
 gguf>=0.10
 nvidia-ml-py>=13
-psutil>=6.0
+psutil>=7.2.2
 
 # Extracción de adjuntos del chat (módulo M3). Todas puras Python y livianas:
 # si falta alguna, ese tipo de archivo se sigue adjuntando como "no
