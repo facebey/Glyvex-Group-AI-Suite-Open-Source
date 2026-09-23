@@ -16,7 +16,7 @@ psutil>=7.2.2
 pypdf>=6.19.0
 python-docx>=1.2.0
 python-pptx>=1.0.2
-openpyxl>=3.1
+openpyxl>=3.1.5
 
 # Tools de búsqueda y navegación web del chat (módulo M3, Bloque 2).
 #
