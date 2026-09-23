@@ -4,8 +4,9 @@ import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from "rec
 import { useTranslation } from "react-i18next";
 import { useLlmStream } from "../hooks/useLlmStream.js";
 import { useDisplay } from "../lib/metricsDisplay.js";
+import { useToast } from "../components/ToastNotification.jsx";
 
-const GPU_KEYS = ["monitor.gpu.vram", "monitor.gpu.util", "monitor.gpu.temp", "monitor.gpu.power_clocks", "monitor.gpu.chart"];
+const GPU_KEYS = ["monitor.gpu.vram", "monitor.gpu.util", "monitor.gpu.temp", "monitor.gpu.power_clocks", "monitor.gpu.power_limit", "monitor.gpu.chart"];
 const CPU_KEYS = ["monitor.cpu.total", "monitor.cpu.cores", "monitor.cpu.freq", "monitor.cpu.chart"];
 const LLM_KEYS_DISPLAY = ["monitor.llm.live", "monitor.llm.live_charts", "monitor.llm.history"];
 
@@ -426,6 +427,7 @@ const HISTORY_REFRESH_MS = 30_000;
 
 export default function Monitor() {
   const { t } = useTranslation();
+  const { addToast } = useToast();
   const [snapshot, setSnapshot] = useState(null);
   const [history, setHistory] = useState([]);
   const [connected, setConnected] = useState(false);
@@ -646,6 +648,67 @@ export default function Monitor() {
   const vramAlert = gpu && gpu.vram_percent != null && gpu.vram_percent > 95;
   const anyAlert = gpuTempAlert || vramAlert;
 
+  // -- Control de límite de potencia (TDP) ---------------------------------
+  // El rango lo pone NVML (mín/máx reales de la GPU); si el proceso no va en
+  // modo admin el slider se habilita pero el botón de Aplicar queda bloqueado
+  // con una pista, en vez de fallar al tocarlo.
+  const [tdpEnabled, setTdpEnabled] = useState(false);
+  const [tdpInfo, setTdpInfo] = useState(null);
+  const [tdpValue, setTdpValue] = useState(null);
+  const [tdpBusy, setTdpBusy] = useState(false);
+
+  const gpuIndex = gpu?.index ?? null;
+  const tdpGpu = useMemo(
+    () => (tdpInfo?.gpus || []).find((g) => g.index === gpuIndex) || (tdpInfo?.gpus || [])[0] || null,
+    [tdpInfo, gpuIndex]
+  );
+
+  const loadTdp = () =>
+    fetch("/api/metrics/gpu/power-limit")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data || !data.available) return;
+        setTdpInfo(data);
+        const g = (data.gpus || []).find((x) => x.index === gpuIndex) || data.gpus?.[0];
+        if (g && g.current_w != null) setTdpValue(g.current_w);
+      })
+      .catch(() => {});
+
+  useEffect(() => {
+    if (gpuIndex == null) return undefined;
+    loadTdp();
+  }, [gpuIndex]);
+
+  // Al activar el control, re-sincroniza con el valor real actual.
+  useEffect(() => {
+    if (tdpEnabled && tdpGpu?.current_w != null) setTdpValue(tdpGpu.current_w);
+  }, [tdpEnabled, tdpGpu?.current_w]);
+
+  const tdpCanApply =
+    tdpEnabled && Boolean(tdpGpu?.supported) && Boolean(tdpInfo?.privileged) && !tdpBusy && tdpValue != null;
+
+  const applyTdp = async (payload, successKey, successVars) => {
+    setTdpBusy(true);
+    try {
+      const res = await fetch("/api/metrics/gpu/power-limit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.ok) {
+        addToast(t(successKey, successVars || {}), "success");
+        loadTdp();
+      } else {
+        addToast(t("monitor.gpu.tdp.applyError", { error: data?.error || "?" }), "error");
+      }
+    } catch {
+      addToast(t("monitor.gpu.tdp.loadError"), "error");
+    } finally {
+      setTdpBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -720,6 +783,77 @@ export default function Monitor() {
               <span>Power: {gpu.power_draw_w ?? "—"}W / {gpu.power_limit_w ?? "—"}W</span>
               <span>Clock graphics: {gpu.clock_graphics_mhz ?? "—"} MHz</span>
               <span>Clock memory: {gpu.clock_memory_mhz ?? "—"} MHz</span>
+            </div>
+            )}
+
+            {show("monitor.gpu.power_limit") && (
+            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-glyvex-muted uppercase tracking-wide">
+                  {t("monitor.gpu.tdp.title")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTdpEnabled((v) => !v)}
+                  className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
+                    tdpEnabled
+                      ? "bg-glyvex-accent/20 text-glyvex-accent border-glyvex-accent/40"
+                      : "bg-white/5 text-glyvex-muted border-white/10 hover:bg-white/10"
+                  }`}
+                >
+                  {tdpEnabled ? t("monitor.gpu.tdp.on") : t("monitor.gpu.tdp.off")}
+                </button>
+              </div>
+
+              {tdpEnabled && (
+                !tdpInfo ? (
+                  <p className="text-xs text-glyvex-muted">{t("monitor.gpu.tdp.loading")}</p>
+                ) : !tdpInfo.available ? (
+                  <p className="text-xs text-glyvex-muted">{tdpInfo.error || t("monitor.gpu.tdp.notSupported")}</p>
+                ) : !tdpGpu || !tdpGpu.supported ? (
+                  <p className="text-xs text-glyvex-muted">{t("monitor.gpu.tdp.notSupported")}</p>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-end justify-between text-[11px] text-glyvex-muted">
+                      <span>{t("monitor.gpu.tdp.min")} {tdpGpu.min_w}W</span>
+                      <span className="text-lg font-semibold text-glyvex-text leading-none">{Math.round(tdpValue ?? 0)}W</span>
+                      <span>{tdpGpu.max_w}W {t("monitor.gpu.tdp.max")}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={tdpGpu.min_w}
+                      max={tdpGpu.max_w}
+                      step={5}
+                      value={tdpValue ?? tdpGpu.min_w}
+                      onChange={(e) => setTdpValue(Number(e.target.value))}
+                      disabled={!tdpInfo.privileged || tdpBusy}
+                      className="w-full accent-glyvex-accent"
+                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => applyTdp({ index: gpuIndex, default: true }, "monitor.gpu.tdp.resetSuccess")}
+                        disabled={!tdpInfo.privileged || tdpBusy || tdpGpu.default_w == null}
+                        className="text-[11px] px-2.5 py-1 rounded-md border border-white/10 bg-white/5 text-glyvex-muted hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {t("monitor.gpu.tdp.reset")}
+                        {tdpGpu.default_w != null ? ` (${tdpGpu.default_w}W)` : ""}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyTdp({ index: gpuIndex, watts: tdpValue }, "monitor.gpu.tdp.applySuccess", { watts: Math.round(tdpValue) })}
+                        disabled={!tdpCanApply}
+                        className="text-[11px] px-3 py-1 rounded-md bg-glyvex-accent text-white font-medium hover:bg-glyvex-accent/85 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {tdpBusy ? t("monitor.gpu.tdp.applying") : t("monitor.gpu.tdp.apply")}
+                      </button>
+                    </div>
+                    {!tdpInfo.privileged && (
+                      <p className="text-[11px] text-amber-400/90">{t("monitor.gpu.tdp.needsAdmin")}</p>
+                    )}
+                  </div>
+                )
+              )}
             </div>
             )}
 

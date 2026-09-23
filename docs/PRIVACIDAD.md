@@ -44,6 +44,29 @@ telemetría saliente**: es el que expone cada `llama-server` **localmente**, y l
 lee el propio Monitor de la app para mostrarte los vitales del proceso
 (t/s, contexto, spec decoding). No se envía a ningún lado.
 
+## Excepción: runtime embebido (llama.cpp)
+
+En **Windows** la suite puede **descargar** su propia build probada de
+[llama.cpp](https://github.com/ggml-org/llama.cpp) (el runtime de inferencia,
+~550 MB) para que no tengas que instalar nada aparte. Es la única excepción a
+"todo es local", y viene con garantías:
+
+- **Explicita** — la app no descarga nada por su cuenta; la descarga la
+  iniciás vos con el botón **Descargar runtime** (onboarding o
+  Config → **Runtime**).
+- **Verificada por sha256** — cada build de la lista de "versiones probadas"
+  declara su URL + sha256; si el archivo descargado no casa, se **descarta**
+  (se borra el parcial) y el runtime queda en `error`. No verificable = no se
+  usa.
+- **Solo fuentes fijas** — el canal propio de la suite (asset del release) y,
+  como fallback, la build oficial de `ggml-org/llama.cpp`. Ningún endpoint
+  configurable por el usuario.
+- **Sin telemetría** — la descarga no envía nada de tu máquina: es un `GET` al
+  release.
+
+Si no tocás **Descargar runtime**, no hay ninguna descarga: la app funciona
+igual con el modo experto (`binary_path`) u Ollama/LM Studio.
+
 ## Configuración y red
 
 - **Bind por defecto `127.0.0.1`** — la app escucha solo en la máquina local.

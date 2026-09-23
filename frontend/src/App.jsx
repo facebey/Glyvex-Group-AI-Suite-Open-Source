@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createBrowserRouter, RouterProvider, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   MessageSquare, Rocket, Gauge, Activity, FileBarChart, Settings,
-  CheckCircle2, Circle, Sun, Moon,
+  CheckCircle2, Circle, Sun, Moon, Cpu, Download, Loader2, AlertTriangle, Github,
 } from "lucide-react";
 import { ToastProvider } from "./components/ToastNotification.jsx";
 import { useLocalStorage } from "./hooks/useLocalStorage.js";
+import { consumeSSE } from "./lib/sse.js";
 import StatusWidget from "./components/StatusWidget.jsx";
 import LanguageSelector from "./components/LanguageSelector.jsx";
 import Chat from "./pages/Chat.jsx";
@@ -104,6 +105,9 @@ function OnboardingScreen({ onDismiss }) {
   const [cfg, setCfg] = useState(null);
   const [modelsCount, setModelsCount] = useState(0);
   const [hasActiveProcess, setHasActiveProcess] = useState(false);
+  const [runtime, setRuntime] = useState(null);
+  const [dl, setDl] = useState(null);
+  const abortRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,25 +116,74 @@ function OnboardingScreen({ onDismiss }) {
         fetch("/api/config").then((r) => r.json()),
         fetch("/api/models").then((r) => r.json()).catch(() => []),
         fetch("/api/launcher/status").then((r) => r.json()).catch(() => []),
+        fetch("/api/runtime/status").then((r) => r.json()).catch(() => null),
       ])
-        .then(([config, models, procs]) => {
+        .then(([config, models, procs, rt]) => {
           if (cancelled) return;
           setCfg(config);
           setModelsCount(Array.isArray(models) ? models.length : 0);
           setHasActiveProcess(Array.isArray(procs) && procs.some((p) => p.state === "running"));
+          setRuntime(rt);
         })
         .catch(() => {});
     }
     poll();
     const intervalId = setInterval(poll, 4000);
-    return () => { cancelled = true; clearInterval(intervalId); };
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+      abortRef.current?.abort();
+    };
   }, []);
+
+  async function handleRuntimeDownload() {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setDl({ phase: "downloading", pct: 0, detail: "" });
+    try {
+      const res = await fetch("/api/runtime/download", { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || t("onboarding.runtimeError"));
+      }
+      await consumeSSE(res, controller.signal, (event) => {
+        if (event.type === "progress") {
+          setDl({ phase: "downloading", pct: event.pct, detail: event.detail });
+        } else if (event.type === "done") {
+          setDl(null);
+          setRuntime(event.status);
+        } else if (event.type === "error") {
+          setDl({ phase: "error", error: event.message });
+        }
+      });
+    } catch (err) {
+      setDl({ phase: "error", error: err.message });
+    }
+  }
 
   if (!cfg) return null;
 
   const step1Done = !allBackendPathsEmpty(cfg);
   const step2Done = (cfg.model_dirs || []).length > 0 && modelsCount > 0;
   const step3Done = hasActiveProcess;
+
+  // Estado del paso "Descargar runtime" (RT-10): experto gana (usa su
+  // binario), luego descarga en curso, error, ready. En Windows el motor
+  // base se ofrece a TODA la GPU (la aceleración depende de la familia);
+  // fuera de Windows va al banner "no soportado".
+  const expertBinary = cfg?.backends?.llama_server?.binary_path;
+  const isWindows = runtime?.platform === "Windows";
+  const gpuLabel = runtime?.gpu === "cpu" ? "CPU" : (runtime?.gpu || "CPU");
+  const isNvidia = runtime?.gpu_family === "nvidia";
+  const sizeMb = isNvidia ? 549 : 19;
+
+  let runtimeView;
+  if (expertBinary) runtimeView = "expert";
+  else if (dl?.phase === "downloading" || runtime?.state === "downloading") runtimeView = "downloading";
+  else if (dl?.phase === "error" || runtime?.state === "error") runtimeView = "error";
+  else if (runtime?.state === "ready") runtimeView = "ready";
+  else if (!isWindows) runtimeView = "skipped";
+  else runtimeView = "action";
 
   const steps = [
     { n: 1, label: t("onboarding.step1"), done: step1Done, to: "/config" },
@@ -148,6 +201,90 @@ function OnboardingScreen({ onDismiss }) {
           <p className="text-sm text-glyvex-muted mt-1">
             {t("onboarding.subtitle")}
           </p>
+        </div>
+        <div className="rounded-md border border-glyvex-border p-4 space-y-3">
+          {runtimeView === "ready" && (
+            <>
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
+                {t("onboarding.runtimeReady", { pin: runtime?.pin })}
+              </div>
+              <p className="text-xs text-glyvex-muted">
+                {t("onboarding.runtimeReadySub", { gpu: gpuLabel })}
+              </p>
+              {isNvidia && !runtime?.accel && (
+                <p className="text-xs text-amber-400">
+                  {t("onboarding.runtimeDegraded")}
+                </p>
+              )}
+            </>
+          )}
+          {runtimeView === "expert" && (
+            <>
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
+                {t("onboarding.runtimeExpert")}
+              </div>
+              <p className="text-xs text-glyvex-muted">{t("onboarding.runtimeExpertSub")}</p>
+            </>
+          )}
+          {runtimeView === "downloading" && (
+            <>
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Loader2 size={18} className="text-glyvex-accent animate-spin shrink-0" />
+                {t("onboarding.runtimeDownloading")}
+              </div>
+              <div className="h-2 rounded-full bg-glyvex-border overflow-hidden">
+                <div className="h-full bg-glyvex-accent transition-all" style={{ width: `${dl?.pct ?? 0}%` }} />
+              </div>
+              {dl?.detail && (
+                <p className="text-xs text-glyvex-muted">{Math.round(dl.pct)}% · {dl.detail}</p>
+              )}
+            </>
+          )}
+          {runtimeView === "action" && (
+            <>
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Cpu size={18} className="text-glyvex-accent shrink-0" />
+                {t("onboarding.runtimeGpuDetected", { gpu: gpuLabel })}
+              </div>
+              <p className="text-xs text-glyvex-muted">
+                {t("onboarding.runtimeSize", { size: sizeMb })}
+                {!isNvidia && <> · {t("onboarding.runtimeCpuNote")}</>}
+              </p>
+              <button type="button" onClick={handleRuntimeDownload}
+                className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-500">
+                <Download size={16} />{t("onboarding.runtimeDownload")}
+              </button>
+            </>
+          )}
+          {runtimeView === "error" && (
+            <>
+              <div className="flex items-center gap-2 text-sm font-medium text-red-400">
+                <AlertTriangle size={18} className="shrink-0" />
+                {t("onboarding.runtimeError")}
+              </div>
+              <p className="text-xs text-red-400/80 break-all">{dl?.error || runtime?.error}</p>
+              <button type="button" onClick={handleRuntimeDownload}
+                className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border border-glyvex-accent/40 bg-glyvex-accent/15 text-glyvex-accent hover:bg-glyvex-accent/25">
+                {t("onboarding.runtimeRetry")}
+              </button>
+            </>
+          )}
+          {runtimeView === "skipped" && (
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-sm text-glyvex-text">
+                  {t("onboarding.runtimeUnsupported")}
+                </p>
+                <button type="button" onClick={() => goTo("/config")}
+                  className="text-xs text-glyvex-accent hover:underline">
+                  {t("onboarding.runtimeGoConfig")}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="space-y-2">
           {steps.map((step) => (
@@ -275,6 +412,18 @@ function Layout() {
               className="hover:text-glyvex-muted transition-colors"
             >
               Glyvex Group
+            </a>
+            {" · "}
+            <a
+              href="https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-glyvex-muted transition-colors"
+              title="Código abierto — Apache 2.0"
+            >
+              <span className="inline-flex items-center gap-1">
+                <Github size={12} /> GitHub
+              </span>
             </a>
           </span>
           <span>{t("footer.rights", { year: new Date().getFullYear() })}</span>

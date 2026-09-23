@@ -68,6 +68,7 @@ from database import (
     db_upsert_template,
 )
 from models import get_entry_metadata, inventory as model_inventory
+from runtime import resolve_binary
 
 logger = logging.getLogger("glyvex.launcher")
 
@@ -940,6 +941,23 @@ def build_ollama_command(binary_path: str, model_name: str) -> list[str]:
     return [binary_path, "run", model_name]
 
 
+def _require_llama_binary() -> str:
+    """Binario de llama_server vía cascada (modo experto → runtime
+    gestionado, ver runtime.resolve_binary). Sin auto-download: si no hay
+    ninguno usable, 400 con code `runtime_missing` para que la UI ofrezca
+    descargarlo (RT-4/RT-5) en vez de lanzar a ciegas."""
+    binary_path = resolve_binary(config.get("backends.llama_server.binary_path"))
+    if not binary_path:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "runtime_missing: no hay runtime de llama.cpp instalado "
+                "(descargalo desde Config → Runtime, o fijá un binary_path propio)"
+            ),
+        )
+    return binary_path
+
+
 # ---------------------------------------------------------------------------
 # Gestión de procesos (asyncio nativo)
 # ---------------------------------------------------------------------------
@@ -1200,12 +1218,7 @@ class ModelProcessManager:
                         "proceso: el server nuevo no podrá subir en ese "
                         "puerto."
                     )
-            binary_path = config.get("backends.llama_server.binary_path")
-            if not binary_path:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No hay binary_path configurado para llama_server (ver Config)",
-                )
+            binary_path = _require_llama_binary()
             # Puerta de thinking: usa la metadata persistida en el inventario
             # (extraída en el scan) si el archivo no cambió, o relee el
             # header con cache. Si no se puede leer, se conserva el
@@ -1378,12 +1391,7 @@ async def preview_command(cfg: LaunchConfig) -> CommandPreview:
             probed=False,
         )
 
-    binary_path = config.get("backends.llama_server.binary_path")
-    if not binary_path:
-        raise HTTPException(
-            status_code=400,
-            detail="No hay binary_path configurado para llama_server (ver Config)",
-        )
+    binary_path = _require_llama_binary()
     meta = await get_entry_metadata(model)
     enable_thinking_supported = (
         True if meta.get("error") else bool(meta.get("enable_thinking_kwarg"))
@@ -1412,12 +1420,7 @@ async def backend_info() -> BinaryInfo:
     para mostrar contra qué build está corriendo y avisar si el probe falló,
     en vez de tener que comparar changelogs a mano en cada actualización.
     """
-    binary_path = config.get("backends.llama_server.binary_path")
-    if not binary_path:
-        raise HTTPException(
-            status_code=400,
-            detail="No hay binary_path configurado para llama_server (ver Config)",
-        )
+    binary_path = _require_llama_binary()
     return await probe_binary(binary_path)
 
 

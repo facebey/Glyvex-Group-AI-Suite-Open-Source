@@ -3,6 +3,46 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
+## [0.5.0] — 2026-09-22
+
+### Agregado
+- **Runtime de inferencia embebido**: en Windows la suite descarga su propia
+  build probada de llama.cpp (pin **b11009**), verificada por **sha256**,
+  sin instalar nada aparte. Split en 2 niveles: **motor base** (~19 MB,
+  corre en cualquier hardware) + **aceleración NVIDIA** (~531 MB, CUDA
+  13.4), elegida por familia de GPU detectada (`nvidia|amd|intel|cpu`).
+  Download en 2 etapas con progreso por SSE; si la aceleración falla,
+  degrada a CPU (estado "degradado"), nunca es error. Fuentes con
+  preferencia: asset propio de la suite (release v0.5.0 del repo open
+  source) → build oficial de ggml-org/llama.cpp (fallback).
+- **Cascada de binario al lanzar**: `binary_path` (modo experto) gana
+  siempre → runtime gestionado si está `ready` → si no, el launch se
+  rechaza con `runtime_missing` y la UI ofrece descargarlo.
+- **API runtime**: `GET /api/runtime/status` (GPU + familia, estado,
+  versión), `POST /api/runtime/download` (SSE con progreso),
+  `POST /api/runtime/reset`.
+- **UI runtime**: paso "Descargar runtime" en el onboarding (GPU
+  detectada, tamaño estimado por familia, progreso, estados), card
+  "Runtime" en Config (estado, reinstalar) y chip de runtime en el
+  Launcher. En Windows el motor base se ofrece a toda la GPU; AMD/Intel
+  corren en CPU con nota "la aceleración llega próximamente".
+- **M5 — Monitor: control TDP** (power limit) de la GPU en la tarjeta
+  GPU (nvidia-ml-py).
+- **Footer** con link al repo público de GitHub (OSS Apache 2.0).
+- i18n ES/EN completo para las vistas nuevas de runtime.
+
+### Cambiado
+- **Dependencias**: `pynvml` (deprecated) reemplazado por `nvidia-ml-py`
+  (lib oficial de NVIDIA).
+- Los archives del runtime se resuelven desde la release del repo open
+  source público (`Glyvex-Group-AI-Suite-Open-Source`).
+
+### Tests
+- Nuevo test suite del runtime: núcleo `runtime.py` (download verificado
+  contra server fake, extract, estados, cascada de fuentes), API
+  (status/download SSE/reset) y cascada del launcher. Suite completa:
+  **356 tests en verde**.
+
 ## [0.4.3] — 2026-09-21
 
 ### Agregado

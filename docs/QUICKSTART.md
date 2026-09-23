@@ -8,10 +8,13 @@ variables de entorno, seguridad, release).
 
 - **Python 3.11+**
 - **Node.js 20 LTS+** (frontend Vite/React)
-- Al menos un backend de inferencia instalado aparte, según qué uses:
-  [`llama-server`](https://github.com/ggml-org/llama.cpp) (de llama.cpp),
-  [Ollama](https://ollama.com) o [LM Studio](https://lmstudio.ai) en modo
-  servidor.
+- Un backend de inferencia, según qué uses:
+  - **Windows:** el [runtime embebido](../README.md) — la suite descarga su
+    propia build probada de llama.cpp (pin b11009, CUDA), sin instalar nada —
+    **o** [`llama-server`](https://github.com/ggml-org/llama.cpp),
+    [Ollama](https://ollama.com) o [LM Studio](https://lmstudio.ai) en modo servidor.
+  - **Otras plataformas:** [`llama-server`](https://github.com/ggml-org/llama.cpp),
+    [Ollama](https://ollama.com) o [LM Studio](https://lmstudio.ai) en modo servidor.
 - **NVIDIA drivers + CUDA** — *opcional*. Sin GPU NVIDIA todo corre en CPU; la
   GPU solo acelera los modelos grandes.
 - `faster-whisper` — *opcional*, solo para la transcripción local de voz:
@@ -69,8 +72,13 @@ Abrí `http://localhost:5173`.
 Con `config.json` vacío aparece la pantalla de onboarding con estos mismos
 pasos y checkmarks en vivo:
 
-1. **Configurar** — en `/config`, indicá el `binary_path` de `llama-server`
-   (y/o Ollama/LM Studio) y agregá al menos un directorio con modelos `.gguf`.
+1. **Configurar** — agregá al menos un directorio con modelos `.gguf` y elegí
+   el backend de inferencia:
+   - **Windows:** en el onboarding (o en `/config` → **Runtime**) tocá
+     **Descargar runtime** y la suite instala su propia build probada de
+     llama.cpp (pin b11009). No tocás `binary_path`.
+   - **Otras plataformas / modo experto:** en `/config`, indicá el
+     `binary_path` de `llama-server` (y/o Ollama/LM Studio).
 2. **Escanear** — tocá "Escanear ahora"; el inventario queda en el Launcher.
 3. **Lanzar** — en `/launcher`, elegí un modelo y tocá **LAUNCH**.
 4. **Chatear** — en `/` el endpoint del modelo lanzado aparece en el selector;

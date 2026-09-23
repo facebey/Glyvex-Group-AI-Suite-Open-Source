@@ -3,6 +3,7 @@ import { Plus, Trash2, Save, RotateCcw, ScanSearch } from "lucide-react";
 import Section from "../components/ui/Section.jsx";
 import Field from "../components/ui/Field.jsx";
 import ChatSettings from "../components/ChatSettings.jsx";
+import RuntimeSettings from "../components/RuntimeSettings.jsx";
 import MetricsDisplaySettings from "../components/MetricsDisplaySettings.jsx";
 import MetricsExportSettings from "../components/MetricsExportSettings.jsx";
 import { CONFIG_SAVED_EVENT, PRESETS } from "../lib/metricsDisplay.js";
@@ -298,6 +299,8 @@ export default function Config() {
           />
         </Field>
       </Section>
+
+      <RuntimeSettings expertBinary={config.backends.llama_server.binary_path} />
 
       <Section title={t("config.modelDirs.section")}>
         <div className="flex gap-2">

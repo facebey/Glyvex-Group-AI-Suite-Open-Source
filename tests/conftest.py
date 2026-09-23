@@ -67,6 +67,7 @@ import llm_metrics as llm_metrics_module  # noqa: E402
 import main as main_module  # noqa: E402
 import metrics as metrics_module  # noqa: E402
 import models as models_module  # noqa: E402
+import runtime as runtime_module  # noqa: E402
 
 from mock_llm_server import build_mock_app  # noqa: E402
 
@@ -173,6 +174,12 @@ async def _isolated_state(tmp_path):
     # en silencio y los tests escribirían sobre el data/ real.
     launcher_module.DATA_DIR = tmp_path
     launcher_module.LOGS_DIR = tmp_path / "logs"
+
+    # -- runtime.py: runtime gestionado a tmp ------------------------------
+    # resolve_binary()/runtime_dir() cuelgan de DATA_DIR de runtime.py; sin
+    # este redirect los tests de la cascada escribirían sobre data/runtime/
+    # del proyecto real.
+    runtime_module.DATA_DIR = tmp_path
 
     # -- launcher.py: templates -> ya no usan disco, van a la DB aislada
     # (self.path se mantiene solo por compatibilidad; lo apuntamos a tmp

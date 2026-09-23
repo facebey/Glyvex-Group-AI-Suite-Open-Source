@@ -40,10 +40,12 @@ de forma segura (ver sección de Módulos).
 - `faster-whisper` — *opcional*, para la transcripción local de voz del
   micrófono del chat: `pip install -r requirements-optional.txt`
   (ver [`docs/voz-a-texto.md`](docs/voz-a-texto.md)).
-- Al menos uno de estos backends de inferencia instalado aparte, según qué
-  vayas a usar: [`llama-server`](https://github.com/ggml-org/llama.cpp)
-  (de llama.cpp), [Ollama](https://ollama.com), o [LM Studio](https://lmstudio.ai)
-   corriendo en modo servidor.
+- Al menos uno de estos backends de inferencia, según qué vayas a usar.
+  **En Windows** también está el [runtime embebido](#runtime-de-inferencia-llamacpp-embebido):
+  la suite descarga su propia build probada de llama.cpp, sin instalar nada
+  aparte. Si no, [`llama-server`](https://github.com/ggml-org/llama.cpp)
+  (de llama.cpp), [Ollama](https://ollama.com) o [LM Studio](https://lmstudio.ai)
+  corriendo en modo servidor.
 
 ## Plataformas
 
@@ -185,6 +187,39 @@ mismos pasos y checkmarks en vivo.
 Desde ahí también podés correr un benchmark completo (`/benchmark`) contra
 el modelo activo, o ver su consumo de HW en vivo (`/monitor`).
 
+## Runtime de inferencia (llama.cpp embebido)
+
+En **Windows** la suite puede traer su propia build probada de
+[llama.cpp](https://github.com/ggml-org/llama.cpp) para que no tengas que
+instalar nada de inferencia: pin **b11009**, en layout plano, en dos niveles:
+
+- **motor base** (~19 MB): corre en cualquier GPU/CPU.
+- **aceleración** (~531 MB para NVIDIA + CUDA 13.4; la de AMD/Intel llega
+  en la fase B). Se elige según la familia de GPU detectada.
+
+- **Dónde vive:** `<DATA_DIR>/runtime/llama.cpp-b11009/` (exe + DLLs en la
+  misma carpeta, porque `llama-server.exe` busca sus DLLs en su propio
+  directorio). No es parte del repo: se descarga bajo demanda y se verifica
+  con **sha256**.
+- **Cómo se obtiene:** es un acto explícito — botón **Descargar runtime** en el
+  onboarding (con la GPU detectada y el tamaño estimado) o en `/config` → card
+  **Runtime**. Nunca se descarga solo.
+- **Estados:** `missing` → `downloading` (progreso por SSE, en 2 etapas: base
+  y aceleración) → `ready` (check + pin; puede quedar "degradado" si la
+  aceleración no se instaló: corre en CPU, nunca es error) / `error`
+  (mensaje + Reintentar) / `unsupported` (otras plataformas; v1 es
+  Windows-only).
+- **Cascada al lanzar:** el `binary_path` del modo experto gana siempre; si no,
+  usa el runtime gestionado cuando está `ready`; si no hay ninguno, el launch
+  se rechaza con `runtime_missing` y la UI ofrece "Descargar runtime".
+- **Reinstalar:** **Reinstalar** en Config = reset (borra la carpeta) +
+  descarga de nuevo. API: `GET /api/runtime/status`,
+  `POST /api/runtime/download` (SSE), `POST /api/runtime/reset`.
+- **v1:** el motor base se ofrece en todo Windows; la aceleración GPU es
+  NVIDIA/CUDA hoy, y AMD/Intel (Vulkan/ROCm) llega en la fase B — mientras
+  tanto esas GPU corren en CPU con una nota en la UI. El modo experto
+  (`binary_path`) sigue funcionando igual en cualquier plataforma.
+
 El Launcher gestiona el ciclo de vida completo del proceso: arranca,
 monitorea y detiene `llama-server` por vos. Por ahora no se adjunta a
 servers que estén corriendo afuera de la app.
@@ -202,20 +237,17 @@ servers que estén corriendo afuera de la app.
 
 ## Módulos
 
-| Módulo | Qué hace |
-|--------|----------|
-| **M0 — Skeleton** | Base del proyecto: FastAPI + React + config persistida. |
-| **M1 — Inventario** | Escanea tus `.gguf`, extrae familia/cuantización, lee metadata GGUF, detecta módulos embebidos (MTP/visión), agrupa por carpeta. |
-| **M2 — Launcher** | Lanza `llama-server`/Ollama/LM Studio con templates de hardware, logs en vivo, MTP/draft y stop/restart limpios. |
-| **M3 — Chat** | Streaming con razonamiento separado, métricas en vivo, ramas, adjuntos, tool calling, voz a texto. |
-| **M4 — Benchmark** | 58 prompts en 6 categorías + sets propios, scoring, reportes HTML, comparación de runs. |
-| **M5 — Monitor** | GPU/CPU/RAM en tiempo real + histórico persistente con retención configurable. |
-| **M6 — Integración** | Widget de estado en navbar, toasts, shortcuts, onboarding. |
-| **M7 — Base de datos** | SQLite async: conversaciones (árbol), benchmarks, templates, sets. |
-| **M8 — Vitales del LLM server** | t/s, prompt processing, caché, % de aceptación MTP desde `/metrics` de `llama-server`. |
-
-Detalle técnico por módulo: [`docs/modulos.md`](docs/modulos.md) ·
-Parámetros de lanzamiento: [`docs/launcher-params.md`](docs/launcher-params.md)
+| Módulo | Descripción |
+|--------|-------------|
+| **M0 — Skeleton** | Base del proyecto: FastAPI + React + config persistida en `data/config.json` con dot-notation. |
+| **M1 — Inventario** | Escanea los `model_dirs` configurados (GGUF/GGML/safetensors), extrae familia/parámetros/cuantización del nombre de archivo y lee **metadata GGUF** (arch, vocab, context, chat template, BOS/EOS), cachea en `data/models.json`. **Detecta módulos embebidos** en el propio `.gguf` (cabeza MTP/NextN `*.nextn.*` y encoder de visión) leyendo el header una sola vez. Scan incremental por `path+mtime`, progreso vía SSE, **agrupación por carpeta** con variantes (base + MTP + mmproj), tags por modelo. Si cambia el esquema de campos derivados del header (`MODELS_CACHE_SCHEMA_VERSION`), el cache se invalida una sola vez y el próximo scan recalcula todo. |
+| **M2 — Launcher** | Lanza `llama-server`/Ollama/LM Studio con `asyncio.subprocess`, templates de hardware predefinidos, logs en vivo por WebSocket (colapsa las líneas "slots idle" repetidas para no enterrar la terminal), health check async, stop/restart limpios (SIGTERM→SIGKILL). **Speculative decoding MTP/NextN:** origen del draft embebido en el modelo, sidecar detectado o path manual (UI de origen), flags `--spec-type draft-mtp` / `--spec-draft-model` / `--spec-draft-n-max` y cache types propios del draft (`--spec-draft-type-k/-v`). Arranca `llama-server` con `--metrics` (endpoint Prometheus `/metrics`) para alimentar los vitales del proceso (M8). |
+| **M3 — Chat** | Interfaz de chat OpenAI-compatible con streaming (SSE), separación de bloques `think` (razonamiento) del contenido de respuesta, métricas en vivo de t/s, TTFT y tokens generados (MetricsBar, calculadas en `stream_metrics.py` desde los `timings` de llama-server: cuenta el razonamiento y las rondas de tools sin inflar ni cortar las tasas), cancelación de generación (Esc), export a JSON/Markdown. **Conversaciones en SQLite** con árbol de mensajes (regeneraciones = ramas), búsqueda e historial. **Adjuntos:** archivos e imágenes (PDF, DOCX, PPTX, XLSX) con límites configurables y estimación de tokens. **Tool calling nativo:** loop de `tool_calls` del modelo con rondas configurables (`tools.max_rounds`) y visualización de actividad (ToolActivity). **Voz a texto:** micrófono en el composer (Web Speech API en el browser, fallback a **faster-whisper** en el backend, idioma configurable, default es-AR). Ver [voz-a-texto.md](docs/voz-a-texto.md). |
+| **M4 — Benchmark** | Suite de 58 prompts en 6 categorías (programación, matemática, ciencias, lógica, español, infraestructura de redes) — extensible con **sets propios** (CRUD) — corridos como `asyncio.Task` cancelable, con progreso por WebSocket, scoring por prompt (keywords automáticas, **judge LLM** opcional, score manual), reporte HTML autónomo, historial de runs en SQLite, comparación de runs y vista `/reports` con gráficos Recharts. |
+| **M5 — Monitor** | GPU (nvidia-ml-py, con control de límite de potencia/TDP)/CPU/RAM (psutil) en tiempo real vía WebSocket con buffer circular de 300 muestras, degrada a `null` sin crashear si no hay GPU NVIDIA o falta psutil. **Histórico persistente** (`metrics_store.py`): poller en segundo plano desde que arranca la app que guarda series en `data/metrics.db` (SQLite) en ventanas de 5 s, con rollup a 1 min y 1 h y retención configurable (`monitor.retention_raw_h/1m_d/1h_d`, default 48 h / 30 d / 365 d); `GET /api/metrics/series` y `/api/metrics/query` eligen la resolución según el rango pedido. |
+| **M6 — Integración final** | Widget de estado en la navbar (modelo activo + mini GPU), sistema de toasts (Context + `useReducer`), shortcuts de teclado en Chat, estado persistido en `localStorage`, onboarding para instalaciones nuevas, `/api/info` + `/api/state`. |
+| **M7 — Base de datos** | SQLAlchemy async + aiosqlite (WAL) en `data/glyvex.db`: conversaciones/mensajes (árbol), benchmark runs/results/summaries, templates de hardware, sets de prompts. Dual con JSON (`config.json`, `models.json`) para portabilidad de reportes. |
+| **M8 — Vitales del LLM server** | Poller que lee el endpoint Prometheus `/metrics` de cada `llama-server` en ejecución (`llm_metrics.py`): generación t/s, prompt processing, contexto ocupado — en builds actuales `kv_cache_tokens` fue removido y el uso sale de `GET /slots` (suma de la secuencia de los slots, con `slots_total`/`slots_busy`; en slot ocioso conserva la última conversación), con fallback a `kv_cache_tokens` en builds viejos —, **% de tokens de prompt reutilizados del caché** (`prompt_tokens_cached_total`), **% de aceptación de la decodificación especulativa MTP/draft** (`spec_decode_num_*`), pico de secuencia (`n_tokens_max` en builds actuales, `n_past_max` en anteriores) y cola de requests, con detección de reinicio (no genera picos falsos). Intervalo adaptativo: 1 s con clientes WS conectados, 5 s en segundo plano (se despierta enseguida al abrir el panel). REST `/api/llm-metrics` (procesos vivos + históricos, history por proceso, WS stream). Se muestra como **tira de vitales** en el Launcher (por proceso) y como **sección LLM Server** en el Monitor (tiles en vivo + gráficos históricos desde `metrics.db`, separados por proceso). Requiere que el launcher arranque `llama-server` con `--metrics` (Ollama/LM Studio no lo exponen). |
 
 ## Shortcuts de teclado (Chat)
 
@@ -252,7 +284,8 @@ El chat expone al modelo dos herramientas, invocadas de forma nativa vía
 | [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Mapa del código: procesos, flujos de datos y dónde vive el estado. |
 | [`docs/PRIVACIDAD.md`](docs/PRIVACIDAD.md) | Qué sale de la máquina y qué no: 100% local, sin telemetría saliente. |
 | [`docs/modulos.md`](docs/modulos.md) | Detalle técnico por módulo (M0–M8). |
-| [`docs/launcher-params.md`](docs/launcher-params.md) | Referencia de parámetros de lanzamiento de `llama-server` (los que maneja el Launcher). |
+| [`docs/launcher-params.md`](docs/launcher-params.md) | Referencia de parámetros de lanzamiento de `llama-server` (los que maneja el Launcher), campo por campo. |
+| [`docs/LAUNCH-FLAGS.md`](docs/LAUNCH-FLAGS.md) · [`docs/LAUNCH-FLAGS.es.md`](docs/LAUNCH-FLAGS.es.md) | Guía bilingüe (EN/ES) de cada flag: qué hace, impacto, default y cuándo cambiarlo. El Launcher muestra la ayuda oficial del binario bajo cada control. |
 | [`docs/voz-a-texto.md`](docs/voz-a-texto.md) | Micrófono del chat: Web Speech API vs Whisper local, modelos, seguridad y empaquetado. |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Problemas frecuentes y cómo resolverlos. |
 | [`docs/searxng/README.md`](docs/searxng/README.md) | Proveedores de búsqueda web (DuckDuckGo, SearXNG, Brave, Tavily) y `tools.*`. |
@@ -263,6 +296,10 @@ El chat expone al modelo dos herramientas, invocadas de forma nativa vía
 - **100% local por diseño**: conversaciones, inventario y benchmarks no
   salen de la máquina; la única salida a red es la búsqueda/fetch de las
   herramientas del modelo.
+- **Runtime embebido** — la descarga opcional del runtime llama.cpp es la única
+  excepción a "todo es local": es **explícita** (la iniciás vos), **verificada
+  por sha256** contra una lista de versiones probadas, y la app no descarga
+  nada por su cuenta. Ver [PRIVACIDAD](docs/PRIVACIDAD.md).
 - CORS restringido a lo que liste `GLYVEX_CORS_ORIGINS` en el entorno activo
   (default `http://localhost:5173`). Con `allow_credentials=True`, un `*` no
   funciona: los navegadores rechazan esa combinación, así que hay que listar
@@ -291,12 +328,12 @@ El chat expone al modelo dos herramientas, invocadas de forma nativa vía
 - [x] **M6** — Integración final y pulido
 - [x] **M7** — Base de datos SQLite (conversaciones, benchmarks, templates, sets)
 - [x] **M8** — Vitales del LLM server (Prometheus `/metrics`, histórico en `metrics.db`)
-- [ ] Soporte para GPU AMD (el stack es hoy optimizado para NVIDIA/CUDA)
+- [ ] Aceleración GPU para AMD/Intel en el runtime embebido (Vulkan/ROCm, fase B — por hoy corre en CPU)
 - [ ] Soporte formal para Linux (y macOS): pruebas completas y CI
 
 ## Tests
 
-Suite de tests automatizados (pytest + pytest-asyncio + httpx, 297 tests,
+Suite de tests automatizados (pytest + pytest-asyncio + httpx, 356 tests,
 sin unittest, sin requests, sin GPU/modelos/red real — todo mockeado: mock
 LLM server uvicorn en `:18080`, binarios fake, SQLite en memoria):
 

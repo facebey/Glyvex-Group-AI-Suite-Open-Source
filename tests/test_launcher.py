@@ -6,6 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 import launcher as launcher_module
+import config as config_module
+import runtime as runtime_module
+from fastapi import HTTPException
 from helpers import scan_and_wait, wait_until, write_gguf
 
 # --------------------------------------------------------------------------
@@ -1285,7 +1288,7 @@ async def _configure_llama_binary(client, binary_path):
 async def test_backend_info_requires_binary(client):
     res = await client.get("/api/launcher/backend-info")
     assert res.status_code == 400
-    assert "binary_path" in res.json()["detail"]
+    assert "runtime_missing" in res.json()["detail"]
 
 
 async def test_backend_info_returns_probe(client, probeable_binary):
@@ -1311,7 +1314,50 @@ async def test_preview_command_requires_binary(client, sample_model_dir):
     model_id = await _first_model_id(client, sample_model_dir)
     res = await client.post("/api/launcher/preview-command", json={"model_id": model_id})
     assert res.status_code == 400
-    assert "binary_path" in res.json()["detail"]
+    assert "runtime_missing" in res.json()["detail"]
+
+
+# --------------------------------------------------------------------------
+# RT-2: cascada de resolución del binario (modo experto → runtime gestionado)
+#
+# _require_llama_binary() es la única fuente; la usan start(), preview-command
+# y backend-info. Sin auto-download: si no hay ninguno, 400 con code
+# runtime_missing para que la UI ofrezca descargarlo.
+# --------------------------------------------------------------------------
+
+
+def _force_windows(monkeypatch):
+    # resolve_binary solo inspecciona el runtime gestionado en Windows; se
+    # fuerza la plataforma para que esa rama sea determinística en cualquier
+    # OS de test (sin GPU ni binarios reales).
+    monkeypatch.setattr(runtime_module.platform, "system", lambda: "Windows")
+
+
+def test_cascade_expert_binary_wins_over_runtime(monkeypatch):
+    _force_windows(monkeypatch)
+    runtime_bin = runtime_module.runtime_dir() / runtime_module.BINARY_NAME
+    runtime_bin.parent.mkdir(parents=True, exist_ok=True)
+    runtime_bin.touch()
+    config_module.config.set("backends.llama_server.binary_path", "/custom/expert.bin")
+    assert launcher_module._require_llama_binary() == "/custom/expert.bin"
+
+
+def test_cascade_falls_back_to_managed_runtime(monkeypatch):
+    _force_windows(monkeypatch)
+    runtime_bin = runtime_module.runtime_dir() / runtime_module.BINARY_NAME
+    runtime_bin.parent.mkdir(parents=True, exist_ok=True)
+    runtime_bin.touch()
+    config_module.config.set("backends.llama_server.binary_path", "")
+    assert launcher_module._require_llama_binary() == str(runtime_bin)
+
+
+def test_cascade_missing_raises_runtime_missing(monkeypatch):
+    _force_windows(monkeypatch)
+    config_module.config.set("backends.llama_server.binary_path", "")
+    with pytest.raises(HTTPException) as exc:
+        launcher_module._require_llama_binary()
+    assert exc.value.status_code == 400
+    assert "runtime_missing" in exc.value.detail
 
 
 async def test_preview_command_masks_key_and_reports_dropped(client, sample_model_dir, probeable_binary):

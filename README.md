@@ -40,10 +40,12 @@ Without an NVIDIA GPU, the Monitor and the Launcher degrade gracefully
 - `faster-whisper` — *optional*, for local voice transcription of the chat
   microphone: `pip install -r requirements-optional.txt`
   (see [`docs/voz-a-texto.md`](docs/voz-a-texto.md), in Spanish).
-- At least one of these inference backends, installed separately, depending
-  on what you'll use: [`llama-server`](https://github.com/ggml-org/llama.cpp)
+- At least one of these inference backends, depending on what you'll use.
+  **On Windows** there's also the [embedded runtime](#inference-runtime-embedded-llamacpp):
+  the suite downloads its own tested build of llama.cpp, so you don't have to
+  install anything separate. Otherwise, [`llama-server`](https://github.com/ggml-org/llama.cpp)
   (from llama.cpp), [Ollama](https://ollama.com), or [LM Studio](https://lmstudio.ai)
-   running in server mode.
+  running in server mode.
 
 ## Platforms
 
@@ -186,6 +188,38 @@ screen with these same steps and live checkmarks.
 From there you can also run a full benchmark (`/benchmark`) against the
 active model, or watch its HW usage live (`/monitor`).
 
+## Inference runtime (embedded llama.cpp)
+
+On **Windows** the suite can bring its own tested build of
+[llama.cpp](https://github.com/ggml-org/llama.cpp) so you don't have to
+install any inference software: pin **b11009**, flat layout, in two levels:
+
+- **base engine** (~19 MB): runs on any GPU/CPU.
+- **acceleration** (~531 MB for NVIDIA + CUDA 13.4; the AMD/Intel one comes
+  in phase B). It's picked based on the detected GPU family.
+
+- **Where it lives:** `<DATA_DIR>/runtime/llama.cpp-b11009/` (exe + DLLs in
+  the same folder, because `llama-server.exe` looks for its DLLs in its own
+  directory). It's not part of the repo: it's downloaded on demand and
+  verified with **sha256**.
+- **How you get it:** it's an explicit act — the **Download runtime** button
+  in onboarding (with the detected GPU and the estimated size) or in
+  `/config` → **Runtime** card. It never downloads by itself.
+- **States:** `missing` → `downloading` (progress via SSE, in 2 stages: base
+  and acceleration) → `ready` (check + pin; it can end up "degraded" if the
+  acceleration didn't install: it runs on CPU, never an error) / `error`
+  (message + Retry) / `unsupported` (other platforms; v1 is Windows-only).
+- **Cascade at launch:** the expert-mode `binary_path` always wins; if not,
+  it uses the managed runtime when it's `ready`; if there's none, the launch
+  is rejected with `runtime_missing` and the UI offers "Download runtime".
+- **Reinstall:** **Reinstall** in Config = reset (deletes the folder) +
+  downloads again. API: `GET /api/runtime/status`,
+  `POST /api/runtime/download` (SSE), `POST /api/runtime/reset`.
+- **v1:** the base engine is offered on all Windows; GPU acceleration is
+  NVIDIA/CUDA today, and AMD/Intel (Vulkan/ROCm) comes in phase B — until
+  then those GPUs run on CPU with a note in the UI. Expert mode
+  (`binary_path`) keeps working the same on any platform.
+
 The Launcher manages the full lifecycle of the process: it starts, monitors
 and stops `llama-server` for you. It does not attach to servers running
 outside the app yet.
@@ -210,7 +244,7 @@ outside the app yet.
 | **M2 — Launcher** | Launches `llama-server`/Ollama/LM Studio with hardware templates, live logs, MTP/draft and clean stop/restart. |
 | **M3 — Chat** | Streaming with separate reasoning, live metrics, branches, attachments, tool calling, voice to text. |
 | **M4 — Benchmark** | 58 prompts in 6 categories + your own sets, scoring, HTML reports, run comparison. |
-| **M5 — Monitor** | Real-time GPU/CPU/RAM + persistent history with configurable retention. |
+| **M5 — Monitor** | Real-time GPU (with power limit/TDP control)/CPU/RAM + persistent history with configurable retention. |
 | **M6 — Integration** | Status widget in the navbar, toasts, shortcuts, onboarding. |
 | **M7 — Database** | Async SQLite: conversations (tree), benchmarks, templates, sets. |
 | **M8 — LLM server vitals** | t/s, prompt processing, cache, MTP acceptance % from `llama-server`'s `/metrics`. |
@@ -256,6 +290,7 @@ The chat exposes two tools to the model, invoked natively via `tool_calls`
 | [`docs/PRIVACIDAD.md`](docs/PRIVACIDAD.md) | What leaves your machine and what doesn't: 100% local, no outbound telemetry. |
 | [`docs/modulos.md`](docs/modulos.md) | Per-module technical detail (M0–M8). |
 | [`docs/launcher-params.md`](docs/launcher-params.md) | Reference of the `llama-server` launch parameters the Launcher manages. |
+| [`docs/LAUNCH-FLAGS.md`](docs/LAUNCH-FLAGS.md) · [`docs/LAUNCH-FLAGS.es.md`](docs/LAUNCH-FLAGS.es.md) | Bilingual (EN/ES) guide for every flag: what it does, impact, default and when to change it. The Launcher shows the binary's official help under each control. |
 | [`docs/voz-a-texto.md`](docs/voz-a-texto.md) | Chat microphone: Web Speech API vs local Whisper, models, security and packaging. |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Common problems and how to solve them. |
 | [`docs/searxng/README.md`](docs/searxng/README.md) | Web search providers (DuckDuckGo, SearXNG, Brave, Tavily) and `tools.*`. |
@@ -266,6 +301,10 @@ The chat exposes two tools to the model, invoked natively via `tool_calls`
 - **100% local by design**: conversations, inventory and benchmarks never
   leave the machine; the only network egress is the web search/fetch of the
   model tools.
+- **Embedded runtime** — the optional download of the llama.cpp runtime is
+  the only exception to "everything is local": it's **explicit** (you start
+  it), **sha256-verified** against a list of tested versions, and the app
+  never downloads anything on its own. See [PRIVACIDAD](docs/PRIVACIDAD.md).
 - CORS is restricted to whatever you list in `GLYVEX_CORS_ORIGINS` in the
   active environment (default `http://localhost:5173`). With
   `allow_credentials=True`, a `*` doesn't work: browsers reject that
@@ -294,12 +333,12 @@ The chat exposes two tools to the model, invoked natively via `tool_calls`
 - [x] **M6** — Final integration and polish
 - [x] **M7** — SQLite database (conversations, benchmarks, templates, sets)
 - [x] **M8** — LLM server vitals (Prometheus `/metrics`, history in `metrics.db`)
-- [ ] AMD GPU support (the stack is today optimized for NVIDIA/CUDA)
+- [ ] GPU acceleration for AMD/Intel in the embedded runtime (Vulkan/ROCm, phase B — for now it runs on CPU)
 - [ ] Formal Linux (and macOS) support: full testing and CI
 
 ## Tests
 
-Automated test suite (pytest + pytest-asyncio + httpx, 297 tests, no
+Automated test suite (pytest + pytest-asyncio + httpx, 356 tests, no
 unittest, no requests, no GPU/models/real network — everything mocked: mock
 LLM server uvicorn on `:18080`, fake binaries, in-memory SQLite):
 

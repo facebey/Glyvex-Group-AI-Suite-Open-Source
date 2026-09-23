@@ -28,6 +28,7 @@ import logsetup
 import metrics
 import metrics_export
 import models
+import runtime_api
 import attachments
 import stt
 import asyncio
@@ -38,7 +39,7 @@ if sys.platform == "win32":
 
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 
-APP_VERSION = "0.4.3"
+APP_VERSION = "0.5.0"
 APP_NAME = "Glyvex-AI-Suite"
 APP_START_MONOTONIC = time.monotonic()
 
@@ -219,6 +220,7 @@ api_router.include_router(metrics.router, prefix="/metrics", tags=["metrics"])
 api_router.include_router(metrics_export.router, prefix="/metrics", tags=["metrics-export"])
 api_router.include_router(llm_metrics.router, prefix="/llm-metrics", tags=["llm-metrics"])
 api_router.include_router(stt.router, prefix="/stt", tags=["stt"])
+api_router.include_router(runtime_api.router, prefix="/runtime", tags=["runtime"])
 
 app.include_router(api_router)
 

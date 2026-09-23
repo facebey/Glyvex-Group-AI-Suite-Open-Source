@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import platform
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -130,6 +131,12 @@ class MetricsSnapshot(BaseModel):
     processes: list[ProcessMetrics] = Field(default_factory=list)
 
 
+class PowerLimitSet(BaseModel):
+    index: int
+    watts: float | None = None
+    default: bool = False
+
+
 # --------------------------------------------------------------------------
 # Recolección de métricas
 # --------------------------------------------------------------------------
@@ -228,6 +235,83 @@ class MetricsCollector:
             ))
 
         return gpus, None
+
+    # -- Límite de potencia (TDP) -----------------------------------------
+
+    def _is_admin(self) -> bool:
+        # Cambiar el power limit exige privilegios (admin en Windows, root en
+        # POSIX). Lo consultamos de forma barata para que el UI desactive el
+        # botón de "Aplicar" con una pista, en vez de fallar al tocarlo.
+        if platform.system() == "Windows":
+            try:
+                import ctypes
+
+                return bool(ctypes.windll.shell32.IsUserAnAdmin())
+            except Exception:
+                return False
+        try:
+            import os
+
+            return os.geteuid() == 0
+        except Exception:
+            return False
+
+    def collect_power_limits(self) -> tuple[list[dict[str, Any]] | None, str | None, bool]:
+        """(gpus, error, privileged). Por GPU: índice, nombre y el rango real
+        de power limit que permite NVML (mín/máx/por defecto/actual, en W).
+        Si la GPU no soporta el límite, `supported` es False y los campos
+        van a null pero la respuesta sigue siendo 200."""
+        privileged = self._is_admin()
+        if not PYNVML_AVAILABLE:
+            return None, "pynvml no está instalado", privileged
+        if not self._nvml_ready:
+            return None, "No se pudo inicializar NVML (¿hay una GPU NVIDIA?)", privileged
+
+        try:
+            count = pynvml.nvmlDeviceGetCount()
+        except Exception as exc:
+            return None, f"Error consultando GPUs: {exc}", privileged
+        if count == 0:
+            return None, "GPU NVIDIA no detectada", privileged
+
+        gpus: list[dict[str, Any]] = []
+        for index in range(count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+            name = self._safe(lambda: pynvml.nvmlDeviceGetName(handle), b"GPU")
+            if isinstance(name, bytes):
+                name = name.decode("utf-8", "replace")
+            current = self._safe(lambda: pynvml.nvmlDeviceGetPowerManagementLimit(handle))
+            constraints = self._safe(lambda: pynvml.nvmlDeviceGetPowerManagementLimitConstraints(handle))
+            default = self._safe(lambda: pynvml.nvmlDeviceGetPowerManagementDefaultLimit(handle))
+            gpus.append({
+                "index": index,
+                "name": name,
+                "supported": constraints is not None,
+                "current_w": round(current / 1000, 1) if current else None,
+                "min_w": round(constraints[0] / 1000, 1) if constraints else None,
+                "max_w": round(constraints[1] / 1000, 1) if constraints else None,
+                "default_w": round(default / 1000, 1) if default else None,
+            })
+        return gpus, None, privileged
+
+    def set_power_limit(self, index: int, watts: float | None = None,
+                        default: bool = False) -> tuple[bool, str | None]:
+        """(ok, error). Con `default=True` restaura el límite de fábrica; si
+        no, aplica `watts`. NVML valida rango y privilegios: cualquier
+        rechazo (sin permisos, no soportado, fuera de rango) vuelve como error."""
+        if not PYNVML_AVAILABLE:
+            return False, "pynvml no está instalado"
+        if not self._nvml_ready:
+            return False, "No se pudo inicializar NVML (¿hay una GPU NVIDIA?)"
+        try:
+            handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+            if default:
+                pynvml.nvmlDeviceSetPowerManagementLimit(handle, pynvml.nvmlDeviceGetPowerManagementDefaultLimit(handle))
+            else:
+                pynvml.nvmlDeviceSetPowerManagementLimit(handle, int(watts * 1000))
+            return True, None
+        except Exception as exc:
+            return False, str(exc)
 
     # -- CPU / RAM ---------------------------------------------------------
 
@@ -593,6 +677,20 @@ async def get_snapshot() -> MetricsSnapshot:
 async def get_gpu() -> dict[str, Any]:
     gpu, error = manager.collector.collect_gpu()
     return {"gpu": [g.model_dump() for g in gpu] if gpu else None, "error": error}
+
+
+@router.get("/gpu/power-limit")
+async def get_gpu_power_limit() -> dict[str, Any]:
+    gpus, error, privileged = await asyncio.to_thread(manager.collector.collect_power_limits)
+    return {"available": gpus is not None, "privileged": privileged, "gpus": gpus, "error": error}
+
+
+@router.post("/gpu/power-limit")
+async def set_gpu_power_limit(body: PowerLimitSet) -> dict[str, Any]:
+    if not body.default and body.watts is None:
+        return {"ok": False, "index": body.index, "watts": None, "error": "watts es requerido"}
+    ok, error = await asyncio.to_thread(manager.collector.set_power_limit, body.index, body.watts, body.default)
+    return {"ok": ok, "index": body.index, "watts": body.watts, "error": error}
 
 
 @router.get("/cpu")

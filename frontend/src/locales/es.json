@@ -17,7 +17,21 @@
     "step1": "Configurar paths de backends",
     "step2": "Agregar directorio de modelos y escanear",
     "step3": "Lanzar el primer modelo",
-    "skip": "Saltar por ahora"
+    "skip": "Saltar por ahora",
+    "runtimeReady": "Runtime de inferencia listo ({{pin}})",
+    "runtimeReadySub": "Optimizado para {{gpu}}",
+    "runtimeExpert": "Runtime: saltado — modo experto",
+    "runtimeExpertSub": "Estás usando tu propio binario (binary_path en Config).",
+    "runtimeDownloading": "Descargando runtime…",
+    "runtimeGpuDetected": "GPU detectada: {{gpu}}",
+    "runtimeSize": "Descarga estimada: ~{{size}} MB · verificada por sha256",
+    "runtimeCpuNote": "la aceleración GPU llega próximamente; por ahora corre en CPU",
+    "runtimeDownload": "Descargar runtime",
+    "runtimeError": "Error al descargar el runtime",
+    "runtimeRetry": "Reintentar",
+    "runtimeDegraded": "Aceleración GPU no instalada — corriendo en CPU.",
+    "runtimeUnsupported": "El runtime embebido es Windows-only en v1. Usá modo experto en Config.",
+    "runtimeGoConfig": "Ir a Config"
   },
   "footer": {
     "developedBy": "Desarrollado por",
@@ -54,6 +68,7 @@
           "util": "GPU · utilización",
           "temp": "GPU · temperatura",
           "power_clocks": "GPU · potencia y clocks",
+          "powerLimit": "GPU · límite de potencia (TDP)",
           "chart": "GPU · gráfico 60 s"
         },
         "cpu": {
@@ -406,6 +421,10 @@
     "probeTitleFail": "No se pudo leer --help/--version del binario: no se filtran flags no soportados",
     "buildUnknown": "build desconocida",
     "binaryNotDetected": "⚠ binario sin detectar",
+    "runtimeReady": "Runtime: {{pin}} listo",
+    "runtimeDownloading": "Runtime: descargando…",
+    "runtimeMissing": "sin runtime — descargar",
+    "runtimeMissingTitle": "Abre Config → Runtime para descargar la versión probada",
     "configuringFor": "Configurando lanzamiento para",
     "loadingModels": "Cargando modelos…",
     "auto": "Auto",
@@ -528,7 +547,24 @@
     "gpu": {
       "notDetected": "GPU NVIDIA no detectada",
       "util": "Utilización GPU",
-      "last60s": "Últimos 60s — GPU util % / VRAM %"
+      "last60s": "Últimos 60s — GPU util % / VRAM %",
+      "tdp": {
+        "title": "Límite de potencia (TDP)",
+        "on": "Activado",
+        "off": "Apagado",
+        "loading": "Leyendo límites…",
+        "notSupported": "Esta GPU no permite ajustar el límite de potencia.",
+        "min": "Mín",
+        "max": "Máx",
+        "reset": "Por defecto",
+        "apply": "Aplicar",
+        "applying": "Aplicando…",
+        "needsAdmin": "Ejecutá Glyvex como administrador para aplicar el límite.",
+        "applySuccess": "Límite de potencia aplicado: {{watts}} W",
+        "resetSuccess": "Límite de potencia restaurado al valor de fábrica",
+        "applyError": "No se pudo aplicar el límite: {{error}}",
+        "loadError": "No se pudo comunicarse con el backend."
+      }
     },
     "cpu": {
       "psutilUnavailable": "psutil no disponible",
@@ -736,6 +772,27 @@
       "testFail": "Falló",
       "testNoBackend": "no se pudo contactar al backend",
       "influxNote": "Si activás InfluxDB con el histórico apagado, reiniciá el backend para que empiece a medir."
+    },
+    "runtime": {
+      "section": "Runtime",
+      "loading": "Consultando estado del runtime…",
+      "ready": "Runtime listo ({{pin}})",
+      "readySub": "Versión probada: {{pin}} · {{size}} MB · fuente: {{source}}",
+      "reinstall": "Reinstalar",
+      "reinstallConfirm": "¿Reinstalar el runtime? Se borra la copia local ({{size}} MB) y hay que volver a descargarlo.",
+      "download": "Descargar runtime",
+      "gpuDetected": "GPU detectada: {{gpu}}",
+      "size": "Descarga estimada: ~{{size}} MB · verificada por sha256",
+      "tested": "versión probada: {{pin}}",
+      "downloading": "Descargando runtime…",
+      "downloadError": "Error al descargar el runtime",
+      "retry": "Reintentar",
+      "resetError": "No se pudo reiniciar el runtime",
+      "expert": "Runtime gestionado: no se usa",
+      "expertSub": "Tenés un binario propio configurado (binary_path en Backends) y ese gana siempre.",
+      "cpuNote": "la aceleración GPU llega próximamente; por ahora corre en CPU",
+      "degraded": "Aceleración GPU no instalada — corriendo en CPU.",
+      "unsupported": "El runtime embebido es Windows-only en v1. Configurá un binario propio en Backends (modo experto)."
     }
   },
   "reports": {

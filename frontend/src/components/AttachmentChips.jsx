@@ -32,7 +32,7 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Trunca por el medio: "presupuesto-escondida-2026.xlsx" → "presupuesto-esc….xlsx" */
+/** Trunca por el medio: "reporte-trimestral-2026.xlsx" → "reporte-trimestra….xlsx" */
 function truncateName(name, max = 24) {
   if (!name || name.length <= max) return name;
   const dot = name.lastIndexOf(".");

@@ -25,7 +25,9 @@ import {
   Terminal,
   Copy,
   Check,
+  Loader2,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useLlmStream } from "../hooks/useLlmStream.js";
 import { useDisplay } from "../lib/metricsDisplay.js";
 import { useTranslation } from "react-i18next";
@@ -1097,6 +1099,7 @@ function LogTerminal({ processId }) {
 
 export default function Launcher() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [modelList, setModelList] = useState([]);
   const [groupList, setGroupList] = useState([]);
   const [viewMode, setViewMode] = useState("group");
@@ -1124,6 +1127,11 @@ export default function Launcher() {
   // la cabecera para saber contra qué binario se está lanzando sin tener que
   // ir a comparar releases a mano después de cada actualización.
   const [backendInfo, setBackendInfo] = useState(null);
+  // Chip "Runtime" (RT-5): estado del runtime gestionado en la cabecera.
+  // Si binary_path (modo experto) está set, no se muestra: el runtime
+  // gestionado no se usa y el chip de build de arriba ya lo cuenta.
+  const [runtimeStatus, setRuntimeStatus] = useState(null);
+  const [expertBinary, setExpertBinary] = useState(false);
   // Preview del comando: se pide al backend (mismo probe y mismo filtrado que
   // usa start()) solo cuando el usuario abre el bloque, no en cada tecleo.
   const [showCommand, setShowCommand] = useState(false);
@@ -1258,6 +1266,34 @@ export default function Launcher() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Chip "Runtime": estado inicial en un solo round-trip (status + config
+  // para detectar el modo experto). Informativo: nunca bloquea la carga.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetch("/api/runtime/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/config").then((r) => r.json()).catch(() => null),
+    ]).then(([rt, cfg]) => {
+      if (cancelled) return;
+      setRuntimeStatus(rt);
+      setExpertBinary(Boolean(cfg?.backends?.llama_server?.binary_path));
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Si la descarga empezó en el onboarding/Config, el chip la sigue hasta
+  // que pasa a "ready" (o error).
+  useEffect(() => {
+    if (runtimeStatus?.state !== "downloading") return undefined;
+    const id = setInterval(() => {
+      fetch("/api/runtime/status")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+        .then((rt) => { if (rt) setRuntimeStatus(rt); });
+    }, 4000);
+    return () => clearInterval(id);
+  }, [runtimeStatus?.state]);
 
   // Metadata real del GGUF del modelo seleccionado
   useEffect(() => {
@@ -1706,6 +1742,30 @@ export default function Launcher() {
                   ? `llama.cpp ${backendInfo.build || t("launcher.buildUnknown")}`
                   : t("launcher.binaryNotDetected")}
             </span>
+          )}
+          {runtimeStatus?.platform === "Windows" && !expertBinary && (
+            runtimeStatus.state === "ready" ? (
+              <span
+                className="text-xs px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                title={runtimeStatus.binary_path}
+              >
+                {t("launcher.runtimeReady", { pin: runtimeStatus.pin })}
+              </span>
+            ) : runtimeStatus.state === "downloading" ? (
+              <span className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded border border-glyvex-accent/40 bg-glyvex-accent/10 text-glyvex-accent">
+                <Loader2 size={12} className="animate-spin" />
+                {t("launcher.runtimeDownloading")}
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => navigate("/config")}
+                className="text-xs px-2 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
+                title={t("launcher.runtimeMissingTitle")}
+              >
+                {t("launcher.runtimeMissing")}
+              </button>
+            )
           )}
         </div>
         <div className="flex gap-1 bg-glyvex-card border border-white/10 rounded-md p-1">

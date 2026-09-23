@@ -170,3 +170,117 @@ async def test_historial_deshabilitado(tmp_path):
     assert manager.store is None
     assert manager._broadcast_task is None
     assert not (tmp_path / "off.db").exists()
+
+
+# --------------------------------------------------------------------------
+# Límite de potencia (TDP): GET/POST /api/metrics/gpu/power-limit
+# --------------------------------------------------------------------------
+
+
+class _FakePynvml:
+    """Sustituye pynvml sin tocar una GPU real: una sola GPU con power limit
+    soportado (240–350 W, por defecto 350 W) y un interruptor para hacer fallar
+    el set (permisos, no soportado, etc.)."""
+
+    def __init__(self, fail_set: str | None = None):
+        self.fail_set = fail_set
+        self.last_set = None
+
+    def nvmlDeviceGetCount(self):
+        return 1
+
+    def nvmlDeviceGetHandleByIndex(self, index):
+        return f"handle-{index}"
+
+    def nvmlDeviceGetName(self, handle):
+        return b"NVIDIA GeForce RTX 3090"
+
+    def nvmlDeviceGetPowerManagementLimit(self, handle):
+        return 350_000  # mW
+
+    def nvmlDeviceGetPowerManagementLimitConstraints(self, handle):
+        return (240_000, 350_000)  # (min, max) mW
+
+    def nvmlDeviceGetPowerManagementDefaultLimit(self, handle):
+        return 350_000  # mW
+
+    def nvmlDeviceSetPowerManagementLimit(self, handle, limit_mw):
+        if self.fail_set:
+            raise Exception(self.fail_set)
+        self.last_set = limit_mw
+
+
+def _mock_nvml(monkeypatch, fake: _FakePynvml) -> None:
+    monkeypatch.setattr(metrics_module, "PYNVML_AVAILABLE", True)
+    monkeypatch.setattr(metrics_module, "pynvml", fake)
+    monkeypatch.setattr(metrics_module.manager.collector, "_nvml_ready", True)
+
+
+async def test_power_limit_get(client, monkeypatch):
+    _mock_nvml(monkeypatch, _FakePynvml())
+    res = await client.get("/api/metrics/gpu/power-limit")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["available"] is True
+    assert isinstance(data["privileged"], bool)
+    assert data["error"] is None
+    gpu = data["gpus"][0]
+    assert gpu["index"] == 0
+    assert gpu["name"] == "NVIDIA GeForce RTX 3090"
+    assert gpu["supported"] is True
+    assert gpu["current_w"] == 350.0
+    assert gpu["min_w"] == 240.0
+    assert gpu["max_w"] == 350.0
+    assert gpu["default_w"] == 350.0
+
+
+async def test_power_limit_set(client, monkeypatch):
+    fake = _FakePynvml()
+    _mock_nvml(monkeypatch, fake)
+    res = await client.post("/api/metrics/gpu/power-limit", json={"index": 0, "watts": 250.0})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert data["error"] is None
+    assert fake.last_set == 250_000  # mW
+
+
+async def test_power_limit_set_default(client, monkeypatch):
+    fake = _FakePynvml()
+    _mock_nvml(monkeypatch, fake)
+    res = await client.post("/api/metrics/gpu/power-limit", json={"index": 0, "default": True})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert fake.last_set == 350_000  # vuelve al límite de fábrica
+
+
+async def test_power_limit_set_sin_watts(client, monkeypatch):
+    fake = _FakePynvml()
+    _mock_nvml(monkeypatch, fake)
+    res = await client.post("/api/metrics/gpu/power-limit", json={"index": 0})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is False
+    assert data["error"]
+    assert fake.last_set is None  # no tocó NVML
+
+
+async def test_power_limit_set_error(client, monkeypatch):
+    fake = _FakePynvml(fail_set="NVML_ERROR_NO_PERMISSION")
+    _mock_nvml(monkeypatch, fake)
+    res = await client.post("/api/metrics/gpu/power-limit", json={"index": 0, "watts": 250.0})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is False
+    assert "NO_PERMISSION" in data["error"]
+
+
+async def test_power_limit_sin_nvidia(client, monkeypatch):
+    monkeypatch.setattr(metrics_module, "PYNVML_AVAILABLE", False)
+    res = await client.get("/api/metrics/gpu/power-limit")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["available"] is False
+    assert data["gpus"] is None
+    assert data["error"] is not None

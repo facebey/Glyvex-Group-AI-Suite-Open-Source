@@ -17,7 +17,21 @@
     "step1": "Configure backend paths",
     "step2": "Add a model directory and scan",
     "step3": "Launch your first model",
-    "skip": "Skip for now"
+    "skip": "Skip for now",
+    "runtimeReady": "Inference runtime ready ({{pin}})",
+    "runtimeReadySub": "Optimized for {{gpu}}",
+    "runtimeExpert": "Runtime: skipped — expert mode",
+    "runtimeExpertSub": "You're using your own binary (binary_path in Config).",
+    "runtimeDownloading": "Downloading runtime…",
+    "runtimeGpuDetected": "GPU detected: {{gpu}}",
+    "runtimeSize": "Estimated download: ~{{size}} MB · sha256 verified",
+    "runtimeCpuNote": "GPU acceleration is coming soon; it runs on CPU for now",
+    "runtimeDownload": "Download runtime",
+    "runtimeError": "Error downloading the runtime",
+    "runtimeRetry": "Retry",
+    "runtimeDegraded": "GPU acceleration not installed — running on CPU.",
+    "runtimeUnsupported": "The embedded runtime is Windows-only in v1. Use expert mode in Config.",
+    "runtimeGoConfig": "Go to Config"
   },
   "footer": {
     "developedBy": "Developed by",
@@ -54,6 +68,7 @@
           "util": "GPU · utilization",
           "temp": "GPU · temperature",
           "power_clocks": "GPU · power and clocks",
+          "powerLimit": "GPU · power limit (TDP)",
           "chart": "GPU · 60 s chart"
         },
         "cpu": {
@@ -406,6 +421,10 @@
     "probeTitleFail": "Could not read --help/--version from the binary: unsupported flags are not filtered",
     "buildUnknown": "unknown build",
     "binaryNotDetected": "⚠ binary not detected",
+    "runtimeReady": "Runtime: {{pin}} ready",
+    "runtimeDownloading": "Runtime: downloading…",
+    "runtimeMissing": "no runtime — download",
+    "runtimeMissingTitle": "Open Config → Runtime to download the tested version",
     "configuringFor": "Configuring launch for",
     "loadingModels": "Loading models…",
     "auto": "Auto",
@@ -528,7 +547,24 @@
     "gpu": {
       "notDetected": "NVIDIA GPU not detected",
       "util": "GPU utilization",
-      "last60s": "Last 60s — GPU util % / VRAM %"
+      "last60s": "Last 60s — GPU util % / VRAM %",
+      "tdp": {
+        "title": "Power limit (TDP)",
+        "on": "On",
+        "off": "Off",
+        "loading": "Reading limits…",
+        "notSupported": "This GPU does not support adjusting the power limit.",
+        "min": "Min",
+        "max": "Max",
+        "reset": "Default",
+        "apply": "Apply",
+        "applying": "Applying…",
+        "needsAdmin": "Run Glyvex as administrator to apply the limit.",
+        "applySuccess": "Power limit applied: {{watts}} W",
+        "resetSuccess": "Power limit reset to factory default",
+        "applyError": "Could not apply the power limit: {{error}}",
+        "loadError": "Could not reach the backend."
+      }
     },
     "cpu": {
       "psutilUnavailable": "psutil not available",
@@ -736,6 +772,27 @@
       "testFail": "Failed",
       "testNoBackend": "could not contact the backend",
       "influxNote": "If you enable InfluxDB with the history turned off, restart the backend so it starts measuring."
+    },
+    "runtime": {
+      "section": "Runtime",
+      "loading": "Checking runtime status…",
+      "ready": "Runtime ready ({{pin}})",
+      "readySub": "Tested version: {{pin}} · {{size}} MB · source: {{source}}",
+      "reinstall": "Reinstall",
+      "reinstallConfirm": "Reinstall the runtime? The local copy ({{size}} MB) will be deleted and it will have to be downloaded again.",
+      "download": "Download runtime",
+      "gpuDetected": "GPU detected: {{gpu}}",
+      "size": "Estimated download: ~{{size}} MB · sha256 verified",
+      "tested": "tested version: {{pin}}",
+      "downloading": "Downloading runtime…",
+      "downloadError": "Error downloading the runtime",
+      "retry": "Retry",
+      "resetError": "Could not reset the runtime",
+      "expert": "Managed runtime: not used",
+      "expertSub": "You have your own binary configured (binary_path in Backends) and it always wins.",
+      "cpuNote": "GPU acceleration is coming soon; it runs on CPU for now",
+      "degraded": "GPU acceleration not installed — running on CPU.",
+      "unsupported": "The embedded runtime is Windows-only in v1. Configure your own binary in Backends (expert mode)."
     }
   },
   "reports": {
