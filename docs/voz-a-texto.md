@@ -72,11 +72,10 @@ faster-whisper decodifica con PyAV, que trae sus propios decoders.
 ## Contexto seguro
 
 `getUserMedia` y la Web Speech API solo funcionan en `https://` o
-`localhost`. `main.py` escucha en `127.0.0.1` por defecto, así que el acceso
-es local y el micrófono funciona; si se expone a la red a propósito
-(`GLYVEX_HOST=0.0.0.0`) y se entra desde otra máquina por IP
-(`http://192.168.x.x:7981`), el micrófono va a aparecer deshabilitado. El
-tooltip lo explica. No es un bug de la app: es una restricción del navegador.
+`localhost`. Como `main.py` escucha en `0.0.0.0`, si entrás desde otra
+máquina por IP (`http://192.168.x.x:7860`) el micrófono va a aparecer
+deshabilitado. El tooltip lo explica. No es un bug de la app: es una
+restricción del navegador.
 
 ## Empaquetado con Tauri
 

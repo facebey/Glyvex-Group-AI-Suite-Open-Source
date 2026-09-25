@@ -373,7 +373,7 @@ def make_probeable_binary(tmp_path):
     """
     Fábrica de "binarios" probeables: cada llamada devuelve un archivo nuevo
     en tmp_path que responde --help/--version con el texto que el test defina
-    (version_lines default: una línea con build b11009) y hace busy-loop con
+    (version_lines default: una línea con build b11146) y hace busy-loop con
     cualquier otro argv. Permite simular builds con distintos sets de flags
     (p. ej. una vieja sin --ctx-checkpoints, o una que le falta un flag
     crítico) sin depender de un llama.cpp real.
@@ -382,7 +382,7 @@ def make_probeable_binary(tmp_path):
 
     def _make(
         help_lines: list[str],
-        version_lines: tuple[str, ...] = ("llama.cpp version b11009",),
+        version_lines: tuple[str, ...] = ("llama.cpp version b11146",),
     ) -> str:
         n = next(counter)
         # La extensión importa: Windows ejecuta .bat vía CreateProcess
@@ -399,7 +399,7 @@ def make_probeable_binary(tmp_path):
 @pytest.fixture
 def probeable_binary(make_probeable_binary):
     """
-    "Build b11009 clásica": trae los flags siempre presentes del comando
+    "Build b11146 clásica": trae los flags siempre presentes del comando
     (model, host, port, ctx-size, batch, gpu-layers, cache-type-k/v,
     flash-attn, metrics, jinja, chat-template-kwargs, reasoning, sampling,
     parallel, mlock, no-mmap, api-key, verbosity, fit) pero NO los de

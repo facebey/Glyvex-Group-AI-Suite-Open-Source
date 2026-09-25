@@ -152,7 +152,7 @@ export default function MicButton({ status, onTranscript, onInterim, onError, di
         type="button"
         disabled
         title={reason}
-        className="flex items-center h-9 px-2 rounded-md border border-white/10 text-glyvex-muted opacity-40 shrink-0"
+        className="flex items-center h-9 px-2 rounded-md border border-glyvex-border-soft text-glyvex-bg-muted opacity-40 shrink-0"
       >
         <Mic size={16} />
       </button>
@@ -180,7 +180,7 @@ export default function MicButton({ status, onTranscript, onInterim, onError, di
         "flex items-center gap-1.5 h-9 px-2 rounded-md border shrink-0 disabled:opacity-50 " +
         (recording
           ? "border-red-500/50 bg-red-500/10 text-red-400"
-          : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30")
+          : "border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-bg-text hover:bg-glyvex-veil-disabled")
       }
     >
       {busy ? (

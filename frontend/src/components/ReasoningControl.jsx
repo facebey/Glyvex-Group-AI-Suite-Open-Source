@@ -59,7 +59,7 @@ export default function ReasoningControl({ value, onChange }) {
   }
 
   const optionRow =
-    "w-full flex items-start gap-2 px-2 py-1.5 rounded-md text-left text-sm hover:bg-white/5";
+    "w-full flex items-start gap-2 px-2 py-1.5 rounded-md text-left text-sm hover:bg-glyvex-veil";
 
   return (
     <div className="relative" ref={wrapRef}>
@@ -79,7 +79,7 @@ export default function ReasoningControl({ value, onChange }) {
           "flex items-center gap-1 h-9 px-2 rounded-md border text-sm shrink-0 " +
           (active
             ? "border-yellow-500/40 bg-yellow-500/10 text-yellow-500"
-            : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30")
+            : "border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-bg-text hover:bg-glyvex-veil-disabled")
         }
       >
         <Lightbulb size={16} />
@@ -89,13 +89,13 @@ export default function ReasoningControl({ value, onChange }) {
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full left-0 mb-2 w-72 z-30 rounded-lg border border-white/10 bg-glyvex-card shadow-xl shadow-black/40 overflow-hidden"
+          className="absolute bottom-full left-0 mb-2 w-72 z-30 rounded-lg border border-glyvex-border-soft bg-glyvex-card shadow-xl shadow-black/40 overflow-hidden"
         >
-          <div className="px-3 py-2 text-xs font-medium text-glyvex-muted border-b border-white/10">
+          <div className="px-3 py-2 text-xs font-medium text-glyvex-muted border-b border-glyvex-border-soft">
             {t("reasoning.heading")}
           </div>
 
-          <div className="p-1.5 border-b border-white/10">
+          <div className="p-1.5 border-b border-glyvex-border-soft">
             {REASONING_MODES.map((mode) => (
               <button
                 key={mode.id}
@@ -113,7 +113,7 @@ export default function ReasoningControl({ value, onChange }) {
                     "mt-1 w-2.5 h-2.5 rounded-full shrink-0 border " +
                     (value.mode === mode.id
                       ? "bg-yellow-500 border-yellow-500"
-                      : "border-white/30")
+                      : "border-glyvex-border-hi")
                   }
                 />
                 <span className="min-w-0">
@@ -124,7 +124,7 @@ export default function ReasoningControl({ value, onChange }) {
             ))}
           </div>
 
-          <div className="px-3 py-2 border-b border-white/10 space-y-2">
+          <div className="px-3 py-2 border-b border-glyvex-border-soft space-y-2">
               <span className="block text-xs text-glyvex-muted">
                 {t("reasoning.effort", { value: value.budget === -1 ? "∞" : value.budget.toLocaleString() })}
               </span>
@@ -141,7 +141,7 @@ export default function ReasoningControl({ value, onChange }) {
                     "px-2 py-1 rounded-md text-xs border " +
                     (value.budget === preset.tokens && !customOpen
                       ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-500"
-                      : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-white/5")
+                      : "border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil")
                   }
                 >
                   {t(preset.labelKey)}
@@ -154,7 +154,7 @@ export default function ReasoningControl({ value, onChange }) {
                   "px-2 py-1 rounded-md text-xs border " +
                   (customOpen
                     ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-500"
-                    : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-white/5")
+                    : "border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil")
                 }
               >
                 Custom
@@ -185,7 +185,7 @@ export default function ReasoningControl({ value, onChange }) {
                     "px-2 py-1 rounded-md text-xs border " +
                     (value.effort === effort
                       ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-500"
-                      : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-white/5")
+                      : "border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil")
                   }
                 >
                   {effort}

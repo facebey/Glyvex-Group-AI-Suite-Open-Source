@@ -227,13 +227,13 @@ const VRAM_STATE_DOT = {
   comodo: "bg-emerald-400",
   justo: "bg-amber-400",
   no_cabe: "bg-red-400",
-  unknown: "bg-white/30",
+  unknown: "bg-glyvex-veil-badge",
 };
 
 const STATE_BADGE = {
   starting: { label: "STARTING", classes: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
   running: { label: "RUNNING", classes: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
-  stopped: { label: "STOPPED", classes: "bg-white/5 text-glyvex-muted border-white/10" },
+  stopped: { label: "STOPPED", classes: "bg-glyvex-veil text-glyvex-muted border-glyvex-border-soft" },
   error: { label: "ERROR", classes: "bg-red-500/15 text-red-400 border-red-500/30" },
 };
 
@@ -244,7 +244,7 @@ function wsUrlFor(path) {
 
 function Panel({ icon: Icon, title, children }) {
   return (
-    <div className="bg-glyvex-card rounded-lg border border-white/10 p-5">
+    <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5">
       <h3 className="flex items-center gap-2 text-sm font-medium text-glyvex-muted uppercase tracking-wide mb-4">
         <Icon size={14} />
         {title}
@@ -266,13 +266,15 @@ function Field({ label, children, hint, flagHelp }) {
 }
 
 const inputClasses =
-  "w-full bg-black/30 border border-white/10 rounded-md px-3 py-2 text-sm " +
+  "w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-3 py-2 text-sm " +
   "text-glyvex-text placeholder:text-glyvex-muted/60 focus:outline-none " +
   "focus:ring-2 focus:ring-glyvex-accent/60";
 
 // El wrapper es un <span class="flex"> (no un <label>) para poder anidarlo
 // dentro de otros labels/rows sin generar HTML inválido.
-function Toggle({ label, checked, onChange, disabled = false, title, help }) {
+// onBg: el toggle vive sobre el fondo crudo (no en una card): en metallic el
+// fondo es oscuro y el label debe usar los tokens bg-text/bg-muted.
+function Toggle({ label, checked, onChange, disabled = false, title, help, onBg = false }) {
   function handleToggle() {
     if (disabled) return;
     onChange(!checked);
@@ -298,22 +300,22 @@ function Toggle({ label, checked, onChange, disabled = false, title, help }) {
           (label ? "justify-between" : "")
         }
       >
-      {label && <span className="text-sm text-glyvex-text">{label}</span>}
+      {label && <span className={`text-sm ${onBg ? "text-glyvex-bg-text" : "text-glyvex-text"}`}>{label}</span>}
       <span
         className={
           "relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 " +
-          (checked ? "bg-glyvex-accent" : "bg-white/10")
+          (checked ? "bg-glyvex-accent" : "bg-glyvex-veil-strong")
         }
       >
         <span
           className={
-            "inline-block h-4 w-4 transform rounded-full bg-white transition-transform " +
+            "inline-block h-4 w-4 transform rounded-full bg-white ring-1 ring-glyvex-border-hi transition-transform " +
             (checked ? "translate-x-4" : "translate-x-0.5")
           }
         />
       </span>
       </span>
-      {help && <span className="block text-xs text-glyvex-muted/50 leading-snug mt-1">{help}</span>}
+      {help && <span className={`block text-xs leading-snug mt-1 ${onBg ? "text-glyvex-bg-muted/50" : "text-glyvex-muted/50"}`}>{help}</span>}
     </span>
   );
 }
@@ -408,12 +410,12 @@ function CommandBlock({ argv, emptyHint }) {
   }
 
   return (
-    <div className="relative rounded-md border border-white/10 bg-black/40">
+    <div className="relative rounded-md border border-glyvex-border-soft bg-glyvex-surface-code">
       <button
         type="button"
         onClick={copy}
         title={t("commandBlock.copyTitle")}
-        className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-1 rounded text-xs border border-white/10 bg-glyvex-card text-glyvex-muted hover:text-glyvex-text"
+        className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-1 rounded text-xs border border-glyvex-border-soft bg-glyvex-card text-glyvex-muted hover:text-glyvex-text"
       >
         {copied ? <Check size={12} /> : <Copy size={12} />}
         {copied ? t("commandBlock.copied") : t("commandBlock.copy")}
@@ -441,7 +443,7 @@ function CommandBlock({ argv, emptyHint }) {
 
 function BackendBadge({ backend }) {
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-black/30 border border-white/10 text-glyvex-muted">
+    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-glyvex-veil-disabled border border-glyvex-border-soft text-glyvex-bg-muted">
       {backend}
     </span>
   );
@@ -497,16 +499,16 @@ function ModelTable({ modelList, selectedId, onSelect }) {
   }
 
   const selectClasses =
-    "bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-sm " +
-    "text-glyvex-text focus:outline-none focus:ring-2 focus:ring-glyvex-accent/60";
+    "bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-2 py-1.5 text-sm " +
+    "text-glyvex-bg-text focus:outline-none focus:ring-2 focus:ring-glyvex-accent/60";
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px]">
-          <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-glyvex-muted" />
+          <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-glyvex-bg-muted" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("modelTable.searchPlaceholder")}
-            className="w-full bg-black/30 border border-white/10 rounded-md pl-8 pr-3 py-1.5 text-sm text-glyvex-text placeholder:text-glyvex-muted/60 focus:outline-none focus:ring-2 focus:ring-glyvex-accent/60" />
+            className="w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md pl-8 pr-3 py-1.5 text-sm text-glyvex-bg-text placeholder:text-glyvex-bg-muted/60 focus:outline-none focus:ring-2 focus:ring-glyvex-accent/60" />
         </div>
         <select className={selectClasses} value={familyFilter} onChange={(e) => setFamilyFilter(e.target.value)}>
           <option value="all">{t("modelTable.allFamilies")}</option>
@@ -525,11 +527,11 @@ function ModelTable({ modelList, selectedId, onSelect }) {
         </select>
       </div>
       {modelList.length === 0 ? (
-        <p className="text-sm text-glyvex-muted">{t("modelTable.emptyInventory")}</p>
+        <p className="text-sm text-glyvex-bg-muted">{t("modelTable.emptyInventory")}</p>
       ) : filtered.length === 0 ? (
-        <p className="text-sm text-glyvex-muted">{t("modelTable.noMatch")}</p>
+        <p className="text-sm text-glyvex-bg-muted">{t("modelTable.noMatch")}</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-white/10">
+        <div className="overflow-x-auto rounded-lg border border-glyvex-border-soft">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-glyvex-card text-left text-glyvex-muted">
@@ -545,17 +547,17 @@ function ModelTable({ modelList, selectedId, onSelect }) {
             </thead>
             <tbody>
               {filtered.map((m) => (
-                <tr key={m.id} className={"border-t border-white/10 " + (m.id === selectedId ? "bg-glyvex-accent/10" : "hover:bg-white/5")}>
+                <tr key={m.id} className={"border-t border-glyvex-border-soft " + (m.id === selectedId ? "bg-glyvex-accent/10" : "hover:bg-glyvex-veil")}>
                   <td className="px-3 py-2"><div className="flex items-center gap-2">{m.has_mmproj && <Eye size={14} className="text-glyvex-accent shrink-0" />}<span className="truncate">{m.name}</span></div></td>
-                  <td className="px-3 py-2 text-glyvex-muted">{m.family || "—"}</td>
-                  <td className="px-3 py-2 text-glyvex-muted">{m.parameters || "—"}</td>
-                  <td className="px-3 py-2 text-glyvex-muted">{m.quantization || "—"}</td>
-                  <td className="px-3 py-2 text-glyvex-muted">{m.size_gb} GB</td>
-                  <td className="px-3 py-2 text-glyvex-muted">{m.format}</td>
+                  <td className="px-3 py-2 text-glyvex-bg-muted">{m.family || "—"}</td>
+                  <td className="px-3 py-2 text-glyvex-bg-muted">{m.parameters || "—"}</td>
+                  <td className="px-3 py-2 text-glyvex-bg-muted">{m.quantization || "—"}</td>
+                  <td className="px-3 py-2 text-glyvex-bg-muted">{m.size_gb} GB</td>
+                  <td className="px-3 py-2 text-glyvex-bg-muted">{m.format}</td>
                   <td className="px-3 py-2"><div className="flex flex-wrap gap-1">{m.compatible_backends.map((b) => <BackendBadge key={b} backend={b} />)}</div></td>
                   <td className="px-3 py-2">
                     <button type="button" onClick={() => onSelect(m.id)}
-                      className={"px-3 py-1 rounded-md text-xs shrink-0 " + (m.id === selectedId ? "bg-glyvex-accent text-white" : "border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card")}>
+                      className={"px-3 py-1 rounded-md text-xs shrink-0 " + (m.id === selectedId ? "bg-glyvex-accent text-white" : "border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card")}>
                       {m.id === selectedId ? t("modelTable.selected") : t("modelTable.select")}
                     </button>
                   </td>
@@ -593,7 +595,7 @@ function SourcePicker({ value, options, onChange }) {
             "px-2 py-1 rounded border " +
             (value === key
               ? "border-glyvex-accent text-glyvex-accent bg-glyvex-accent/10"
-              : "border-white/10 text-glyvex-muted hover:text-glyvex-text")
+              : "border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text")
           }>
           {label}
         </button>
@@ -700,7 +702,7 @@ function GroupCard({ group, onSelect }) {
   }
 
   return (
-    <div className="bg-glyvex-card rounded-lg border border-white/10 overflow-hidden">
+    <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft overflow-hidden">
       <button type="button" onClick={() => setExpanded((v) => !v)} className="w-full flex items-center justify-between p-4 text-left">
         <div className="min-w-0">
           <p className="text-sm font-medium truncate">{group.name}</p>
@@ -713,7 +715,7 @@ function GroupCard({ group, onSelect }) {
         {expanded ? <ChevronDown size={16} className="shrink-0 text-glyvex-muted" /> : <ChevronRight size={16} className="shrink-0 text-glyvex-muted" />}
       </button>
       {expanded && (
-        <div className="border-t border-white/10 p-4 space-y-4">
+        <div className="border-t border-glyvex-border-soft p-4 space-y-4">
           <div>
             <p className="text-xs text-glyvex-muted uppercase tracking-wide mb-2">{t("groupCard.baseQuant")}</p>
             <div className="space-y-1.5">
@@ -750,14 +752,14 @@ function GroupCard({ group, onSelect }) {
                   onChange={(v) => { mtpTouchedRef.current = true; setMtpSource(v); emitSelection({ mtpSource: v }); }} />
               )}
               {useMtp && mtpSource === "sidecar" && group.mtp_models.length > 1 && (
-                <select className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text"
+                <select className="w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-2 py-1.5 text-xs text-glyvex-text"
                   value={selectedMtpId ?? ""}
                   onChange={(e) => { mtpTouchedRef.current = true; setSelectedMtpId(e.target.value); emitSelection({ mtpId: e.target.value }); }}>
                   {group.mtp_models.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.size_gb} GB)</option>)}
                 </select>
               )}
               {useMtp && mtpSource === "manual" && (
-                <input className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text placeholder:text-glyvex-muted/60"
+                <input className="w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-2 py-1.5 text-xs text-glyvex-text placeholder:text-glyvex-muted/60"
                   value={manualMtpPath}
                   onChange={(e) => { mtpTouchedRef.current = true; setManualMtpPath(e.target.value); emitSelection({ mtpManual: e.target.value }); }}
                   placeholder={t("groupCard.draftPathPlaceholder")} />
@@ -787,14 +789,14 @@ function GroupCard({ group, onSelect }) {
                   onChange={(v) => { mmprojTouchedRef.current = true; setMmprojSource(v); emitSelection({ visionSource: v }); }} />
               )}
               {useMmproj && mmprojSource === "sidecar" && group.mmproj_models.length > 1 && (
-                <select className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text"
+                <select className="w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-2 py-1.5 text-xs text-glyvex-text"
                   value={selectedMmprojId ?? ""}
                   onChange={(e) => { mmprojTouchedRef.current = true; setSelectedMmprojId(e.target.value); emitSelection({ mmprojId: e.target.value }); }}>
                   {group.mmproj_models.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.size_gb} GB)</option>)}
                 </select>
               )}
               {useMmproj && mmprojSource === "manual" && (
-                <input className="w-full bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-xs text-glyvex-text placeholder:text-glyvex-muted/60"
+                <input className="w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-2 py-1.5 text-xs text-glyvex-text placeholder:text-glyvex-muted/60"
                   value={manualMmprojPath}
                   onChange={(e) => { mmprojTouchedRef.current = true; setManualMmprojPath(e.target.value); emitSelection({ mmprojManual: e.target.value }); }}
                   placeholder={t("groupCard.mmprojPathPlaceholder")} />
@@ -849,14 +851,14 @@ function contextTitle(snap, t) {
 }
 
 function vitalsCtxColor(ratio) {
-  if (ratio == null) return "#9ca3af";
-  if (ratio < 0.5) return "#22c55e";
-  if (ratio <= 0.8) return "#f59e0b";
-  return "#ef4444";
+  if (ratio == null) return "var(--color-glyvex-load-none)";
+  if (ratio < 0.5) return "var(--color-glyvex-load-ok)";
+  if (ratio <= 0.8) return "var(--color-glyvex-load-warn)";
+  return "var(--color-glyvex-load-crit)";
 }
 
 /** Sparkline mínima en SVG: sin recharts, para una tira que se actualiza cada segundo. */
-function MiniSpark({ values, color = "#06b6d4", width = 72, height = 20 }) {
+function MiniSpark({ values, color = "var(--color-glyvex-chart-2)", width = 72, height = 20 }) {
   const points = values.filter((v) => v != null);
   if (points.length < 2) return <svg width={width} height={height} aria-hidden="true" />;
   const max = Math.max(...points);
@@ -924,7 +926,7 @@ function ServerVitalsStrip({ processId, state }) {
 
   if (state !== "running" && !last) {
     return (
-      <div className="px-3 py-2 rounded-md border border-white/10 bg-black/30 text-xs text-glyvex-muted">
+      <div className="px-3 py-2 rounded-md border border-glyvex-border-soft bg-glyvex-veil-disabled text-xs text-glyvex-muted">
         {t("vitals.waitingReady")}
       </div>
     );
@@ -942,7 +944,7 @@ function ServerVitalsStrip({ processId, state }) {
   const specInterval = last?.spec_accept_pct ?? null;
 
   return (
-    <div className="px-3 py-2 rounded-md border border-white/10 bg-black/30 text-xs space-y-1.5" aria-live="off">
+    <div className="px-3 py-2 rounded-md border border-glyvex-border-soft bg-glyvex-veil-disabled text-xs space-y-1.5" aria-live="off">
       {state === "running" && !connected && last && (
         <p className="text-amber-400" title={t("vitals.streamDownTitle")}>
           {t("vitals.streamDown")}
@@ -974,7 +976,7 @@ function ServerVitalsStrip({ processId, state }) {
                 {ctxUsed.toLocaleString()}{ctxTotal ? ` / ${ctxTotal.toLocaleString()}` : ""}
               </span>
               {ctxRatio != null && (
-                <span className="w-16 h-1.5 rounded-full bg-black/40 overflow-hidden">
+                <span className="w-16 h-1.5 rounded-full bg-glyvex-surface-code overflow-hidden">
                   <span
                     className="block h-full rounded-full"
                     style={{ width: `${Math.min(100, ctxRatio * 100)}%`, backgroundColor: vitalsCtxColor(ctxRatio) }}
@@ -1090,7 +1092,7 @@ function LogTerminal({ processId }) {
           {t("logTerminal.download")}
         </button>
       </div>
-      <div ref={containerRef} className="bg-black/50 border border-white/10 rounded-md p-3 h-64 overflow-y-auto font-mono text-xs text-glyvex-muted space-y-0.5">
+      <div ref={containerRef} className="bg-glyvex-surface-code border border-glyvex-border-soft rounded-md p-3 h-64 overflow-y-auto font-mono text-xs text-glyvex-muted space-y-0.5">
         {lines.length === 0 ? <p className="text-glyvex-muted/60">{t("logTerminal.empty")}</p> : lines.map((line, i) => <div key={i}>{line}</div>)}
       </div>
     </div>
@@ -1175,9 +1177,15 @@ export default function Launcher() {
   const applyToggles = useCallback((cfg) => {
     const out = { ...cfg };
     for (const [id, group] of Object.entries(TOGGLE_GROUPS)) {
+      if (id === "fit") {
+        // El toggle fit ES el valor: --fit es on|off y el default de la build
+        // es 'on', así que el payload debe reflejar el toggle, no cfg.fit
+        // (que puede quedar false tras restaurar un proceso corriendo).
+        out.fit = Boolean(toggles.fit);
+        continue;
+      }
       if (toggles[id]) continue;
-      // fit OFF debe enviar false (no null): el builder lo mapea a --fit off.
-      for (const f of group.fields) out[f] = id === "fit" ? false : null;
+      for (const f of group.fields) out[f] = null;
     }
     return out;
   }, [toggles]);
@@ -1569,7 +1577,7 @@ export default function Launcher() {
 
   const isProcessActive = processInfo && processInfo.state !== "stopped";
   const badge = processInfo ? STATE_BADGE[processInfo.state] : null;
-  const selectClasses = "w-full bg-black/30 border border-white/10 rounded-md px-3 py-2 text-sm text-glyvex-text focus:outline-none focus:ring-2 focus:ring-glyvex-accent/60";
+  const selectClasses = "w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-3 py-2 text-sm text-glyvex-text focus:outline-none focus:ring-2 focus:ring-glyvex-accent/60";
   const showCustomCtx = customCtx || !N_CTX_PRESETS.includes(launchConfig.n_ctx);
 
   const metaOk = modelMeta && !modelMeta.error;
@@ -1607,7 +1615,7 @@ export default function Launcher() {
             ["presence", Number(launchConfig.presence_penalty).toFixed(2)],
             ["repeat", Number(launchConfig.repeat_penalty).toFixed(2)],
           ].map(([label, value]) => (
-            <span key={label} className="px-2 py-1 rounded border border-glyvex-border bg-black/30">
+            <span key={label} className="px-2 py-1 rounded border border-glyvex-border bg-glyvex-veil-disabled">
               {label}: {value}
             </span>
           ))}
@@ -1636,7 +1644,7 @@ export default function Launcher() {
         </div>
       )}
       {modelMeta && (
-        <div className="space-y-1 pt-1 border-t border-white/10">
+        <div className="space-y-1 pt-1 border-t border-glyvex-border-soft">
           {modelMeta.error ? (
             <p className="text-xs text-glyvex-muted-2">
               {t("launcher.ggufMetaError", { error: modelMeta.error })}
@@ -1664,7 +1672,7 @@ export default function Launcher() {
         </div>
       )}
       {vramEstimate && vramEstimate.available && (
-        <div className="mt-2 rounded-md bg-black/20 border border-white/10 p-3 space-y-1">
+        <div className="mt-2 rounded-md bg-glyvex-veil-box border border-glyvex-border-soft p-3 space-y-1">
           <div className="flex items-center gap-2 text-sm">
             <span className={`inline-block w-2.5 h-2.5 rounded-full ${VRAM_STATE_DOT[vramEstimate.state] || VRAM_STATE_DOT.unknown}`} />
             <span className="font-medium">{t("launcher.vramEstimated", { total: vramEstimate.total_gb })}</span>
@@ -1678,7 +1686,7 @@ export default function Launcher() {
             {vramEstimate.n_parallel > 1 ? ` · ${vramEstimate.n_parallel} slots` : ""}
           </p>
           {Array.isArray(vramEstimate.legend) && vramEstimate.legend.length > 0 && (
-            <div className="pt-1.5 border-t border-white/10">
+            <div className="pt-1.5 border-t border-glyvex-border-soft">
               <p className="text-[11px] text-glyvex-muted-2 mb-1">
                 {t("launcher.vramByContext")}
               </p>
@@ -1722,7 +1730,7 @@ export default function Launcher() {
     </Panel>
   );
 
-  if (loading) return <p className="text-glyvex-muted text-sm">{t("launcher.loadingModels")}</p>;
+  if (loading) return <p className="text-glyvex-bg-muted text-sm">{t("launcher.loadingModels")}</p>;
 
   return (
     <div className="space-y-6">
@@ -1731,7 +1739,7 @@ export default function Launcher() {
           <h1 className="text-xl font-semibold">Launcher</h1>
           {backendInfo && (
             <span
-              className="text-xs font-mono px-2 py-0.5 rounded border border-white/10 text-glyvex-muted"
+              className="text-xs font-mono px-2 py-0.5 rounded border border-glyvex-border-soft text-glyvex-bg-muted"
                 title={
                   backendInfo.probed
                     ? `${backendInfo.version_line || "llama-server"}\n${t("launcher.probeTitleFlags", { n: backendInfo.flags?.length ?? 0 })}\n${backendInfo.path}`
@@ -1768,7 +1776,7 @@ export default function Launcher() {
             )
           )}
         </div>
-        <div className="flex gap-1 bg-glyvex-card border border-white/10 rounded-md p-1">
+        <div className="flex gap-1 bg-glyvex-card border border-glyvex-border-soft rounded-md p-1">
           <button type="button" onClick={() => setViewMode("group")} className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs ${viewMode === "group" ? "bg-glyvex-accent text-white" : "text-glyvex-muted hover:text-glyvex-text"}`}><LayoutGrid size={13} /> Group</button>
           <button type="button" onClick={() => setViewMode("list")} className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs ${viewMode === "list" ? "bg-glyvex-accent text-white" : "text-glyvex-muted hover:text-glyvex-text"}`}><ListIcon size={13} /> List</button>
         </div>
@@ -1778,7 +1786,7 @@ export default function Launcher() {
 
       {viewMode === "group" ? (
         groupList.length === 0 ? (
-          <p className="text-sm text-glyvex-muted">{t("modelTable.emptyInventory")}</p>
+          <p className="text-sm text-glyvex-bg-muted">{t("modelTable.emptyInventory")}</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {groupList.map((g) => <GroupCard key={g.group_id} group={g} onSelect={handleSelectModel} />)}
@@ -1791,31 +1799,31 @@ export default function Launcher() {
       {selectedModel && (
         <div ref={configPanelRef} className="space-y-6 scroll-mt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-glyvex-muted">{t("launcher.configuringFor")} <span className="text-glyvex-text">{selectedModel.name}</span></p>
+            <p className="text-sm text-glyvex-bg-muted">{t("launcher.configuringFor")} <span className="text-glyvex-bg-text">{selectedModel.name}</span></p>
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-2 text-sm">
-                <span className="text-glyvex-muted">{t("launcher.auto")}</span>
-                <Toggle checked={autoMode} onChange={(v) => updateConfig({ auto_mode: v })}
+                <span className="text-glyvex-bg-muted">{t("launcher.auto")}</span>
+                <Toggle onBg checked={autoMode} onChange={(v) => updateConfig({ auto_mode: v })}
                   disabled={advancedMode}
                   title={t("launcher.autoTitle")} />
               </span>
               <span className="flex items-center gap-2 text-sm">
-                <span className="text-glyvex-muted">{t("launcher.advanced")}</span>
-                <Toggle checked={advancedMode}
+                <span className="text-glyvex-bg-muted">{t("launcher.advanced")}</span>
+                <Toggle onBg checked={advancedMode}
                   onChange={(v) => { setAdvancedMode(v); if (v) updateConfig({ auto_mode: false }); }} />
               </span>
               <button
                 type="button"
                 onClick={() => setShowCommand((v) => !v)}
                 title={t("launcher.viewCommandTitle")}
-                className={"flex items-center gap-2 px-3 py-2 rounded-md text-sm border " + (showCommand ? "border-glyvex-accent/60 text-glyvex-text bg-glyvex-card" : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card")}
+                className={"flex items-center gap-2 px-3 py-2 rounded-md text-sm border " + (showCommand ? "border-glyvex-accent/60 text-glyvex-text bg-glyvex-card" : "border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card")}
               >
                 <Terminal size={16} />
                 {t("launcher.command")}
                 {showCommand ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </button>
               {isProcessActive && (
-                <button type="button" onClick={handleRestart} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"><RotateCw size={16} />Restart</button>
+                <button type="button" onClick={handleRestart} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card"><RotateCw size={16} />Restart</button>
               )}
               {isProcessActive ? (
                 <button type="button" onClick={handleStop} className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-red-600 text-white hover:bg-red-500"><Square size={16} />STOP</button>
@@ -1865,17 +1873,17 @@ export default function Launcher() {
                     <ChevronDown size={14} className="shrink-0 text-glyvex-muted" />
                   </button>
                   {templateOpen && (
-                    <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-white/10 bg-glyvex-card shadow-lg">
+                    <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-glyvex-border-soft bg-glyvex-card shadow-lg">
                       <button type="button"
                         onClick={() => { setSelectedTemplate(""); setTemplateOpen(false); }}
-                        className="w-full px-3 py-2 text-left text-sm text-glyvex-muted hover:bg-white/5">
+                        className="w-full px-3 py-2 text-left text-sm text-glyvex-muted hover:bg-glyvex-veil">
                         {t("launcher.templateChoose")}
                       </button>
                       {templateList.length === 0 && (
                         <p className="px-3 py-2 text-sm text-glyvex-muted">{t("launcher.templateEmpty")}</p>
                       )}
                       {templateList.map((tpl) => (
-                        <div key={tpl.name} className={"flex items-center gap-1 pr-1 hover:bg-white/5 " + (tpl.name === selectedTemplate ? "bg-glyvex-accent/10" : "")}>
+                        <div key={tpl.name} className={"flex items-center gap-1 pr-1 hover:bg-glyvex-veil " + (tpl.name === selectedTemplate ? "bg-glyvex-accent/10" : "")}>
                           <button type="button"
                             onClick={() => { applyTemplate(tpl.name); setNewTemplateName(tpl.name); setTemplateOpen(false); }}
                             className="flex-1 min-w-0 px-3 py-2 text-left text-sm text-glyvex-text">
@@ -1897,7 +1905,7 @@ export default function Launcher() {
               </Field>
               <div className="flex gap-2">
                 <input className={inputClasses} value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} placeholder={t("launcher.templateNamePlaceholder")} />
-                <button type="button" onClick={saveTemplate} className="flex items-center gap-1 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card shrink-0"><Save size={14} />{t("launcher.save")}</button>
+                <button type="button" onClick={saveTemplate} className="flex items-center gap-1 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card shrink-0"><Save size={14} />{t("launcher.save")}</button>
               </div>
             </Panel>
 
@@ -1959,7 +1967,7 @@ export default function Launcher() {
                   {["gpu_only", "cpu_only", "hybrid"].map((mode) => (
                     <button key={mode} type="button"
                       onClick={() => updateConfig({ gpu_mode: mode, n_gpu_layers: mode === "cpu_only" ? 0 : launchConfig.n_gpu_layers === 0 ? -1 : launchConfig.n_gpu_layers })}
-                      className={"flex-1 px-3 py-2 rounded-md text-sm border " + (launchConfig.gpu_mode === mode ? "bg-glyvex-accent/15 border-glyvex-accent text-glyvex-accent" : "border-white/10 text-glyvex-muted hover:text-glyvex-text")}>
+                      className={"flex-1 px-3 py-2 rounded-md text-sm border " + (launchConfig.gpu_mode === mode ? "bg-glyvex-accent/15 border-glyvex-accent text-glyvex-accent" : "border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text")}>
                       {mode}
                     </button>
                   ))}
@@ -2264,7 +2272,7 @@ export default function Launcher() {
                       </Field>
                     )}
                   </div>
-                  <div className="border-t border-white/10 pt-4 space-y-4">
+                  <div className="border-t border-glyvex-border-soft pt-4 space-y-4">
                     <p className="text-xs text-glyvex-muted uppercase tracking-wide">
                       {t("launcher.checkpointsMemory")}
                     </p>

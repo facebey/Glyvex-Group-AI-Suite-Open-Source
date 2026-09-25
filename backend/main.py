@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import config
-from paths import BASE_DIR, DATA_DIR, ENV_NAME
+from paths import BUNDLE_DIR, DATA_DIR, ENV_NAME, FROZEN
 from database import db_all_attachment_ids, init_db
 import benchmark
 import chat
@@ -37,9 +37,11 @@ import sys
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
+# En dev: frontend/dist del repo. En el bundle: el dist empaquetado
+# (glyvex.spec, datas → _internal/frontend/dist).
+FRONTEND_DIST = BUNDLE_DIR / "frontend" / "dist"
 
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.6.0"
 APP_NAME = "Glyvex-AI-Suite"
 APP_START_MONOTONIC = time.monotonic()
 
@@ -229,8 +231,36 @@ if FRONTEND_DIST.exists():
 
 
 if __name__ == '__main__':
+    # El import redirige stdout/stderr al log cuando el bundle corre sin
+    # consola (no hace nada en dev). Debe ir antes de uvicorn.run, que
+    # escribe en stdout.
+    import glyvex_console_hook  # noqa: F401
     import uvicorn
     # 127.0.0.1 por defecto (app local, sin autenticación); GLYVEX_HOST y
     # GLYVEX_PORT lo sobreescriben (mismo contrato que start.cmd/start.ps1).
     port = int(os.environ.get("GLYVEX_PORT", "7981"))
+    # GLYVEX_NO_BROWSER lo exporta el launcher de Tauri: la ventana la da la
+    # shell y no hay que abrir el navegador.
+    _no_browser = os.environ.get("GLYVEX_NO_BROWSER", "").strip().lower() in ("1", "true", "yes")
+    if FROZEN and not _no_browser:
+        # El atajo del instalador apunta a este exe: cuando la API responde,
+        # abrir la SPA en el navegador predeterminado (hasta que exista la
+        # ventana nativa de Tauri).
+        import threading
+        import urllib.request
+        import webbrowser
+
+        def _open_when_ready() -> None:
+            base = f"http://{os.environ.get('GLYVEX_HOST', '127.0.0.1')}:{port}"
+            for _ in range(90):
+                try:
+                    with urllib.request.urlopen(base + "/api/health", timeout=2) as r:
+                        if r.status == 200:
+                            webbrowser.open(base)
+                            return
+                except Exception:
+                    pass
+                time.sleep(1)
+
+        threading.Thread(target=_open_when_ready, daemon=True).start()
     uvicorn.run(app, host=os.environ.get("GLYVEX_HOST", "127.0.0.1"), port=port, loop='asyncio')

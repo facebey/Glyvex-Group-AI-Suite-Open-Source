@@ -840,7 +840,7 @@ export default function Chat() {
       )}
 
       <section
-        className="relative flex-1 flex flex-col min-w-0 rounded-lg border border-white/10 overflow-hidden"
+        className="relative flex-1 flex flex-col min-w-0 rounded-lg border border-glyvex-border-soft overflow-hidden"
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
@@ -848,11 +848,11 @@ export default function Chat() {
       >
         {dragging && (
           <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-2 bg-glyvex-accent/10 border-2 border-dashed border-glyvex-accent/60 pointer-events-none">
-            <span className="text-sm text-glyvex-text">{t("chat.dropHint")}</span>
+            <span className="text-sm text-glyvex-bg-text">{t("chat.dropHint")}</span>
           </div>
         )}
 
-        <div className="flex items-center justify-between border-b border-white/10">
+        <div className="flex items-center justify-between border-b border-glyvex-border-soft">
           <MetricsBar
             metrics={stream.liveMetrics}
             estimate={estimate}
@@ -865,7 +865,7 @@ export default function Chat() {
               onClick={() => history.setOpen((v) => !v)}
               className={
                 "flex items-center gap-1.5 px-3 text-xs " +
-                (history.open ? "text-glyvex-accent" : "text-glyvex-muted hover:text-glyvex-text")
+                (history.open ? "text-glyvex-accent" : "text-glyvex-bg-muted hover:text-glyvex-bg-text")
               }
               title={t("chat.historyTitle")}
             >
@@ -874,7 +874,7 @@ export default function Chat() {
             <button
               type="button"
               onClick={() => setCompact((v) => !v)}
-              className="flex items-center gap-1.5 px-3 text-xs text-glyvex-muted hover:text-glyvex-text"
+              className="flex items-center gap-1.5 px-3 text-xs text-glyvex-bg-muted hover:text-glyvex-bg-text"
               title={compact ? t("chat.showSettings") : t("chat.compactMode")}
             >
               {compact ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
@@ -883,19 +883,19 @@ export default function Chat() {
         </div>
 
         {exportPanelOpen && (
-          <div className="flex items-center gap-2 px-4 py-2 border-b border-white/10 bg-black/20">
-            <span className="text-xs text-glyvex-muted mr-1">{t("chat.exportLabel")}</span>
+          <div className="flex items-center gap-2 px-4 py-2 border-b border-glyvex-border-soft bg-glyvex-veil-box">
+            <span className="text-xs text-glyvex-bg-muted mr-1">{t("chat.exportLabel")}</span>
             <button
               type="button"
               onClick={() => exportAsJson(path, selectedModel)}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-xs border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card"
             >
               <Download size={12} /> JSON
             </button>
             <button
               type="button"
               onClick={() => exportAsMarkdown(path, selectedModel)}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-xs border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card"
             >
               <Download size={12} /> Markdown
             </button>
@@ -922,7 +922,7 @@ export default function Chat() {
           className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4"
         >
           {path.length === 0 ? (
-            <p className="text-sm text-glyvex-muted text-center mt-10">
+              <p className="text-sm text-glyvex-bg-muted text-center mt-10">
               {t("chat.emptyState")}
             </p>
           ) : (
@@ -958,7 +958,7 @@ export default function Chat() {
             type="button"
             onClick={() => scrollToBottom()}
             title={t("chat.goToBottom")}
-            className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/10 bg-glyvex-card text-xs text-glyvex-text shadow-lg shadow-black/40 hover:bg-black/40"
+            className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-glyvex-border-soft bg-glyvex-card text-xs text-glyvex-text shadow-lg shadow-black/40 hover:bg-glyvex-surface-code"
           >
             <ArrowDown size={13} />
             {streaming ? t("chat.followAnswer") : t("chat.goToBottom")}

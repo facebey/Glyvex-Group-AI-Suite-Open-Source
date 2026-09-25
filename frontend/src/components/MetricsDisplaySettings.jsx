@@ -58,7 +58,7 @@ export default function MetricsDisplaySettings({ display, onChange }) {
           type="button"
           onClick={() => commit(PRESETS.default)}
           disabled={preset === "default"}
-          className="px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30 disabled:opacity-40"
+          className="px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil-disabled disabled:opacity-40"
         >
           {t("display.restore")}
         </button>
@@ -71,7 +71,7 @@ export default function MetricsDisplaySettings({ display, onChange }) {
       {DISPLAY_CATALOG.map((group) => {
         const visibleCount = group.items.filter((i) => !hiddenSet.has(i.key)).length;
         return (
-          <div key={group.page} className="rounded-md border border-white/10 p-3">
+          <div key={group.page} className="rounded-md border border-glyvex-border-soft p-3">
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-medium text-glyvex-text">
                 {t(group.page)}

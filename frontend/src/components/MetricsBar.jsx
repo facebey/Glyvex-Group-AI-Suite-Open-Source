@@ -138,7 +138,7 @@ export default function MetricsBar({
   if (items.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-6 px-4 py-2 bg-glyvex-card border-b border-white/10 text-sm">
+    <div className="flex items-center gap-6 px-4 py-2 bg-glyvex-card border-b border-glyvex-border-soft text-sm">
       {items.map((item) => (
         <div key={item.label} className="flex items-center gap-1.5" title={item.title}>
           <span className="text-glyvex-muted">{item.label}</span>

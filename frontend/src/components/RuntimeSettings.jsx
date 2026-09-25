@@ -137,7 +137,7 @@ export default function RuntimeSettings({ expertBinary }) {
             type="button"
             onClick={handleReinstall}
             disabled={resetting}
-            className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-50"
+            className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-50"
           >
             <RotateCcw size={16} className={resetting ? "animate-spin" : ""} />
             {t("config.runtime.reinstall")}

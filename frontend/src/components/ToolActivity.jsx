@@ -44,7 +44,7 @@ export function ToolActivityLive({ entries }) {
         return (
           <div
             key={entry.id}
-            className="inline-flex items-center gap-2 self-start max-w-full px-2.5 py-1.5 rounded-md border border-white/10 bg-black/30 text-xs text-glyvex-muted"
+            className="inline-flex items-center gap-2 self-start max-w-full px-2.5 py-1.5 rounded-md border border-glyvex-border-soft bg-glyvex-veil-disabled text-xs text-glyvex-bg-muted"
           >
             {done ? (
               entry.ok ? (
@@ -80,11 +80,11 @@ export default function ToolSummary({ activity }) {
   const failed = activity.some((entry) => !entry.ok);
 
   return (
-    <div className="rounded-md border border-white/10 bg-black/20 mb-2 overflow-hidden self-start max-w-full">
+    <div className="rounded-md border border-glyvex-border-soft bg-glyvex-veil-box mb-2 overflow-hidden self-start max-w-full">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left text-glyvex-muted hover:text-glyvex-text"
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left text-glyvex-bg-muted hover:text-glyvex-bg-text"
       >
         <ChevronRight
           size={13}
@@ -107,12 +107,12 @@ export default function ToolSummary({ activity }) {
             const Icon = iconFor(entry.name);
             return (
               <div key={entry.id} className="text-xs">
-                <div className="flex items-center gap-1.5 text-glyvex-text">
-                  <Icon size={12} className="shrink-0 text-glyvex-muted" />
+                <div className="flex items-center gap-1.5 text-glyvex-bg-text">
+                  <Icon size={12} className="shrink-0 text-glyvex-bg-muted" />
                   <span>{describe(entry, t)}</span>
                 </div>
                 {entry.summary && (
-                  <p className={"pl-5 " + (entry.ok ? "text-glyvex-muted" : "text-amber-400")}>
+                  <p className={"pl-5 " + (entry.ok ? "text-glyvex-bg-muted" : "text-amber-400")}>
                     {entry.summary}
                   </p>
                 )}

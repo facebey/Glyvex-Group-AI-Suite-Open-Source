@@ -82,7 +82,7 @@ export default function MetricsExportSettings({ exportsConfig, port, onChange })
       </p>
 
       {/* Prometheus */}
-      <div className="rounded-md border border-white/10 p-3 space-y-3">
+      <div className="rounded-md border border-glyvex-border-soft p-3 space-y-3">
         <Toggle
           checked={Boolean(exp.prometheus_enabled)}
           onChange={(v) => set({ prometheus_enabled: v })}
@@ -103,14 +103,14 @@ export default function MetricsExportSettings({ exportsConfig, port, onChange })
                   {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? t("config.export.copied") : t("config.export.copy")}
                 </button>
               </div>
-              <pre className="text-xs font-mono bg-black/40 border border-white/10 rounded-md p-2 overflow-x-auto">{telegraf}</pre>
+              <pre className="text-xs font-mono bg-glyvex-surface-code border border-glyvex-border-soft rounded-md p-2 overflow-x-auto">{telegraf}</pre>
             </div>
           </>
         )}
       </div>
 
       {/* InfluxDB */}
-      <div className="rounded-md border border-white/10 p-3 space-y-3">
+      <div className="rounded-md border border-glyvex-border-soft p-3 space-y-3">
         <Toggle
           checked={influx.enabled}
           onChange={(v) => setInflux({ enabled: v })}
@@ -172,7 +172,7 @@ export default function MetricsExportSettings({ exportsConfig, port, onChange })
 
             <div className="flex flex-wrap items-center gap-3">
               <button type="button" onClick={testInflux} disabled={testing}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-text hover:bg-black/30 disabled:opacity-50">
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-text hover:bg-glyvex-veil-disabled disabled:opacity-50">
                 {testing && <Loader2 size={14} className="animate-spin" />}
                 {t("config.export.test")}
               </button>

@@ -154,20 +154,23 @@ def test_extract_zip_rejects_entry_outside_target(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_select_base_source_prefers_glyvex_when_verifiable():
-    # BASE_SOURCES real: glyvex trae sha256 completada (RT-10) y es la
-    # primera fuente → gana ante official (fallback).
+def test_select_base_source_official_b11146_verifiable():
+    # Bump b11146: la fuente es la build oficial de la release (los archives
+    # propios "glyvex" eran específicos de b11009).
     source = runtime_module._select_base_source()
     assert source is not None
-    assert source["id"] == "glyvex"
+    assert source["id"] == "official"
     assert all(len(f["sha256"]) == 64 for f in source["files"])
+    assert all("b11146" in f["url"] for f in source["files"])
 
 
-def test_select_accel_source_nvidia_prefers_glyvex_when_verifiable():
+def test_select_accel_source_nvidia_official_b11146_verifiable():
     source = runtime_module._select_accel_source("nvidia")
     assert source is not None
-    assert source["id"] == "glyvex"
+    assert source["id"] == "official"
     assert all(len(f["sha256"]) == 64 for f in source["files"])
+    assert len(source["files"]) == 2
+    assert all("b11146" in f["url"] for f in source["files"])
 
 
 def test_select_accel_source_none_for_family_without_package():
@@ -264,7 +267,7 @@ def test_status_ready_with_meta(monkeypatch):
     d.mkdir(parents=True)
     (d / runtime_module.BINARY_NAME).write_bytes(b"FAKE-EXE")
     (d / runtime_module.META_FILENAME).write_text(
-        json.dumps({"state": "ready", "build": "b11009", "source": "official"}),
+        json.dumps({"state": "ready", "build": "b11146", "source": "official"}),
         encoding="utf-8",
     )
 
@@ -272,7 +275,7 @@ def test_status_ready_with_meta(monkeypatch):
 
     assert st["state"] == "ready"
     assert st["binary_path"] == str(d / runtime_module.BINARY_NAME)
-    assert st["build"] == "b11009"
+    assert st["build"] == "b11146"
     assert st["source"] == "official"
     assert st["size_mb"] is not None
 

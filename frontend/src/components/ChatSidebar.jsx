@@ -21,12 +21,12 @@ function MiniToggle({ checked, onChange, disabled = false }) {
       className={
         "inline-flex items-center h-5 w-9 shrink-0 rounded-full border transition-colors cursor-pointer " +
         (disabled ? "opacity-40 cursor-not-allowed " : "") +
-        (checked ? "bg-glyvex-accent border-glyvex-accent" : "bg-black/30 border-white/10")
+        (checked ? "bg-glyvex-accent border-glyvex-accent" : "bg-glyvex-veil-disabled border-glyvex-border-soft")
       }
     >
       <span
         className={
-          "h-3.5 w-3.5 rounded-full bg-white transition-transform " +
+          "h-3.5 w-3.5 rounded-full bg-white ring-1 ring-glyvex-border-hi transition-transform " +
           (checked ? "translate-x-[19px]" : "translate-x-[3px]")
         }
       />
@@ -87,7 +87,7 @@ export default function ChatSidebar({
 
   return (
     <aside className="w-[300px] shrink-0 overflow-y-auto space-y-3 pr-2">
-      <div className="bg-glyvex-card rounded-lg border border-white/10 p-4 space-y-3">
+      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-4 space-y-3">
         <div>
           <span className="block text-sm text-glyvex-muted mb-1">{t("chatSidebar.endpoint")}</span>
           <div className="flex items-center gap-2">
@@ -118,7 +118,7 @@ export default function ChatSidebar({
             <button
               type="button"
               onClick={useManualEndpoint}
-              className="px-2 py-1.5 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30 shrink-0"
+              className="px-2 py-1.5 rounded-md text-xs border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil-disabled shrink-0"
             >
               {t("chatSidebar.use")}
             </button>
@@ -226,11 +226,11 @@ export default function ChatSidebar({
         </label>
       </CollapsibleSection>
 
-      <div className="border-t border-white/10 pt-3 space-y-2">
+      <div className="border-t border-glyvex-border-soft pt-3 space-y-2">
         <button
           type="button"
           onClick={onClear}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
         >
           <Trash2 size={14} />
           {t("chatSidebar.clearConversation")}
@@ -239,14 +239,14 @@ export default function ChatSidebar({
           <button
             type="button"
             onClick={onExportJson}
-            className="flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
+            className="flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-md text-xs border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
           >
             <Download size={13} /> JSON
           </button>
           <button
             type="button"
             onClick={onExportMarkdown}
-            className="flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
+            className="flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-md text-xs border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
           >
             <Download size={13} /> Markdown
           </button>
@@ -254,7 +254,7 @@ export default function ChatSidebar({
         <button
           type="button"
           onClick={() => importInputRef.current?.click()}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
         >
           <Upload size={14} />
           {t("chatSidebar.import")}

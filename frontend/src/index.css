@@ -19,25 +19,539 @@
   --color-glyvex-sky:       #0ea5e9;
   --color-glyvex-violet:    #7c3aed;
   --color-glyvex-orange:    #f97316;
+  /* Overlays sutiles (hover, bordes, badges, superficies) — identicos en dark,
+     grises sutiles en light donde los blancos/negros translucidos eran ilegibles */
+  --color-glyvex-veil:           rgb(255 255 255 / 0.05);
+  --color-glyvex-veil-faint:     rgb(255 255 255 / 0.02);
+  --color-glyvex-veil-strong:    rgb(255 255 255 / 0.10);
+  --color-glyvex-veil-badge:     rgb(255 255 255 / 0.30);
+  --color-glyvex-border-soft:    rgb(255 255 255 / 0.10);
+  --color-glyvex-veil-box:       rgb(0 0 0 / 0.20);
+  --color-glyvex-veil-disabled:  rgb(0 0 0 / 0.30);
+  --color-glyvex-surface-code:   rgb(0 0 0 / 0.40);
+  --color-glyvex-ok:             #34d399;
+  --color-glyvex-warn:           #fbbf24;
+  --color-glyvex-crit:           #f87171;
+  /* Texto sobre fondo crudo (navbar, títulos, footer): igual a text/muted
+     salvo en metallic, donde el fondo es oscuro y las cards son claras */
+  --color-glyvex-bg-text:       #e8edf5;
+  --color-glyvex-bg-muted:      #94a3b8;
+  /* Paleta de datos (gráficos y barras de carga). Defaults = los hex que
+     antes estaban hardcodeados en Monitor/Benchmark/Launcher, así dark y
+     light no cambian; carbon/metallic/matrix los redefinen. */
+  --color-glyvex-chart-1:       #3b82f6;  /* GPU / en curso */
+  --color-glyvex-chart-2:       #06b6d4;  /* VRAM / RAM / contexto */
+  --color-glyvex-chart-3:       #f59e0b;  /* CPU / en espera */
+  --color-glyvex-chart-4:       #22c55e;  /* generación */
+  --color-glyvex-chart-5:       #7c3aed;  /* throughput */
+  --color-glyvex-chart-axis:    #5b6472;
+  --color-glyvex-chart-tick:    #9ca3af;
+  --color-glyvex-chart-grid:    rgb(255 255 255 / 0.08);
+  --color-glyvex-chart-tip-bg:  #1a1a1a;
+  --color-glyvex-chart-tip-bd:  rgb(255 255 255 / 0.10);
+  --color-glyvex-load-ok:       #22c55e;
+  --color-glyvex-load-warn:     #f59e0b;
+  --color-glyvex-load-crit:     #ef4444;
+  --color-glyvex-load-none:     #9ca3af;
 }
 
-/* Light theme */
+/* Light theme — paleta lavanda: fondo lila desaturado, cards lavanda clara
+   con gradiente y texto índigo (no negro puro) para que el conjunto sea
+   coherente en vez de "blanco con acentos violeta". */
 .light {
-  --color-glyvex-bg:        #ffffff;
-  --color-glyvex-bg-2:      #f5f7fa;
-  --color-glyvex-card:      #ffffff;
-  --color-glyvex-card-hi:   #f0f3f7;
-  --color-glyvex-border:    #e2e8f0;
-  --color-glyvex-border-hi: #cbd5e1;
-  --color-glyvex-text:      #0f172a;
-  --color-glyvex-muted:     #475569;
-  --color-glyvex-muted-2:   #94a3b8;
-  --color-glyvex-accent:    #0f766e;  /* teal más oscuro para mejor contraste en light */
-  --color-glyvex-cyan:      #0891b2;
-  --color-glyvex-sky:       #0284c7;
+  --color-glyvex-bg:        #b6acd5;
+  --color-glyvex-bg-2:      #a79cc7;
+  --color-glyvex-card:      #ccc2e2;
+  --color-glyvex-card-hi:   #bfb4d9;
+  --color-glyvex-border:    #cbc2e2;
+  --color-glyvex-border-hi: #b0a4d0;
+  --color-glyvex-text:      #241f38;
+  --color-glyvex-muted:     #4c4666;
+  --color-glyvex-muted-2:   #7d7598;
+  --color-glyvex-accent:    #6d28d9;  /* violeta: acento nativo de la paleta lavanda */
+  --color-glyvex-cyan:      #0e7490;
+  --color-glyvex-sky:       #1d4ed8;
   --color-glyvex-violet:    #6d28d9;
-  --color-glyvex-orange:    #ea6c00;
+  --color-glyvex-orange:    #ea580c;
+  /* Overlays con tinte índigo (los blancos/grises neutros se veían ajenos
+     a la paleta) */
+  --color-glyvex-veil:           rgb(30 27 75 / 0.05);
+  --color-glyvex-veil-faint:     rgb(30 27 75 / 0.03);
+  --color-glyvex-veil-strong:    rgb(30 27 75 / 0.09);
+  --color-glyvex-veil-badge:     rgb(30 27 75 / 0.12);
+  --color-glyvex-border-soft:    rgb(30 27 75 / 0.14);
+  --color-glyvex-veil-box:       rgb(30 27 75 / 0.06);
+  --color-glyvex-veil-disabled:  rgb(30 27 75 / 0.10);
+  --color-glyvex-surface-code:   #b3a8d4;
+  --color-glyvex-bg-text:       #241f38;
+  --color-glyvex-bg-muted:      #4c4666;
+  /* -800 (no -700): la navbar y el badge Live viven sobre el fondo lavanda,
+     donde -700 daba solo ~3:1. En las cards quedan 6.5-8:1. */
+  --color-glyvex-ok:             #047857;
+  --color-glyvex-warn:           #92400e;
+  --color-glyvex-crit:           #991b1b;
+  /* Datos: mismos significados semánticos que dark, pero un tono más profundos
+     para legibilidad sobre lavanda clara */
+  --color-glyvex-chart-1:       #2563eb;
+  --color-glyvex-chart-2:       #0e7490;
+  --color-glyvex-chart-3:       #d97706;
+  --color-glyvex-chart-4:       #16a34a;
+  --color-glyvex-chart-5:       #7c3aed;
+  --color-glyvex-chart-axis:    #5a5478;
+  --color-glyvex-chart-tick:    #6b6488;
+  --color-glyvex-chart-grid:    rgb(30 27 75 / 0.12);
+  --color-glyvex-chart-tip-bg:  #312b52;
+  --color-glyvex-chart-tip-bd:  rgb(255 255 255 / 0.14);
 }
+
+/* Cards en light: placa lavanda media con gradiente vertical suave (más
+   cercana al fondo) para que no se vea plana ni blanca. */
+.light .bg-glyvex-card {
+  background-image: linear-gradient(180deg, #ccc2e2, #bfb4d9);
+}
+
+/* Gráficos en light: el plot vive en una recesión lavanda (un paso más
+   oscuro que la card) para dar profundidad sin romper la paleta. */
+.light .gx-chart {
+  background-color: #aea2cf;
+  background-image: linear-gradient(180deg, rgb(30 27 75 / 0.08), rgb(30 27 75 / 0.01) 45%);
+  border: 1px solid rgb(30 27 75 / 0.14);
+  border-radius: 6px;
+  box-shadow: inset 0 1px 3px rgb(30 27 75 / 0.10), 0 1px 0 rgb(255 255 255 / 0.6);
+  padding: 8px 6px 4px;
+  --color-glyvex-chart-tick: #544d75;
+}
+
+/* ==========================================================================
+   Hooks semánticos usados por los temas con acabado (carbon/metallic/matrix).
+   En dark y light no tienen estilo propio: la UI se ve exactamente como antes.
+     .gx-app       contenedor raíz del Layout (fondo con textura)
+     .gx-shell     header y footer
+     .gx-nav-on    pestaña activa de la navbar
+     .gx-recess    sub-panel hundido (Power Limit)
+     .gx-raised    placa elevada (Cores)
+     .gx-bar /.gx-bar-fill   barras de carga
+     .gx-range     sliders
+     .gx-chart     contenedores de gráficos recharts
+   Texturas: generadas por código (sin licencias de terceros), src/assets/themes.
+   ========================================================================== */
+
+/* Sin tema con acabado, el wrapper de la placa no genera caja: el layout de
+   dark/light queda idéntico al original. */
+.gx-raised { display: contents; }
+
+/* ============================== CARBON ============================== */
+.carbon {
+  --color-glyvex-bg:        #1c1e21;
+  --color-glyvex-bg-2:      #08090b;
+  --color-glyvex-card:      #0a0b0d;
+  --color-glyvex-card-hi:   #16181c;
+  --color-glyvex-border:    #1c1f23;
+  --color-glyvex-border-hi: #34383e;
+  --color-glyvex-text:      #e8edf4;
+  --color-glyvex-muted:     #9aa2ae;
+  --color-glyvex-muted-2:   #6b7280;
+  --color-glyvex-accent:    #14b8a6;
+  --color-glyvex-cyan:      #22d3ee;
+  --color-glyvex-sky:       #3b82f6;
+  --color-glyvex-violet:    #8b5cf6;
+  --color-glyvex-orange:    #f5a524;
+  --color-glyvex-veil:           rgb(255 255 255 / 0.05);
+  --color-glyvex-veil-faint:     rgb(0 0 0 / 0.40);
+  --color-glyvex-veil-strong:    rgb(255 255 255 / 0.10);
+  --color-glyvex-veil-badge:     rgb(255 255 255 / 0.30);
+  --color-glyvex-border-soft:    #2e3238;
+  --color-glyvex-veil-box:       rgb(0 0 0 / 0.35);
+  --color-glyvex-veil-disabled:  rgb(0 0 0 / 0.45);
+  --color-glyvex-surface-code:   rgb(0 0 0 / 0.55);
+  --color-glyvex-ok:             #22c55e;
+  --color-glyvex-warn:           #f5a524;
+  --color-glyvex-crit:           #ef4444;
+  --color-glyvex-bg-text:        #e8edf4;
+  --color-glyvex-bg-muted:       #9aa2ae;
+
+  --color-glyvex-chart-1:       #3b82f6;
+  --color-glyvex-chart-2:       #22d3ee;
+  --color-glyvex-chart-3:       #f5a524;
+  --color-glyvex-chart-4:       #22c55e;
+  --color-glyvex-chart-5:       #a855f7;
+  --color-glyvex-chart-axis:    #6b7280;
+  --color-glyvex-chart-tick:    #9aa2ae;
+  --color-glyvex-chart-grid:    rgb(255 255 255 / 0.06);
+  --color-glyvex-chart-tip-bg:  #0b0c0e;
+  --color-glyvex-chart-tip-bd:  #34383e;
+  --color-glyvex-load-ok:       #22c55e;
+  --color-glyvex-load-warn:     #f5a524;
+  --color-glyvex-load-crit:     #ef4444;
+  --color-glyvex-load-none:     #4b5563;
+}
+
+/* Fondo: metal gris rayado + viñeta (fija, como el mockup) */
+html.carbon .gx-app {
+  background-image:
+    radial-gradient(120% 85% at 60% 22%, rgb(255 255 255 / 0.06) 0%, transparent 35%, rgb(0 0 0 / 0.70) 100%),
+    url("./assets/themes/carbon-bg2.jpg");
+  background-size: 100% 100%, 512px 512px;
+  background-attachment: fixed, scroll;
+}
+html.carbon .gx-shell { background-color: rgb(6 7 8 / 0.94); border-color: #1c1f23; }
+
+/* Paneles: tejido twill + barridos de brillo diagonales + laca */
+html.carbon .bg-glyvex-card {
+  background-color: #0a0b0d;
+  background-image:
+    linear-gradient(118deg, transparent 36%, rgb(255 255 255 / 0.06) 50%, transparent 66%),
+    linear-gradient(118deg, rgb(255 255 255 / 0.035) 0%, transparent 28%),
+    linear-gradient(180deg, transparent 40%, rgb(0 0 0 / 0.35)),
+    url("./assets/themes/carbon-weave.png");
+  background-size: 100% 100%, 100% 100%, 100% 100%, 44px 44px;
+  border-color: #25282d;
+  border-top-color: #43484f;
+  border-left-color: #383c43;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.09),
+    inset 0 0 32px rgb(0 0 0 / 0.55),
+    0 3px 0 rgb(0 0 0 / 0.35),
+    0 12px 26px rgb(0 0 0 / 0.75);
+}
+html.carbon .gx-recess {
+  background-color: rgb(0 0 0 / 0.40);
+  border-color: #2d3137;
+  box-shadow: inset 0 1px 4px rgb(0 0 0 / 0.7), 0 1px 0 rgb(255 255 255 / 0.04);
+}
+html.carbon .gx-nav-on {
+  color: #5eead4;
+  background: rgb(20 184 166 / 0.10);
+  box-shadow: inset 0 0 0 1px rgb(20 184 166 / 0.35);
+}
+html.carbon .gx-bar { height: 10px; background: #0a0b0d; border: 1px solid #000; box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.8); }
+html.carbon .gx-bar-fill {
+  height: 100%;
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.28), rgb(255 255 255 / 0) 55%, rgb(0 0 0 / 0.15));
+}
+html.carbon .gx-chart .recharts-line-curve { filter: drop-shadow(0 0 2.5px rgb(59 130 246 / 0.55)); }
+html.carbon .gx-core { stroke: rgb(0 0 0 / 0.6); stroke-width: 1; }
+
+/* ============================== METALLIC ============================== */
+.metallic {
+  --color-glyvex-bg:        #34373c;
+  --color-glyvex-bg-2:      #26282c;
+  --color-glyvex-card:      #bfc3c8;
+  --color-glyvex-card-hi:   #d4d7db;
+  --color-glyvex-border:    #1a1c1f;
+  --color-glyvex-border-hi: #6d727a;
+  --color-glyvex-text:      #15191f;
+  --color-glyvex-muted:     #2a303a;  /* ~7.5:1 sobre aluminio (era 5.4:1) */
+  --color-glyvex-muted-2:   #454d59;  /* ~4.8:1: -800 para pasar AA (era 3.5:1) */
+  --color-glyvex-accent:    #1d4ed8;
+  --color-glyvex-cyan:      #0e7490;
+  --color-glyvex-sky:       #1e40af;
+  --color-glyvex-violet:    #5b21b6;
+  --color-glyvex-orange:    #c2410c;
+  --color-glyvex-bg-text:   #e3e6ea;
+  --color-glyvex-bg-muted:  #a9afb8;
+  --color-glyvex-veil:           rgb(15 23 42 / 0.06);
+  --color-glyvex-veil-faint:     rgb(15 23 42 / 0.04);
+  --color-glyvex-veil-strong:    rgb(15 23 42 / 0.10);
+  --color-glyvex-veil-badge:     rgb(15 23 42 / 0.14);
+  --color-glyvex-border-soft:    rgb(20 24 30 / 0.30);
+  --color-glyvex-veil-box:       rgb(15 23 42 / 0.07);
+  --color-glyvex-veil-disabled:  rgb(15 23 42 / 0.12);
+  --color-glyvex-surface-code:   #d9dce0;
+  --color-glyvex-ok:             #166534;
+  --color-glyvex-warn:           #9a3412;
+  --color-glyvex-crit:           #991b1b;
+
+  --color-glyvex-chart-1:       #1e293b;  /* tinta pizarra grabada: ~8:1 (el blanco en relieve era 1.7:1) */
+  --color-glyvex-chart-2:       #155e75;  /* cian -800: ~4:1 (era 2.9:1, "negro" #353b45) */
+  --color-glyvex-chart-3:       #92400e;  /* ámbar -800: ~4:1 (era 2.2:1, naranja sucio #c8641e) */
+  --color-glyvex-chart-4:       #166534;
+  --color-glyvex-chart-5:       #4c1d95;
+  --color-glyvex-chart-axis:    #4b5260;
+  --color-glyvex-chart-tick:    #2d333c;
+  --color-glyvex-chart-grid:    rgb(40 46 56 / 0.22);
+  --color-glyvex-chart-tip-bg:  #e3e6ea;
+  --color-glyvex-chart-tip-bd:  #6d727a;
+  --color-glyvex-load-ok:       #1f9d4a;
+  --color-glyvex-load-warn:     #d97706;
+  --color-glyvex-load-crit:     #c02626;
+  --color-glyvex-load-none:     #6f747c;
+}
+
+/* Fondo: chapas grafito con costuras y tornillos + viñeta */
+html.metallic .gx-app {
+  background-image:
+    radial-gradient(140% 90% at 50% 30%, transparent 40%, rgb(0 0 0 / 0.45) 100%),
+    url("./assets/themes/metal-plates.jpg");
+  background-size: 100% 100%, 640px 720px;
+  background-attachment: fixed, scroll;
+}
+html.metallic .gx-shell {
+  background-color: #26282c;
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(0 0 0 / 0.25)), url("./assets/themes/metal-plates.jpg");
+  background-size: 100% 100%, 640px 720px;
+  border-color: #111214;
+}
+html.metallic h1, html.metallic .gx-app > main h1 { text-shadow: 0 1px 0 rgb(0 0 0 / 0.6); }
+
+/* Paneles: aluminio cepillado gris medio, banda de luz, sombra dura abajo */
+html.metallic .bg-glyvex-card {
+  background-color: #bfc3c8;
+  background-image:
+    url("./assets/themes/brushed.png"),
+    linear-gradient(180deg, rgb(255 255 255 / 0.30) 0%, rgb(255 255 255 / 0) 22%, rgb(0 0 0 / 0) 70%, rgb(0 0 0 / 0.14) 100%),
+    linear-gradient(90deg, #aeb2b8 0%, #cdd0d4 20%, #dcdee1 35%, #c4c8cd 54%, #a7abb1 78%, #b9bdc2 100%);
+  background-size: 512px 256px, 100% 100%, 100% 100%;
+  border-color: #4a4e55;
+  border-top-color: #5e636b;
+  border-left-color: #5e636b;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.9),
+    inset 0 -1px 0 rgb(0 0 0 / 0.25),
+    0 2px 0 rgb(0 0 0 / 0.35),
+    0 8px 16px rgb(0 0 0 / 0.55);
+  color: var(--color-glyvex-text);
+}
+/* Sub-panel hundido */
+html.metallic .gx-recess {
+  background-color: #bdc1c6;
+  background-image: url("./assets/themes/brushed.png"), linear-gradient(90deg, #b1b5bb, #caced2 42%, #b5b9bf);
+  background-size: 512px 256px, 100% 100%;
+  border-color: #6d727a;
+  box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.38), inset 0 -1px 0 rgb(255 255 255 / 0.55), 0 1px 0 rgb(255 255 255 / 0.55);
+}
+/* Placa elevada con reflejo cromado */
+html.metallic .gx-raised {
+  display: inline-flex;
+  padding: 10px 11px;
+  border-radius: 8px;
+  border: 1px solid #60656d;
+  background-image:
+    linear-gradient(90deg, transparent 56%, rgb(255 255 255 / 0.75) 67%, rgb(255 255 255 / 0.2) 75%, transparent 84%),
+    url("./assets/themes/brushed.png"),
+    linear-gradient(180deg, #d6d9dd, #aab0b7);
+  background-size: 100% 100%, 512px 256px, 100% 100%;
+  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgb(0 0 0 / 0.2), 0 3px 7px rgb(0 0 0 / 0.5), 0 1px 0 rgb(0 0 0 / 0.3);
+}
+html.metallic .gx-core { stroke: rgb(0 0 0 / 0.35); stroke-width: 1; }
+
+/* Pestaña activa = tecla metálica */
+html.metallic .gx-nav-on {
+  color: #15191f;
+  background: linear-gradient(180deg, #e2e6ec, #b6bdc8);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 2px rgb(0 0 0 / 0.4);
+}
+/* Botones dentro de los paneles = teclas de metal */
+html.metallic .bg-glyvex-card button:is(.border, .bg-glyvex-accent):not(:disabled) {
+  color: #15191f;
+  background-color: #b3b8bf;
+  background-image: linear-gradient(180deg, #e6e8eb, #a0a5ac);
+  border: 1px solid #4f545b;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 1px 0 rgb(0 0 0 / 0.35), 0 2px 4px rgb(0 0 0 / 0.30);
+}
+html.metallic .bg-glyvex-card button:is(.border, .bg-glyvex-accent):not(:disabled):hover {
+  background-image: linear-gradient(180deg, #f1f3f5, #b3b8bf);
+}
+/* Barras = surco hundido */
+html.metallic .gx-bar {
+  height: 7px;
+  background: #6f747c;
+  border: 1px solid #4d525a;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.65), 0 1px 0 rgb(255 255 255 / 0.65);
+}
+html.metallic .gx-bar-fill {
+  height: 100%;
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.55), rgb(255 255 255 / 0) 55%, rgb(0 0 0 / 0.22));
+}
+/* Gráficos: el plot vive sobre la chapa de aluminio, con leve recesión clara y
+   líneas grabadas en relieve (sombra oscura bajo el trazo). La serie principal
+   va clara en relieve y el resto en colores oscuros que leen sobre el aluminio. */
+html.metallic .gx-chart {
+  background-color: #c6cad0;
+  background-image: linear-gradient(180deg, rgb(0 0 0 / 0.14), rgb(0 0 0 / 0.03) 45%);
+  border: 1px solid rgb(0 0 0 / 0.40);
+  border-radius: 6px;
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.30), 0 1px 0 rgb(255 255 255 / 0.55);
+  padding: 8px 6px 4px;
+  --color-glyvex-chart-1: #1d4ed8;
+  --color-glyvex-chart-2: #0e7490;
+  --color-glyvex-chart-3: #c8641e;
+  --color-glyvex-chart-4: #166534;
+  --color-glyvex-chart-5: #4c1d95;
+  --color-glyvex-chart-axis: #6f747c;
+  --color-glyvex-chart-tick: #454a52;
+  --color-glyvex-chart-grid: rgb(0 0 0 / 0.10);
+  --color-glyvex-chart-tip-bg: #2a2d32;
+  --color-glyvex-chart-tip-bd: #14161a;
+}
+html.metallic .gx-chart .recharts-cartesian-axis-tick text { fill: var(--color-glyvex-chart-tick); }
+html.metallic .gx-chart :is(.text-glyvex-muted, .text-glyvex-muted-2) { color: #3f444c; }
+html.metallic .gx-chart .recharts-line-curve { filter: drop-shadow(0 1.5px 1.5px rgb(0 0 0 / 0.45)); }
+
+/* ============================== MATRIX ============================== */
+/* Terminal de fósforo verde: lluvia digital (canvas <MatrixRain/>) detrás de
+   paneles de vidrio oscuro, esquinas HUD, barras de LEDs segmentados y todo
+   en monoespaciada. */
+.matrix {
+  --color-glyvex-bg:        #000301;
+  --color-glyvex-bg-2:      #000802;
+  --color-glyvex-card:      #010c05;
+  --color-glyvex-card-hi:   #03170b;
+  --color-glyvex-border:    #0a3b1c;
+  --color-glyvex-border-hi: #13693a;
+  --color-glyvex-text:      #c9ffd9;
+  --color-glyvex-muted:     #5fd08a;
+  --color-glyvex-muted-2:   #2f8a55;
+  --color-glyvex-accent:    #00ff66;
+  --color-glyvex-cyan:      #29ffd0;
+  --color-glyvex-sky:       #5ad1ff;
+  --color-glyvex-violet:    #9dff5a;
+  --color-glyvex-orange:    #e5ff3a;
+  --color-glyvex-veil:           rgb(0 255 102 / 0.05);
+  --color-glyvex-veil-faint:     rgb(0 255 102 / 0.03);
+  --color-glyvex-veil-strong:    rgb(0 255 102 / 0.10);
+  --color-glyvex-veil-badge:     rgb(0 255 102 / 0.25);
+  --color-glyvex-border-soft:    rgb(0 255 102 / 0.22);
+  --color-glyvex-veil-box:       rgb(0 0 0 / 0.45);
+  --color-glyvex-veil-disabled:  rgb(0 0 0 / 0.55);
+  --color-glyvex-surface-code:   rgb(0 10 4 / 0.85);
+  --color-glyvex-ok:             #39ff88;
+  --color-glyvex-warn:           #e5ff3a;
+  --color-glyvex-crit:           #ff3b5c;
+  --color-glyvex-bg-text:        #c9ffd9;
+  --color-glyvex-bg-muted:       #5fd08a;
+
+  --color-glyvex-chart-1:       #00ff66;
+  --color-glyvex-chart-2:       #29ffd0;
+  --color-glyvex-chart-3:       #e5ff3a;
+  --color-glyvex-chart-4:       #9dff5a;
+  --color-glyvex-chart-5:       #5ad1ff;
+  --color-glyvex-chart-axis:    #1f7a45;
+  --color-glyvex-chart-tick:    #5fd08a;
+  --color-glyvex-chart-grid:    rgb(0 255 102 / 0.10);
+  --color-glyvex-chart-tip-bg:  #000a03;
+  --color-glyvex-chart-tip-bd:  rgb(0 255 102 / 0.45);
+  --color-glyvex-load-ok:       #39ff88;
+  --color-glyvex-load-warn:     #e5ff3a;
+  --color-glyvex-load-crit:     #ff3b5c;
+  --color-glyvex-load-none:     #0f3d20;
+}
+
+html.matrix body,
+html.matrix .gx-app { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+html.matrix .gx-app {
+  /* viñeta CRT; la lluvia la dibuja <MatrixRain/> por debajo */
+  background-image: radial-gradient(120% 90% at 50% 40%, transparent 45%, rgb(0 0 0 / 0.85) 100%);
+  background-attachment: fixed;
+}
+html.matrix .gx-shell {
+  background-color: rgb(0 4 1 / 0.88);
+  border-color: rgb(0 255 102 / 0.25);
+  box-shadow: 0 1px 0 rgb(0 255 102 / 0.08), 0 0 24px rgb(0 255 102 / 0.06);
+}
+html.matrix h1, html.matrix h2, html.matrix h3 {
+  text-shadow: 0 0 6px rgb(0 255 102 / 0.55), 0 0 18px rgb(0 255 102 / 0.20);
+  letter-spacing: 0.06em;
+}
+/* Paneles: vidrio oscuro sobre la lluvia + scanlines + esquinas HUD */
+html.matrix .bg-glyvex-card {
+  --hud: rgb(0 255 102 / 0.85);
+  background-color: rgb(1 12 5 / 0.80);
+  -webkit-backdrop-filter: blur(2.5px);
+  backdrop-filter: blur(2.5px);
+  background-image:
+    /* esquinas HUD: 8 trazos de 14×2 / 2×14 */
+    linear-gradient(var(--hud), var(--hud)), linear-gradient(var(--hud), var(--hud)),
+    linear-gradient(var(--hud), var(--hud)), linear-gradient(var(--hud), var(--hud)),
+    linear-gradient(var(--hud), var(--hud)), linear-gradient(var(--hud), var(--hud)),
+    linear-gradient(var(--hud), var(--hud)), linear-gradient(var(--hud), var(--hud)),
+    /* scanlines + resplandor superior */
+    repeating-linear-gradient(0deg, rgb(0 255 102 / 0.035) 0 1px, transparent 1px 3px),
+    radial-gradient(90% 60% at 50% 0%, rgb(0 255 102 / 0.07), transparent 70%);
+  background-size:
+    14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px,
+    100% 100%, 100% 100%;
+  background-position:
+    0 0, 0 0, 100% 0, 100% 0, 0 100%, 0 100%, 100% 100%, 100% 100%,
+    0 0, 0 0;
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, repeat, no-repeat;
+  border-color: rgb(0 255 102 / 0.22);
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 28px rgb(0 255 102 / 0.05),
+    0 0 0 1px rgb(0 0 0 / 0.9),
+    0 0 22px rgb(0 255 102 / 0.07),
+    0 10px 30px rgb(0 0 0 / 0.8);
+}
+html.matrix .gx-recess {
+  background-color: rgb(0 0 0 / 0.55);
+  border-color: rgb(0 255 102 / 0.18);
+  border-style: dashed;
+  border-radius: 3px;
+}
+html.matrix .gx-nav-on {
+  color: #000301;
+  background: #00ff66;
+  box-shadow: 0 0 12px rgb(0 255 102 / 0.55);
+  font-weight: 600;
+}
+/* Barras = medidor de LEDs segmentado */
+html.matrix .gx-bar {
+  height: 10px;
+  border-radius: 1px;
+  background: #000a03;
+  border: 1px solid rgb(0 255 102 / 0.25);
+  padding: 1px;
+}
+html.matrix .gx-bar-fill {
+  height: 100%;
+  border-radius: 0;
+  background-image: repeating-linear-gradient(90deg, transparent 0 5px, rgb(0 3 1 / 0.9) 5px 7px);
+  box-shadow: 0 0 8px currentColor;
+}
+html.matrix .gx-core { filter: drop-shadow(0 0 3px rgb(0 255 102 / 0.55)); }
+html.matrix .gx-chart .recharts-line-curve { filter: drop-shadow(0 0 3px rgb(0 255 102 / 0.75)); }
+html.matrix ::selection { background: rgb(0 255 102 / 0.35); color: #eaffef; }
+html.matrix ::-webkit-scrollbar-thumb { background: rgb(0 255 102 / 0.35); box-shadow: 0 0 6px rgb(0 255 102 / 0.5); }
+
+/* ============================ SLIDERS (temas con acabado) ============================ */
+html:is(.carbon, .metallic, .matrix) .gx-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+}
+html:is(.carbon, .metallic, .matrix) .gx-range::-webkit-slider-runnable-track { height: 7px; border-radius: 999px; }
+html:is(.carbon, .metallic, .matrix) .gx-range::-moz-range-track { height: 7px; border-radius: 999px; }
+html:is(.carbon, .metallic, .matrix) .gx-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 15px; height: 15px; margin-top: -4px; border-radius: 999px;
+}
+html:is(.carbon, .metallic, .matrix) .gx-range::-moz-range-thumb { width: 15px; height: 15px; border-radius: 999px; border: 0; }
+
+html.carbon .gx-range::-webkit-slider-runnable-track { background: linear-gradient(90deg, #0f766e, #14b8a6 var(--gx-pct, 50%), #c9cdd2 var(--gx-pct, 50%)); border: 1px solid #000; }
+html.carbon .gx-range::-moz-range-track { background: #c9cdd2; border: 1px solid #000; }
+html.carbon .gx-range::-moz-range-progress { background: #14b8a6; height: 7px; border-radius: 999px; }
+html.carbon .gx-range::-webkit-slider-thumb { background: #e8edf4; box-shadow: 0 1px 3px rgb(0 0 0 / 0.7); }
+html.carbon .gx-range::-moz-range-thumb { background: #e8edf4; }
+
+html.metallic .gx-range::-webkit-slider-runnable-track { background: linear-gradient(180deg, #e9ebee, #a3a8b0) 0 0 / var(--gx-pct, 50%) 100% no-repeat, #4c5159; border: 1px solid #3a3e45; box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.7), 0 1px 0 rgb(255 255 255 / 0.6); }
+html.metallic .gx-range::-moz-range-track { background: #4c5159; border: 1px solid #3a3e45; }
+html.metallic .gx-range::-moz-range-progress { background: linear-gradient(180deg, #e9ebee, #a3a8b0); height: 7px; border-radius: 999px; }
+html.metallic .gx-range::-webkit-slider-thumb { background: linear-gradient(180deg, #fff, #b4bbc6); border: 1px solid #767d89; box-shadow: 0 1px 3px rgb(0 0 0 / 0.55); }
+html.metallic .gx-range::-moz-range-thumb { background: linear-gradient(180deg, #fff, #b4bbc6); border: 1px solid #767d89; }
+
+html.matrix .gx-range::-webkit-slider-runnable-track { background: linear-gradient(90deg, #00ff66 var(--gx-pct, 50%), #031a0b var(--gx-pct, 50%)); border: 1px solid rgb(0 255 102 / 0.35); border-radius: 1px; box-shadow: 0 0 8px rgb(0 255 102 / 0.25); }
+html.matrix .gx-range::-moz-range-track { background: #031a0b; border: 1px solid rgb(0 255 102 / 0.35); }
+html.matrix .gx-range::-moz-range-progress { background: #00ff66; height: 7px; }
+html.matrix .gx-range::-webkit-slider-thumb { background: #eaffef; border-radius: 2px; box-shadow: 0 0 10px #00ff66; }
+html.matrix .gx-range::-moz-range-thumb { background: #eaffef; border-radius: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  html.matrix .bg-glyvex-card { -webkit-backdrop-filter: none; backdrop-filter: none; background-color: rgb(1 12 5 / 0.92); }
+}
+
 
 html, body, #root {
   height: 100%;
@@ -64,3 +578,28 @@ code, pre, .font-mono {
 
 /* Selección de texto */
 ::selection { background: rgba(13,148,136,0.25); color: var(--color-glyvex-text); }
+
+/* Tooltips de gráficos en metallic: el tooltip flota oscuro sobre la chapa
+   clara; la hora sale clara y los nombres de serie conservan su color
+   (inline, ya legible sobre #2a2d32). */
+html.metallic .gx-tip .text-slate-400 { color: #9aa2ae; }
+html.matrix .gx-tip .text-slate-400 { color: #5fd08a; }
+
+/* Metallic: las píldoras de estado (temp, alerta, on/off) son píldoras de metal
+   como en el mockup; así el verde/rojo oscuro se lee también sobre el grafito. */
+html.metallic :is(.text-glyvex-ok, .text-glyvex-warn, .text-glyvex-crit).border {
+  background-color: #c9cdd2;
+  background-image: linear-gradient(180deg, #eef0f3, #b3b8bf);
+  border-color: #555a62;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 0 rgb(0 0 0 / 0.35), 0 2px 4px rgb(0 0 0 / 0.30);
+}
+
+/* Botones con acento sólido: texto oscuro sobre verde neón / teal (contraste AA). */
+html.matrix .bg-glyvex-accent.text-white { color: #001a08; font-weight: 600; }
+html.carbon .bg-glyvex-accent.text-white { color: #03201d; }
+
+/* Metallic: textos que caen directo sobre el grafito (fuera de paneles de metal)
+   usan la versión clara; dentro de paneles siguen oscuros. */
+html.metallic main :is(.text-glyvex-muted, .text-glyvex-muted-2):not(:is(.bg-glyvex-card, .bg-glyvex-card-hi, .bg-glyvex-surface-code, input, select, textarea) *) { color: #a9afb8; }
+html.metallic main .text-glyvex-text:not(:is(.bg-glyvex-card, .bg-glyvex-card-hi, .bg-glyvex-surface-code, input, select, textarea) *) { color: #e3e6ea; }
+html.metallic main :is(.bg-glyvex-card, .bg-glyvex-card-hi).text-glyvex-text { color: var(--color-glyvex-text); }

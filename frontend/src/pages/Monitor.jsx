@@ -39,15 +39,15 @@ function tierLabel(t, tier) {
 // paleta que ya usa Sparkline para GPU/VRAM/CPU/RAM, así el histórico se
 // lee como una continuación de los gráficos en vivo, no algo aparte.
 const TEMP_LEGEND = [
-  { key: "gpu.0.temp_c", name: "GPU", color: "#3b82f6" },
-  { key: "cpu.temp_c", name: "CPU", color: "#f59e0b" },
+  { key: "gpu.0.temp_c", name: "GPU", color: "var(--color-glyvex-chart-1)" },
+  { key: "cpu.temp_c", name: "CPU", color: "var(--color-glyvex-chart-3)" },
 ];
 const LOAD_LEGEND = [
-  { key: "gpu.0.util_pct", name: "GPU", color: "#3b82f6" },
-  { key: "gpu.0.vram_pct", name: "VRAM", color: "#06b6d4" },
-  { key: "cpu.total_pct", name: "CPU", color: "#f59e0b" },
+  { key: "gpu.0.util_pct", name: "GPU", color: "var(--color-glyvex-chart-1)" },
+  { key: "gpu.0.vram_pct", name: "VRAM", color: "var(--color-glyvex-chart-2)" },
+  { key: "cpu.total_pct", name: "CPU", color: "var(--color-glyvex-chart-3)" },
 ];
-const RAM_LEGEND = [{ key: "ram.pct", name: "RAM", color: "#06b6d4" }];
+const RAM_LEGEND = [{ key: "ram.pct", name: "RAM", color: "var(--color-glyvex-chart-2)" }];
 
 // -- LLM Server (series scope="llm" de metrics.db, por process_id) -----------
 const LLM_KEYS = [
@@ -55,14 +55,14 @@ const LLM_KEYS = [
   "llm.requests_processing", "llm.requests_deferred",
 ];
 const LLM_SPEED_LEGEND = [
-  { key: "llm.tg_tps", nameKey: "monitor.llm.legend.generation", color: "#22c55e" },
-  { key: "llm.throughput_tps", name: "Throughput", color: "#7c3aed" },
+  { key: "llm.tg_tps", nameKey: "monitor.llm.legend.generation", color: "var(--color-glyvex-chart-4)" },
+  { key: "llm.throughput_tps", name: "Throughput", color: "var(--color-glyvex-chart-5)" },
 ];
-const LLM_CTX_PCT_LEGEND = [{ key: "llm.ctx_pct", nameKey: "monitor.llm.legend.contextUsed", color: "#06b6d4" }];
-const LLM_CTX_PEAK_LEGEND = [{ key: "llm.ctx_peak", nameKey: "monitor.llm.legend.contextPeak", color: "#06b6d4" }];
+const LLM_CTX_PCT_LEGEND = [{ key: "llm.ctx_pct", nameKey: "monitor.llm.legend.contextUsed", color: "var(--color-glyvex-chart-2)" }];
+const LLM_CTX_PEAK_LEGEND = [{ key: "llm.ctx_peak", nameKey: "monitor.llm.legend.contextPeak", color: "var(--color-glyvex-chart-2)" }];
 const LLM_QUEUE_LEGEND = [
-  { key: "llm.requests_processing", nameKey: "monitor.llm.legend.inProgress", color: "#3b82f6" },
-  { key: "llm.requests_deferred", nameKey: "monitor.llm.legend.waiting", color: "#f59e0b" },
+  { key: "llm.requests_processing", nameKey: "monitor.llm.legend.inProgress", color: "var(--color-glyvex-chart-1)" },
+  { key: "llm.requests_deferred", nameKey: "monitor.llm.legend.waiting", color: "var(--color-glyvex-chart-3)" },
 ];
 
 function translateLegend(legend, t) {
@@ -243,10 +243,10 @@ function HistoryTooltip({ active, payload, label, legend, unit }) {
   const row = payload[0]?.payload || {};
   return (
     <div
-      className="rounded-md border px-2.5 py-1.5 text-xs"
-      style={{ background: "#1a1a1a", borderColor: "rgba(255,255,255,0.1)" }}
+      className="gx-tip rounded-md border px-2.5 py-1.5 text-xs"
+      style={{ background: "var(--color-glyvex-chart-tip-bg)", borderColor: "var(--color-glyvex-chart-tip-bd)" }}
     >
-      <p className="text-glyvex-muted mb-1">{formatTooltipTime(label)}</p>
+      <p className="text-slate-400 mb-1">{formatTooltipTime(label)}</p>
       {legend.map((l) => {
         const avg = row[`${l.key}__avg`];
         if (avg == null) return null;
@@ -256,7 +256,7 @@ function HistoryTooltip({ active, payload, label, legend, unit }) {
         return (
           <p key={l.key} style={{ color: l.color }}>
             {l.name}: {avg.toFixed(1)}{unit}
-            {showRange && <span className="text-glyvex-muted"> ({min.toFixed(1)}–{max.toFixed(1)})</span>}
+            {showRange && <span className="text-slate-400"> ({min.toFixed(1)}–{max.toFixed(1)})</span>}
           </p>
         );
       })}
@@ -282,22 +282,24 @@ function HistoryChart({
   const hasData = data.length > 0;
 
   return (
-    <div style={{ height }}>
+    <div className="gx-chart" style={{ height }}>
+      {hasData && <ChartLegend legend={legend} />}
       {!hasData ? (
         <div className="h-full flex items-center justify-center text-xs text-glyvex-muted">
           {emptyText || t("monitor.history.noData")}
         </div>
       ) : (
+        <div style={{ height: "calc(100% - 24px)" }}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data}>
             <XAxis
               dataKey="t"
               tickFormatter={(t) => formatAxisTime(t, rangeSeconds)}
-              stroke="#5b6472"
+              stroke="var(--color-glyvex-chart-axis)"
               fontSize={11}
               minTickGap={40}
             />
-            <YAxis domain={domain || ["auto", "auto"]} stroke="#5b6472" fontSize={11} width={36} />
+            <YAxis domain={domain || ["auto", "auto"]} stroke="var(--color-glyvex-chart-axis)" fontSize={11} width={36} />
             <Tooltip content={<HistoryTooltip legend={legend} unit={unit} />} />
             {legend.map((l) => (
               <Line
@@ -314,6 +316,7 @@ function HistoryChart({
             ))}
           </LineChart>
         </ResponsiveContainer>
+        </div>
       )}
     </div>
   );
@@ -340,37 +343,43 @@ function wsUrlFor(path) {
   return `${protocol}//${window.location.host}${path}`;
 }
 
-function tempClasses(temp) {
-  if (temp == null) return "text-glyvex-muted";
-  if (temp < 70) return "text-emerald-400";
-  if (temp <= 85) return "text-amber-400";
-  return "text-red-400";
+// Píldora de temperatura: texto + fondo + borde en el color de estado para
+// que se note sobre el panel (en light los -400 crudos se perdían).
+function tempBadgeClasses(temp) {
+  if (temp == null) return "text-glyvex-bg-muted bg-glyvex-veil border-glyvex-border-soft";
+  if (temp < 70) return "text-glyvex-ok bg-glyvex-ok/10 border-glyvex-ok/30";
+  if (temp <= 85) return "text-glyvex-warn bg-glyvex-warn/10 border-glyvex-warn/30";
+  return "text-glyvex-crit bg-glyvex-crit/10 border-glyvex-crit/30";
 }
 
 function pctBarColor(pct) {
-  if (pct == null) return "#9ca3af";
-  if (pct < 50) return "#22c55e";
-  if (pct <= 80) return "#f59e0b";
-  return "#ef4444";
+  if (pct == null) return "var(--color-glyvex-load-none)";
+  if (pct < 50) return "var(--color-glyvex-load-ok)";
+  if (pct <= 80) return "var(--color-glyvex-load-warn)";
+  return "var(--color-glyvex-load-crit)";
 }
 
 function ProgressBar({ value, max, color }) {
   const pct = max ? Math.min(100, (value / max) * 100) : 0;
   return (
-    <div className="w-full bg-black/30 rounded-full h-2.5 overflow-hidden">
-      <div className="h-2.5 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color || "#3b82f6" }} />
+    <div className="gx-bar w-full bg-glyvex-veil-disabled rounded-full h-2.5 overflow-hidden">
+      <div
+        className="gx-bar-fill h-2.5 rounded-full transition-all"
+        style={{ width: `${pct}%`, backgroundColor: color || "var(--color-glyvex-chart-1)", color: color || "var(--color-glyvex-chart-1)" }}
+      />
     </div>
   );
 }
 
 function Sparkline({ data, dataKeys, colors, height = 80, domain = [0, 100] }) {
   return (
+    <div className="gx-chart">
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={data}>
         <XAxis dataKey="t" hide />
         <YAxis hide domain={domain} />
         <Tooltip
-          contentStyle={{ background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.1)", fontSize: 11 }}
+          contentStyle={{ background: "var(--color-glyvex-chart-tip-bg)", border: "1px solid var(--color-glyvex-chart-tip-bd)", fontSize: 11 }}
           labelFormatter={() => ""}
         />
         {dataKeys.map((key, i) => (
@@ -378,6 +387,7 @@ function Sparkline({ data, dataKeys, colors, height = 80, domain = [0, 100] }) {
         ))}
       </LineChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -389,7 +399,7 @@ function CoreHeatmap({ cores }) {
     return cores.map((pct, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      const color = pct < 50 ? "#22c55e" : pct <= 80 ? "#f59e0b" : "#ef4444";
+      const color = pct < 50 ? "var(--color-glyvex-load-ok)" : pct <= 80 ? "var(--color-glyvex-load-warn)" : "var(--color-glyvex-load-crit)";
       return (
         <rect
           key={i}
@@ -400,6 +410,7 @@ function CoreHeatmap({ cores }) {
           rx={3}
           fill={color}
           opacity={0.85}
+          className="gx-core"
         >
           <title>{`core ${i}: ${pct.toFixed(0)}%`}</title>
         </rect>
@@ -671,6 +682,11 @@ export default function Monitor() {
         setTdpInfo(data);
         const g = (data.gpus || []).find((x) => x.index === gpuIndex) || data.gpus?.[0];
         if (g && g.current_w != null) setTdpValue(g.current_w);
+        // Si la GPU tiene un límite distinto al de fábrica, el control está
+        // activo: restaurar el toggle desde el estado real (sobrevive refresh).
+        if (g && g.current_w != null && g.default_w != null && g.current_w !== g.default_w) {
+          setTdpEnabled(true);
+        }
       })
       .catch(() => {});
 
@@ -713,7 +729,7 @@ export default function Monitor() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Monitor</h1>
-        <span className={`text-xs px-2 py-1 rounded-full border ${connected ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" : "text-glyvex-muted border-white/10"}`}>
+        <span className={`text-xs px-2 py-1 rounded-full border ${connected ? "text-glyvex-ok border-emerald-500/30 bg-emerald-500/10" : "text-glyvex-bg-muted border-glyvex-border-soft"}`}>
           {connected ? t("monitor.header.live") : t("monitor.header.disconnected")}
         </span>
       </div>
@@ -721,14 +737,14 @@ export default function Monitor() {
       {/* Barra de alertas */}
       {show("monitor.alerts") && (
       <div className="flex flex-wrap items-center gap-2">
-        <span className={`text-xs px-2.5 py-1 rounded-full border bg-glyvex-card ${tempClasses(gpu?.temperature_c)} border-white/10`}>
+        <span className={`text-sm px-3 py-1 rounded-full border font-medium ${tempBadgeClasses(gpu?.temperature_c)}`}>
           {t("monitor.alerts.gpuTemp")} {gpu?.temperature_c != null ? `${gpu.temperature_c}°C` : "—"}
         </span>
-        <span className="text-xs px-2.5 py-1 rounded-full border bg-glyvex-card border-white/10 text-glyvex-text">
+        <span className="text-xs px-2.5 py-1 rounded-full border bg-glyvex-card border-glyvex-border-soft text-glyvex-text">
           {t("monitor.alerts.freeVram")} {gpu ? `${(gpu.vram_free_mb / 1024).toFixed(1)} GB` : "—"}
         </span>
         {anyAlert && (
-          <span className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-red-500/15 text-red-400 border border-red-500/30 font-medium">
+          <span className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-red-500/15 text-glyvex-crit border border-red-500/30 font-medium">
             <AlertTriangle size={12} /> {t("monitor.alerts.alert")}
           </span>
         )}
@@ -737,7 +753,7 @@ export default function Monitor() {
 
       {/* Card GPU */}
       {anyVisible(GPU_KEYS) && (
-      <div className="bg-glyvex-card rounded-lg border border-white/10 p-5">
+      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5">
         <div className="flex items-center gap-2 mb-3">
           <Gauge size={16} className="text-glyvex-muted" />
           <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">GPU</h2>
@@ -752,9 +768,9 @@ export default function Monitor() {
             <div className="flex items-center justify-between">
               <p className="text-sm text-glyvex-text">{gpu.name}</p>
               {show("monitor.gpu.temp") && (
-                <p className={`text-sm font-medium ${tempClasses(gpu.temperature_c)}`}>
+                <span className={`text-sm font-semibold px-2.5 py-1 rounded-full border ${tempBadgeClasses(gpu.temperature_c)}`}>
                   {gpu.temperature_c != null ? `${gpu.temperature_c}°C` : "—"}
-                </p>
+                </span>
               )}
             </div>
 
@@ -787,7 +803,7 @@ export default function Monitor() {
             )}
 
             {show("monitor.gpu.power_limit") && (
-            <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3 space-y-3">
+            <div className="gx-recess rounded-lg border border-glyvex-border-soft bg-glyvex-veil-faint p-3 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-glyvex-muted uppercase tracking-wide">
                   {t("monitor.gpu.tdp.title")}
@@ -798,7 +814,7 @@ export default function Monitor() {
                   className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
                     tdpEnabled
                       ? "bg-glyvex-accent/20 text-glyvex-accent border-glyvex-accent/40"
-                      : "bg-white/5 text-glyvex-muted border-white/10 hover:bg-white/10"
+                      : "bg-glyvex-veil text-glyvex-muted border-glyvex-border-soft hover:bg-glyvex-veil-strong"
                   }`}
                 >
                   {tdpEnabled ? t("monitor.gpu.tdp.on") : t("monitor.gpu.tdp.off")}
@@ -827,14 +843,17 @@ export default function Monitor() {
                       value={tdpValue ?? tdpGpu.min_w}
                       onChange={(e) => setTdpValue(Number(e.target.value))}
                       disabled={!tdpInfo.privileged || tdpBusy}
-                      className="w-full accent-glyvex-accent"
+                      className="gx-range w-full accent-glyvex-accent"
+                      style={{
+                        "--gx-pct": `${(((tdpValue ?? tdpGpu.min_w) - tdpGpu.min_w) / Math.max(1, tdpGpu.max_w - tdpGpu.min_w)) * 100}%`,
+                      }}
                     />
                     <div className="flex items-center justify-between gap-2">
                       <button
                         type="button"
                         onClick={() => applyTdp({ index: gpuIndex, default: true }, "monitor.gpu.tdp.resetSuccess")}
                         disabled={!tdpInfo.privileged || tdpBusy || tdpGpu.default_w == null}
-                        className="text-[11px] px-2.5 py-1 rounded-md border border-white/10 bg-white/5 text-glyvex-muted hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="text-[11px] px-2.5 py-1 rounded-md border border-glyvex-border-soft bg-glyvex-veil text-glyvex-muted hover:bg-glyvex-veil-strong disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {t("monitor.gpu.tdp.reset")}
                         {tdpGpu.default_w != null ? ` (${tdpGpu.default_w}W)` : ""}
@@ -860,7 +879,7 @@ export default function Monitor() {
             {show("monitor.gpu.chart") && (
             <div>
               <p className="text-xs text-glyvex-muted mb-1">{t("monitor.gpu.last60s")}</p>
-              <Sparkline data={history} dataKeys={["gpu", "vram"]} colors={["#3b82f6", "#06b6d4"]} height={100} />
+              <Sparkline data={history} dataKeys={["gpu", "vram"]} colors={["var(--color-glyvex-chart-1)", "var(--color-glyvex-chart-2)"]} height={100} />
             </div>
             )}
           </div>
@@ -872,7 +891,7 @@ export default function Monitor() {
       <div className={`grid grid-cols-1 gap-4 ${anyVisible(CPU_KEYS) && show("monitor.ram") ? "md:grid-cols-2" : ""}`}>
         {/* Card CPU */}
         {anyVisible(CPU_KEYS) && (
-        <div className="bg-glyvex-card rounded-lg border border-white/10 p-5 space-y-4">
+        <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-4">
           <div className="flex items-center gap-2">
             <Cpu size={16} className="text-glyvex-muted" />
             <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">CPU</h2>
@@ -892,13 +911,15 @@ export default function Monitor() {
               {show("monitor.cpu.cores") && (
                 <div>
                   <p className="text-xs text-glyvex-muted mb-2">Cores ({cpu.percent_per_core.length})</p>
-                  <CoreHeatmap cores={cpu.percent_per_core} />
+                  <div className="gx-raised">
+                    <CoreHeatmap cores={cpu.percent_per_core} />
+                  </div>
                 </div>
               )}
               {show("monitor.cpu.chart") && (
                 <div>
                   <p className="text-xs text-glyvex-muted mb-1">{t("monitor.cpu.last60s")}</p>
-                  <Sparkline data={history} dataKeys={["cpu"]} colors={["#3b82f6"]} height={80} />
+                  <Sparkline data={history} dataKeys={["cpu"]} colors={["var(--color-glyvex-chart-1)"]} height={80} />
                 </div>
               )}
             </>
@@ -908,7 +929,7 @@ export default function Monitor() {
 
         {/* Card RAM */}
         {show("monitor.ram") && (
-        <div className="bg-glyvex-card rounded-lg border border-white/10 p-5 space-y-4">
+        <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-4">
           <div className="flex items-center gap-2">
             <MemoryStick size={16} className="text-glyvex-muted" />
             <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">RAM</h2>
@@ -927,7 +948,7 @@ export default function Monitor() {
               <p className="text-xs text-glyvex-muted">Swap: {ram.swap_used_gb} GB / {ram.swap_total_gb} GB</p>
               <div>
                 <p className="text-xs text-glyvex-muted mb-1">{t("monitor.ram.last60s")}</p>
-                <Sparkline data={history} dataKeys={["ram"]} colors={["#06b6d4"]} height={80} />
+                <Sparkline data={history} dataKeys={["ram"]} colors={["var(--color-glyvex-chart-2)"]} height={80} />
               </div>
             </>
           )}
@@ -938,7 +959,7 @@ export default function Monitor() {
 
       {/* Histórico */}
       {show("monitor.history") && (
-      <div className="bg-glyvex-card rounded-lg border border-white/10 p-5 space-y-4">
+      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <History size={16} className="text-glyvex-muted" />
@@ -957,7 +978,7 @@ export default function Monitor() {
                   "px-2.5 py-1 rounded-md text-xs border transition-colors " +
                   (range === r.id
                     ? "border-glyvex-accent/50 bg-glyvex-accent/15 text-glyvex-accent"
-                    : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30")
+                    : "border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil-disabled")
                 }
               >
                 {rangeLabel(t, r.id)}
@@ -967,7 +988,7 @@ export default function Monitor() {
               type="button"
               onClick={() => { setHistoryLoading(true); fetchHistory(); }}
               title={t("monitor.history.refresh")}
-              className="p-1.5 rounded-md text-glyvex-muted hover:text-glyvex-text hover:bg-black/30"
+              className="p-1.5 rounded-md text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil-disabled"
             >
               <RefreshCw size={13} className={historyLoading ? "animate-spin" : ""} />
             </button>
@@ -984,7 +1005,6 @@ export default function Monitor() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div>
               <p className="text-xs text-glyvex-muted mb-1">{t("monitor.history.chartTemp")}</p>
-              <ChartLegend legend={TEMP_LEGEND} />
               <HistoryChart
                 series={historySeries}
                 legend={TEMP_LEGEND}
@@ -994,7 +1014,6 @@ export default function Monitor() {
             </div>
             <div>
               <p className="text-xs text-glyvex-muted mb-1">{t("monitor.history.chartLoad")}</p>
-              <ChartLegend legend={LOAD_LEGEND} />
               <HistoryChart
                 series={historySeries}
                 legend={LOAD_LEGEND}
@@ -1021,7 +1040,7 @@ export default function Monitor() {
 
       {/* LLM Server */}
       {llmSectionVisible && (
-      <div className="bg-glyvex-card rounded-lg border border-white/10 p-5 space-y-4">
+      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Server size={16} className="text-glyvex-muted" />
@@ -1041,7 +1060,7 @@ export default function Monitor() {
                     "px-2.5 py-1 rounded-md text-xs border transition-colors " +
                     (range === r.id
                       ? "border-glyvex-accent/50 bg-glyvex-accent/15 text-glyvex-accent"
-                      : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30")
+                      : "border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil-disabled")
                   }
                 >
                   {rangeLabel(t, r.id)}
@@ -1053,7 +1072,7 @@ export default function Monitor() {
             <select
               value={llmSelected || ""}
               onChange={(e) => setLlmSelected(e.target.value)}
-              className="text-xs bg-black/30 border border-white/10 rounded-md px-2 py-1 text-glyvex-text max-w-full"
+              className="text-xs bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-2 py-1 text-glyvex-text max-w-full"
               aria-label={t("monitor.llm.selectAria")}
             >
               {llmOptions.map((o) => (
@@ -1140,7 +1159,6 @@ export default function Monitor() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                 <div>
                   <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.liveChartSpeed")}</p>
-                  <ChartLegend legend={llmSpeedLegend} />
                   <HistoryChart
                     series={llmLiveWindow} legend={llmSpeedLegend} unit=" t/s"
                     rangeSeconds={LLM_LIVE_WINDOW_S} height={130} connectGaps={false}
@@ -1151,7 +1169,6 @@ export default function Monitor() {
                   <p className="text-xs text-glyvex-muted mb-1">
                     {llmHasCtxPct ? t("monitor.llm.liveChartCtxPct") : t("monitor.llm.liveChartCtxPeak")}
                   </p>
-                  <ChartLegend legend={llmHasCtxPct ? llmCtxPctLegend : llmCtxPeakLegend} />
                   <HistoryChart
                     series={llmLiveWindow}
                     legend={llmHasCtxPct ? llmCtxPctLegend : llmCtxPeakLegend}
@@ -1163,7 +1180,6 @@ export default function Monitor() {
                 </div>
                 <div>
                   <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.liveChartQueue")}</p>
-                  <ChartLegend legend={llmQueueLegend} />
                   <HistoryChart
                     series={llmLiveWindow} legend={llmQueueLegend}
                     rangeSeconds={LLM_LIVE_WINDOW_S} height={130} connectGaps={false}
@@ -1182,14 +1198,13 @@ export default function Monitor() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <div>
                 <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.histChartSpeed")}</p>
-                <ChartLegend legend={llmSpeedLegend} />
                 <HistoryChart series={llmSeriesWithTail} legend={llmSpeedLegend} unit=" t/s" rangeSeconds={rangeSeconds} />
               </div>
               <div>
                 <p className="text-xs text-glyvex-muted mb-1">
-                  {llmHasCtxPct ? t("monitor.llm.histChartCtxPct") : t("monitor.llm.histChartCtxPeak")}
-                </p>
-                <ChartLegend legend={llmHasCtxPct ? llmCtxPctLegend : llmCtxPeakLegend} />
+                    {llmHasCtxPct ? t("monitor.llm.histChartCtxPct") : t("monitor.llm.histChartCtxPeak")}
+                  </p>
+
                 <HistoryChart
                   series={llmSeriesWithTail}
                   legend={llmHasCtxPct ? llmCtxPctLegend : llmCtxPeakLegend}
@@ -1200,7 +1215,6 @@ export default function Monitor() {
               </div>
               <div>
                 <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.histChartQueue")}</p>
-                <ChartLegend legend={llmQueueLegend} />
                 <HistoryChart series={llmSeriesWithTail} legend={llmQueueLegend} rangeSeconds={rangeSeconds} height={140} />
               </div>
             </div>
@@ -1212,7 +1226,7 @@ export default function Monitor() {
 
       {/* Card procesos */}
       {show("monitor.processes") && (
-      <div className="bg-glyvex-card rounded-lg border border-white/10 p-5">
+      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5">
         <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide mb-3">{t("monitor.processes.title")}</h2>
         {processes.length === 0 ? (
           <p className="text-sm text-glyvex-muted">{t("monitor.processes.empty")}</p>
@@ -1231,7 +1245,7 @@ export default function Monitor() {
               </thead>
               <tbody>
                 {processes.map((p) => (
-                  <tr key={p.pid} className="border-t border-white/10">
+                  <tr key={p.pid} className="border-t border-glyvex-border-soft">
                     <td className="px-3 py-1.5 text-glyvex-muted">{p.pid}</td>
                     <td className="px-3 py-1.5">{p.name}</td>
                     <td className="px-3 py-1.5 text-glyvex-muted">{p.cpu_percent.toFixed(1)}</td>

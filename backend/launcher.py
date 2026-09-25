@@ -24,7 +24,14 @@ Responsabilidades:
     - stop con SIGTERM y escalamiento a SIGKILL si no responde en 5s.
     - detección de caída inesperada del proceso -> estado "error".
 
-Notas de compatibilidad verificadas contra las builds b11003-b11009 (2026):
+Notas de compatibilidad verificadas contra las builds b11003-b11009 (2026) y
+re-probadas contra b11146 (v0.5.0, 2026-09-24, PLAN-LLAMA-BUMP-V0-5-0.md T2.1):
+- b11146: los 53 flags que emite el launcher siguen presentes, EXCEPTO:
+  - --lora-scale REMOVIDO → --lora-scaled PATH:SCALE (feature-detect por
+    probe; ver build_llama_server_command).
+  - --grp-attn-n/--grp-attn-w REMOVIDOS del server (solo se emiten con
+    grp_attn_n > 1, default 1 = off; el probe los descarta con warning).
+- Desde b11003-b11009:
 - --flash-attn acepta on|off|auto (NO 1/0).
 - Con Flash Attention, el KV cache solo admite pares simétricos:
   q4_0-q4_0, q8_0-q8_0, f16-f16, bf16-bf16 (línea FA_QUANTS del log).
@@ -60,7 +67,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, model_validator
 
 from config import config
-from paths import BASE_DIR, DATA_DIR
+from paths import BUNDLE_DIR, DATA_DIR
 from database import (
     db_delete_template,
     db_get_template,
@@ -74,9 +81,9 @@ logger = logging.getLogger("glyvex.launcher")
 
 # Semilla versionada en el repo (no está en .gitignore): son los templates
 # predefinidos que init_db() inserta en la DB de CADA instancia al arrancar.
-# Es código, no estado, así que cuelga de BASE_DIR y se comparte. Si colgara
+# Es código, no estado, así que cuelga de BUNDLE_DIR y se comparte. Si colgara
 # de DATA_DIR, una instancia nueva arrancaría sin ningún template predefinido.
-TEMPLATES_PATH = BASE_DIR / "data" / "templates" / "hw_templates.json"
+TEMPLATES_PATH = BUNDLE_DIR / "data" / "templates" / "hw_templates.json"
 LOGS_DIR = DATA_DIR / "logs"
 
 LOG_BUFFER_MAXLEN = 2000
@@ -570,7 +577,7 @@ BOOLEAN_FLAGS = frozenset({
 class BinaryInfo(BaseModel):
     """Capacidades detectadas de un binario de llama-server."""
     path: str
-    build: str | None = None          # p. ej. "b11009"
+    build: str | None = None          # p. ej. "b11146"
     version_line: str | None = None   # primera línea cruda de --version
     flags: list[str] = []
     flag_help: dict[str, str] = {}    # P1.5: ayuda oficial de cada long-flag
@@ -730,6 +737,7 @@ def build_llama_server_command(
     binary_path: str,
     model_path: str,
     enable_thinking_supported: bool = True,
+    supported_flags: set[str] | None = None,
 ) -> list[str]:
     # P1.5: solo --model y --port van siempre. Todo lo que tiene toggle es
     # Optional: None (toggle OFF) -> no se emite el flag -> default de build.
@@ -850,7 +858,12 @@ def build_llama_server_command(
     if cfg.mmproj_path:
         cmd += ["--mmproj", cfg.mmproj_path]
     if cfg.lora_path:
-        cmd += ["--lora", cfg.lora_path, "--lora-scale", str(cfg.lora_scale)]
+        if supported_flags and "--lora-scaled" in supported_flags:
+            # b11146+ (v0.5.0): --lora-scale fue removido; la escala va
+            # dentro del mismo flag (PATH:SCALE).
+            cmd += ["--lora-scaled", f"{cfg.lora_path}:{cfg.lora_scale}"]
+        else:
+            cmd += ["--lora", cfg.lora_path, "--lora-scale", str(cfg.lora_scale)]
     # -- sampling defaults del servidor ---------------------------------
     # Van siempre: son los valores que llama-server aplica a cualquier
     # request que no traiga los suyos (el Chat sí manda los propios).
@@ -1228,17 +1241,20 @@ class ModelProcessManager:
             enable_thinking_supported = (
                 True if meta.get("error") else bool(meta.get("enable_thinking_kwarg"))
             )
+            # Probe de capacidades ANTES de armar el comando: el build lo usa
+            # para feature-detect (ej. --lora-scaled de b11146+) y para
+            # descartar los flags que la build no conoce (ej. --grp-attn-n
+            # removido) en vez de morir con "unknown argument". Los críticos
+            # faltantes son error duro.
+            info = await probe_binary(binary_path)
+            supported = set(info.flags) if info.probed else set()
             cmd = build_llama_server_command(
                 cfg,
                 binary_path,
                 model.path,
                 enable_thinking_supported=enable_thinking_supported,
+                supported_flags=supported,
             )
-            # Probe de capacidades: descarta los flags que esta build no
-            # conoce (ej. --grp-attn-n removido) en vez de morir con
-            # "unknown argument". Los críticos faltantes son error duro.
-            info = await probe_binary(binary_path)
-            supported = set(info.flags) if info.probed else set()
             if supported:
                 # Solo los críticos que el comando emite realmente: si
                 # --host no va (default 127.0.0.1), una build sin --host
@@ -1396,14 +1412,15 @@ async def preview_command(cfg: LaunchConfig) -> CommandPreview:
     enable_thinking_supported = (
         True if meta.get("error") else bool(meta.get("enable_thinking_kwarg"))
     )
+    info = await probe_binary(binary_path)
+    supported = set(info.flags) if info.probed else set()
     cmd = build_llama_server_command(
         cfg,
         binary_path,
         model.path,
         enable_thinking_supported=enable_thinking_supported,
+        supported_flags=supported,
     )
-    info = await probe_binary(binary_path)
-    supported = set(info.flags) if info.probed else set()
     cmd, dropped = filter_command(cmd, supported)
     return CommandPreview(
         command=mask_command(cmd),

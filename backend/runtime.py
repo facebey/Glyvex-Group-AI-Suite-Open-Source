@@ -56,44 +56,28 @@ try:
 except ImportError:
     winreg = None
 
-RUNTIME_PIN = "b11009"
+RUNTIME_PIN = "b11146"
 META_FILENAME = ".runtime-meta.json"
 BINARY_NAME = "llama-server.exe" if platform.system() == "Windows" else "llama-server"
 
-# Split de RT-10: el archive único probado en NVIDIA
-# (glyvex-runtime-win-x64-b11009.zip, 55 archivos) se repaqueta en 2 niveles,
-# verificados byte-identicos (55/55). Cada nivel conserva el orden de
-# preferencia "glyvex" (assets propios, release de la suite) → "official"
-# (assets de la release ggml-org/llama.cpp b11009, ya probados en la máquina
-# de desarrollo).
-
-# Release de la suite (repo open source público) donde viven los archives
-# propios del split.
-RELEASE = "v0.5.0"
-SUITE_RELEASE_REPO = "facebey/Glyvex-Group-AI-Suite-Open-Source"
+# Split de RT-10 en 2 niveles: motor base (CPU) siempre, y aceleración de la
+# familia detectada encima cuando existe paquete verificable. Con el bump a
+# b11146 los archives propios "glyvex" (empaquetados sobre b11009) dejan de
+# aplicar al pin: la fuente pasa a ser la build oficial de la release
+# ggml-org/llama.cpp b11146 (= tag v0.5.0), descargada y verificada en la
+# máquina de desarrollo (PLAN-LLAMA-BUMP-V0-5-0.md, T0.1-T0.2).
 
 # Nivel 1: motor base (CPU). Corre en cualquier hardware Windows x64; la
 # aceleración, cuando existe para la familia, se extrae encima.
 BASE_SOURCES: list[dict] = [
     {
-        "id": "glyvex",
-        "description": "Motor base glyvex-runtime-base-win-x64-b11009.zip (asset de la release de la suite)",
-        "files": [
-            {
-                "url": f"https://github.com/{SUITE_RELEASE_REPO}/releases/download/"
-                       f"{RELEASE}/glyvex-runtime-base-win-x64-b11009.zip",
-                "sha256": "76d7c36366cee940662a2bcaf294517255517117b322a64123f64a5d01e3da79",
-            },
-        ],
-    },
-    {
         "id": "official",
-        "description": "Build oficial ggml-org/llama.cpp b11009 (CPU)",
+        "description": "Build oficial ggml-org/llama.cpp b11146 (CPU)",
         "files": [
             {
                 "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                       "b11009/llama-b11009-bin-win-cpu-x64.zip",
-                "sha256": "39973a6c78303dd3cf0ab202a0ec24976579b80704320733e43b086b70af558d",
+                       "b11146/llama-b11146-bin-win-cpu-x64.zip",
+                "sha256": "14cf1303ca9ac3abd94816850532f9f9a69ac66fbaca3776fc6f9061c2fac1d1",
             },
         ],
     },
@@ -106,28 +90,17 @@ BASE_SOURCES: list[dict] = [
 ACCEL_SOURCES: dict[str, list[dict]] = {
     "nvidia": [
         {
-            "id": "glyvex",
-            "description": "Aceleración NVIDIA glyvex-runtime-accel-nvidia-win-x64-b11009.zip (ggml-cuda + cuBLAS + cuDART)",
-            "files": [
-                {
-                    "url": f"https://github.com/{SUITE_RELEASE_REPO}/releases/download/"
-                           f"{RELEASE}/glyvex-runtime-accel-nvidia-win-x64-b11009.zip",
-                    "sha256": "d61c6371fca42b018b7f2a40d35c95f78304c1fdc6015433c33e37b242ee30f4",
-                },
-            ],
-        },
-        {
             "id": "official",
-            "description": "Build oficial ggml-org/llama.cpp b11009 (CUDA 13.4 + cuDART)",
+            "description": "Build oficial ggml-org/llama.cpp b11146 (CUDA 13.4 + cuDART)",
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11009/llama-b11009-bin-win-cuda-13.4-x64.zip",
-                    "sha256": "8e8432f924cd36ce038477907ed5533ad323242522feab9bcae267346c93b00a",
+                           "b11146/llama-b11146-bin-win-cuda-13.4-x64.zip",
+                    "sha256": "b1866c0ce76bc7bfb0c24b33e9a37e9669f1be18539b12c74ce361f81c41f047",
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11009/cudart-llama-bin-win-cuda-13.4-x64.zip",
+                           "b11146/cudart-llama-bin-win-cuda-13.4-x64.zip",
                     "sha256": "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668",
                 },
             ],

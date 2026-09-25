@@ -9,6 +9,7 @@ import MetricsExportSettings from "../components/MetricsExportSettings.jsx";
 import { CONFIG_SAVED_EVENT, PRESETS } from "../lib/metricsDisplay.js";
 import { useTranslation } from "react-i18next";
 import { formInputClasses as inputClasses } from "../lib/styles.js";
+import { applyTheme, getStoredTheme, THEME_CHANGED_EVENT } from "../lib/theme.js";
 
 const EMPTY_CONFIG = {
   app: { port: 7981, theme: "dark", language: "es" },
@@ -147,12 +148,25 @@ export default function Config() {
     }
   }
 
+  // Mantener el <select> de tema sincronizado con el botón de ciclo del header.
+  useEffect(() => {
+    const onTheme = (e) =>
+      setConfig((prev) => (prev?.app ? { ...prev, app: { ...prev.app, theme: e.detail } } : prev));
+    window.addEventListener(THEME_CHANGED_EVENT, onTheme);
+    return () => window.removeEventListener(THEME_CHANGED_EVENT, onTheme);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     fetch("/api/config")
       .then((res) => res.json())
       .then((data) => {
-        if (!cancelled) setConfig((prev) => ({ ...prev, ...data }));
+        if (cancelled) return;
+        setConfig((prev) => {
+          const merged = { ...prev, ...data };
+          merged.app = { ...merged.app, theme: getStoredTheme() };
+          return merged;
+        });
       })
       .catch(() => {
         if (!cancelled) setMessage({ type: "error", text: t("config.loadError") });
@@ -232,7 +246,7 @@ export default function Config() {
   }
 
   if (loading) {
-    return <p className="text-glyvex-muted text-sm">{t("config.loading")}</p>;
+    return <p className="text-glyvex-bg-muted text-sm">{t("config.loading")}</p>;
   }
 
   return (
@@ -244,7 +258,7 @@ export default function Config() {
             type="button"
             onClick={handleReset}
             disabled={saving}
-            className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-50"
+            className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-50"
           >
             <RotateCcw size={16} />
             {t("config.reset")}
@@ -327,7 +341,7 @@ export default function Config() {
             {config.model_dirs.map((dir) => (
               <li
                 key={dir}
-                className="flex items-center justify-between bg-black/30 border border-white/10 rounded-md px-3 py-2 text-sm"
+                className="flex items-center justify-between bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-3 py-2 text-sm"
               >
                 <span className="truncate">{dir}</span>
                 <button
@@ -343,7 +357,7 @@ export default function Config() {
           </ul>
         )}
 
-        <div className="border-t border-white/10 pt-4 space-y-3">
+        <div className="border-t border-glyvex-border-soft pt-4 space-y-3">
           <button
             type="button"
             onClick={handleScan}
@@ -459,15 +473,19 @@ export default function Config() {
             <select
               className={inputClasses}
               value={config.app.theme}
-              onChange={(e) =>
+              onChange={(e) => {
+                applyTheme(e.target.value);
                 setConfig((prev) => ({
                   ...prev,
                   app: { ...prev.app, theme: e.target.value },
-                }))
-              }
+                }));
+              }}
             >
               <option value="dark">{t("config.appPrefs.themeDark")}</option>
               <option value="light">{t("config.appPrefs.themeLight")}</option>
+              <option value="carbon">{t("config.appPrefs.themeCarbon")}</option>
+              <option value="metallic">{t("config.appPrefs.themeMetallic")}</option>
+              <option value="matrix">{t("config.appPrefs.themeMatrix")}</option>
             </select>
           </Field>
         </div>

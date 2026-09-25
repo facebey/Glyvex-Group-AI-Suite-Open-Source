@@ -43,8 +43,8 @@ function RunDetail({ run, onBack }) {
   const avgJudge = run.summary?.avg_judge_score;
   return (
     <div className="space-y-4">
-      <button type="button" onClick={onBack} className="flex items-center gap-1 text-sm text-glyvex-muted hover:text-glyvex-text"><ArrowLeft size={14} /> {t("reports.backToHistory")}</button>
-      <div className="bg-glyvex-card rounded-lg border border-white/10 p-5 space-y-2">
+      <button type="button" onClick={onBack} className="flex items-center gap-1 text-sm text-glyvex-bg-muted hover:text-glyvex-text"><ArrowLeft size={14} /> {t("reports.backToHistory")}</button>
+      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-2">
         <p className="text-sm"><span className="text-glyvex-muted">{t("reports.detail.model")}:</span> {run.config.model_name || "—"}</p>
         <p className="text-sm"><span className="text-glyvex-muted">Endpoint:</span> {run.config.endpoint}</p>
         <p className="text-sm"><span className="text-glyvex-muted">Sets:</span> {run.config.sets.join(", ")}</p>
@@ -54,16 +54,16 @@ function RunDetail({ run, onBack }) {
       </div>
       {run.summary && (
         <div className="flex flex-wrap gap-3 text-sm">
-          <span className="bg-glyvex-card border border-white/10 rounded-md px-3 py-1.5">{t("benchmark.summary.avgTps")}: <b>{run.summary.avg_tps}</b></span>
-          <span className="bg-glyvex-card border border-white/10 rounded-md px-3 py-1.5">{t("benchmark.summary.avgTtft")}: <b>{run.summary.avg_ttft_ms}ms</b></span>
-          <span className="bg-glyvex-card border border-white/10 rounded-md px-3 py-1.5">{t("benchmark.summary.keywordHitRate")}: <b>{(run.summary.keyword_hit_rate * 100).toFixed(0)}%</b></span>
-          <span className="bg-glyvex-card border border-white/10 rounded-md px-3 py-1.5">{t("benchmark.summary.errors")}: <b>{run.summary.errors}</b></span>
+          <span className="bg-glyvex-card border border-glyvex-border-soft rounded-md px-3 py-1.5">{t("benchmark.summary.avgTps")}: <b>{run.summary.avg_tps}</b></span>
+          <span className="bg-glyvex-card border border-glyvex-border-soft rounded-md px-3 py-1.5">{t("benchmark.summary.avgTtft")}: <b>{run.summary.avg_ttft_ms}ms</b></span>
+          <span className="bg-glyvex-card border border-glyvex-border-soft rounded-md px-3 py-1.5">{t("benchmark.summary.keywordHitRate")}: <b>{(run.summary.keyword_hit_rate * 100).toFixed(0)}%</b></span>
+          <span className="bg-glyvex-card border border-glyvex-border-soft rounded-md px-3 py-1.5">{t("benchmark.summary.errors")}: <b>{run.summary.errors}</b></span>
           {avgJudge != null && (
-            <span className="bg-glyvex-card border border-white/10 rounded-md px-3 py-1.5">{t("reports.detail.avgJudgeScore")}: <b>{fmtJudgeAvg(avgJudge)}</b></span>
+            <span className="bg-glyvex-card border border-glyvex-border-soft rounded-md px-3 py-1.5">{t("reports.detail.avgJudgeScore")}: <b>{fmtJudgeAvg(avgJudge)}</b></span>
           )}
         </div>
       )}
-      <div className="overflow-x-auto rounded-lg border border-white/10">
+      <div className="overflow-x-auto rounded-lg border border-glyvex-border-soft">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-glyvex-card text-left text-glyvex-muted">
@@ -78,7 +78,7 @@ function RunDetail({ run, onBack }) {
               const found = r.keywords_found || [];
               const missing = r.keywords_missing || [];
               return (
-                <tr key={`${r.set_id}-${r.prompt_id}-${i}`} className="border-t border-white/10">
+                <tr key={`${r.set_id}-${r.prompt_id}-${i}`} className="border-t border-glyvex-border-soft">
                   <td className="px-3 py-2 text-glyvex-muted">{r.set_id}</td>
                   <td className="px-3 py-2">{r.prompt_title}</td>
                   <td className="px-3 py-2 text-glyvex-muted">{r.metrics?.tps?.toFixed(1) ?? "—"}</td>
@@ -94,7 +94,7 @@ function RunDetail({ run, onBack }) {
         </table>
       </div>
       {run.summary && avgJudge == null && (
-        <div className="bg-glyvex-card rounded-lg border border-white/10 p-5">
+        <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5">
           <p className="text-sm text-glyvex-muted">
             {t("reports.detail.notEvaluated")}
           </p>
@@ -121,8 +121,8 @@ function CompareView({ runA, runB, onBack }) {
   ];
   return (
     <div className="space-y-4">
-      <button type="button" onClick={onBack} className="flex items-center gap-1 text-sm text-glyvex-muted hover:text-glyvex-text"><ArrowLeft size={14} /> {t("reports.backToHistory")}</button>
-      <div className="overflow-x-auto rounded-lg border border-white/10">
+      <button type="button" onClick={onBack} className="flex items-center gap-1 text-sm text-glyvex-bg-muted hover:text-glyvex-text"><ArrowLeft size={14} /> {t("reports.backToHistory")}</button>
+      <div className="overflow-x-auto rounded-lg border border-glyvex-border-soft">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-glyvex-card text-left text-glyvex-muted">
@@ -133,8 +133,8 @@ function CompareView({ runA, runB, onBack }) {
           </thead>
           <tbody>
             {metrics.map(([label, getValue]) => (
-              <tr key={label} className="border-t border-white/10">
-                <td className="px-3 py-2 text-glyvex-muted">{label}</td>
+              <tr key={label} className="border-t border-glyvex-border-soft">
+                <td className="px-3 py-2 text-glyvex-bg-muted">{label}</td>
                 <td className="px-3 py-2">{getValue(runA)}</td>
                 <td className="px-3 py-2">{getValue(runB)}</td>
               </tr>
@@ -195,16 +195,16 @@ export default function Reports() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Reports</h1>
         <button type="button" onClick={doCompare} disabled={compareIds.length !== 2}
-          className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-40">
+          className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-40">
           <GitCompare size={14} />{t("reports.compareSelected", { n: compareIds.length })}
         </button>
       </div>
       {loading ? (
-        <p className="text-sm text-glyvex-muted">{t("reports.loading")}</p>
+        <p className="text-sm text-glyvex-bg-muted">{t("reports.loading")}</p>
       ) : history.length === 0 ? (
-        <p className="text-sm text-glyvex-muted">{t("reports.empty")}</p>
+        <p className="text-sm text-glyvex-bg-muted">{t("reports.empty")}</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-white/10">
+        <div className="overflow-x-auto rounded-lg border border-glyvex-border-soft">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-glyvex-card text-left text-glyvex-muted">
@@ -218,7 +218,7 @@ export default function Reports() {
             </thead>
             <tbody>
               {history.map((run) => (
-                <tr key={run.run_id} className="border-t border-white/10 hover:bg-white/5">
+                <tr key={run.run_id} className="border-t border-glyvex-border-soft hover:bg-glyvex-veil">
                   <td className="px-3 py-2"><input type="checkbox" checked={compareIds.includes(run.run_id)} onChange={() => toggleCompare(run.run_id)} className="accent-glyvex-accent w-4 h-4" /></td>
                   <td className="px-3 py-2 text-glyvex-muted">{fmtDate(run.started_at)}</td>
                   <td className="px-3 py-2">{run.model_name || "—"}</td>

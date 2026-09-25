@@ -131,7 +131,7 @@ function CheckButton({ onClick, checking }) {
       onClick={onClick}
       disabled={checking}
       title={t("chatSettings.checkTitle")}
-      className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30 disabled:opacity-50"
+      className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil-disabled disabled:opacity-50"
     >
       <RefreshCw size={12} className={checking ? "animate-spin" : ""} />
       {t("chatSettings.check")}
@@ -222,7 +222,7 @@ export default function ChatSettings({ config, onChange }) {
         {(tools.search_provider === "brave" || tools.search_provider === "tavily") && (
           <p className="text-sm text-glyvex-muted">
             {t("chatSettings.apiKeyNoteBefore")}
-            <code className="px-1 rounded bg-black/40 text-glyvex-text">
+            <code className="px-1 rounded bg-glyvex-surface-code text-glyvex-text">
               {tools.search_provider === "brave" ? "BRAVE_API_KEY" : "TAVILY_API_KEY"}
             </code>
             {t("chatSettings.apiKeyNoteAfter")}

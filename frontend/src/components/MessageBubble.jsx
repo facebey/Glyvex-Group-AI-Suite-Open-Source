@@ -10,7 +10,7 @@ import StreamStatus from "./StreamStatus.jsx";
 import MarkdownMessage from "./MarkdownMessage.jsx";
 import { CopyButton } from "./CodeBlock.jsx";
 import ReasoningControl from "./ReasoningControl.jsx";
-import { inputClasses } from "../lib/styles.js";
+import { composerInputClasses } from "../lib/styles.js";
 
 function formatTime(iso) {
   if (!iso) return "";
@@ -66,7 +66,7 @@ function MessageAttachments({ attachments }) {
                   loading="lazy"
                   className={
                     "h-24 w-24 object-cover rounded-md border " +
-                    (skipped ? "border-amber-500/40 opacity-50" : "border-white/10")
+                    (skipped ? "border-amber-500/40 opacity-50" : "border-glyvex-border-soft")
                   }
                 />
                 {skipped && (
@@ -99,7 +99,7 @@ function MessageAttachments({ attachments }) {
                     ? "border-red-500/40 bg-red-500/10 text-red-300"
                     : skipped
                       ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                      : "border-white/10 bg-black/30 text-glyvex-text")
+                      : "border-glyvex-border-soft bg-glyvex-veil-disabled text-glyvex-bg-text")
                 }
               >
                 <Icon size={12} className="shrink-0" />
@@ -119,13 +119,13 @@ function BranchNav({ branch, onSwitch }) {
   const { t } = useTranslation();
   if (!branch || branch.total <= 1) return null;
   return (
-    <span className="inline-flex items-center gap-0.5 text-xs text-glyvex-muted">
+      <span className="inline-flex items-center gap-0.5 text-xs text-glyvex-bg-muted">
       <button
         type="button"
         onClick={() => onSwitch(-1)}
         disabled={branch.index <= 1}
         title={t("message.prevVersion")}
-        className="p-0.5 rounded hover:bg-white/10 hover:text-glyvex-text disabled:opacity-30"
+        className="p-0.5 rounded hover:bg-glyvex-veil-strong hover:text-glyvex-bg-text disabled:opacity-30"
       >
         <ChevronLeft size={12} />
       </button>
@@ -137,7 +137,7 @@ function BranchNav({ branch, onSwitch }) {
         onClick={() => onSwitch(1)}
         disabled={branch.index >= branch.total}
         title={t("message.nextVersion")}
-        className="p-0.5 rounded hover:bg-white/10 hover:text-glyvex-text disabled:opacity-30"
+        className="p-0.5 rounded hover:bg-glyvex-veil-strong hover:text-glyvex-bg-text disabled:opacity-30"
       >
         <ChevronRight size={12} />
       </button>
@@ -175,16 +175,16 @@ function EditBox({ initial, onSubmit, onCancel }) {
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={handleKeyDown}
-        className={inputClasses + " min-h-[72px] max-h-60 resize-y"}
+        className={composerInputClasses + " min-h-[72px] max-h-60 resize-y"}
       />
       <div className="flex items-center justify-end gap-2 mt-1.5">
-        <span className="text-xs text-glyvex-muted mr-auto">
+        <span className="text-xs text-glyvex-bg-muted mr-auto">
           {t("message.editNote")}
         </span>
         <button
           type="button"
           onClick={onCancel}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30"
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-bg-text hover:bg-glyvex-veil-disabled"
         >
           <X size={12} /> {t("message.cancel")}
         </button>
@@ -287,7 +287,7 @@ export default function MessageBubble({
         {!isUser && streaming && !hasText && <StreamStatus phase={livePhase} />}
 
         {!isUser && !streaming && !hasText && (
-          <p className="text-xs italic text-glyvex-muted px-1">
+          <p className="text-xs italic text-glyvex-bg-muted px-1">
             {message.thinking || message.tool_activity?.length
               ? t("message.noText")
               : t("message.stoppedEarly")}
@@ -338,10 +338,10 @@ export default function MessageBubble({
         >
           <BranchNav branch={branch} onSwitch={(dir) => onSwitchBranch?.(message, dir)} />
 
-          <span className="text-xs text-glyvex-muted">{formatTime(message.timestamp)}</span>
+          <span className="text-xs text-glyvex-bg-muted">{formatTime(message.timestamp)}</span>
 
           {!isUser && message.metrics?.tps ? (
-            <span className="text-xs text-glyvex-muted font-mono">
+            <span className="text-xs text-glyvex-bg-muted font-mono">
               {message.metrics.metrics_source === "chunks" ? "~" : ""}
               {message.metrics.tps.toFixed(1)} t/s
               {message.metrics.ttft_ms ? ` · ${Math.round(message.metrics.ttft_ms)}ms TTFT` : ""}
@@ -357,7 +357,7 @@ export default function MessageBubble({
               type="button"
               onClick={() => setEditing(true)}
               title={t("message.editTitle")}
-              className="p-0.5 rounded text-glyvex-muted hover:text-glyvex-text hover:bg-white/10"
+              className="p-0.5 rounded text-glyvex-bg-muted hover:text-glyvex-bg-text hover:bg-glyvex-veil-strong"
             >
               <Pencil size={12} />
             </button>
@@ -372,7 +372,7 @@ export default function MessageBubble({
                 type="button"
                 onClick={() => onRegenerate?.(message, regenReasoning)}
                 title={t("message.regenerateTitle")}
-                className="p-0.5 rounded text-glyvex-muted hover:text-glyvex-text hover:bg-white/10"
+                className="p-0.5 rounded text-glyvex-bg-muted hover:text-glyvex-bg-text hover:bg-glyvex-veil-strong"
               >
                 <RefreshCw size={12} />
               </button>

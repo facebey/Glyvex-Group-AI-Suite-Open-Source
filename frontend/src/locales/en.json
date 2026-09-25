@@ -9,7 +9,8 @@
   },
   "common": {
     "themeLight": "Switch to light mode",
-    "themeDark": "Switch to dark mode"
+    "themeDark": "Switch to dark mode",
+    "themeCycle": "Theme: {{current}} — click to switch to {{next}}"
   },
   "onboarding": {
     "title": "Welcome to Glyvex AI Suite",
@@ -746,7 +747,10 @@
       "port": "Port",
       "theme": "Theme",
       "themeDark": "Dark",
-      "themeLight": "Light"
+      "themeLight": "Light",
+      "themeCarbon": "Carbon",
+      "themeMetallic": "Metallic",
+      "themeMatrix": "Matrix"
     },
     "export": {
       "section": "Export metrics",

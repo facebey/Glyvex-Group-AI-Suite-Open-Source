@@ -42,8 +42,8 @@ function truncateName(name, max = 24) {
 }
 
 const STATUS_STYLES = {
-  pending: "border-white/10 bg-black/30 text-glyvex-muted",
-  ready: "border-white/10 bg-black/30 text-glyvex-text",
+  pending: "border-glyvex-border-soft bg-glyvex-veil-disabled text-glyvex-bg-muted",
+  ready: "border-glyvex-border-soft bg-glyvex-veil-disabled text-glyvex-bg-text",
   error: "border-red-500/40 bg-red-500/10 text-red-300",
   vision_unsupported: "border-amber-500/40 bg-amber-500/10 text-amber-300",
 };
@@ -59,7 +59,7 @@ function StatusIcon({ attachment }) {
     return <EyeOff size={13} className="shrink-0" />;
   }
   const Icon = iconFor(attachment);
-  return <Icon size={13} className="text-glyvex-muted shrink-0" />;
+  return <Icon size={13} className="text-glyvex-bg-muted shrink-0" />;
 }
 
 function chipTitle(attachment, t) {
@@ -100,7 +100,7 @@ export default function AttachmentChips({ attachments, onRemove }) {
               <img
                 src={attachment.url}
                 alt=""
-                className="w-5 h-5 rounded object-cover border border-white/10 shrink-0"
+                className="w-5 h-5 rounded object-cover border border-glyvex-border-soft shrink-0"
               />
             ) : (
               <StatusIcon attachment={attachment} />
@@ -118,7 +118,7 @@ export default function AttachmentChips({ attachments, onRemove }) {
               type="button"
               onClick={() => onRemove(attachment.localId)}
                 title={t("attachments.remove", { filename: attachment.filename })}
-              className="p-0.5 rounded hover:bg-white/10 hover:text-glyvex-text"
+              className="p-0.5 rounded hover:bg-glyvex-veil-strong hover:text-glyvex-bg-text"
             >
               <X size={12} />
             </button>

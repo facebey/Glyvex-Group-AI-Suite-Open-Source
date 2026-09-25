@@ -3,11 +3,11 @@ import { Thermometer } from "lucide-react";
 
 const POLL_INTERVAL_MS = 5000;
 
-function tempColorClass(temp) {
-  if (temp == null) return "text-glyvex-muted";
-  if (temp < 70) return "text-emerald-400";
-  if (temp <= 85) return "text-amber-400";
-  return "text-red-400";
+function tempBadgeClasses(temp) {
+  if (temp == null) return "text-glyvex-bg-muted bg-glyvex-veil border-glyvex-border-soft";
+  if (temp < 70) return "text-glyvex-ok bg-glyvex-ok/10 border-glyvex-ok/30";
+  if (temp <= 85) return "text-glyvex-warn bg-glyvex-warn/10 border-glyvex-warn/30";
+  return "text-glyvex-crit bg-glyvex-crit/10 border-glyvex-crit/30";
 }
 
 /**
@@ -46,18 +46,18 @@ export default function StatusWidget() {
     <div className="flex items-center gap-4 text-xs">
       <div className="flex items-center gap-1.5">
         <span className={`w-2 h-2 rounded-full ${runningProcess ? "bg-emerald-400" : "bg-glyvex-muted/50"}`} />
-        <span className={runningProcess ? "text-glyvex-text" : "text-glyvex-muted"}>
+        <span className={runningProcess ? "text-glyvex-bg-text" : "text-glyvex-bg-muted"}>
           {runningProcess ? `${runningProcess.model_name} — :${runningProcess.port}` : "Sin modelo activo"}
         </span>
       </div>
 
       {gpu && (
-        <div className="flex items-center gap-1.5 text-glyvex-muted">
-          <Thermometer size={12} className={tempColorClass(gpu.temperature_c)} />
-          <span className={tempColorClass(gpu.temperature_c)}>
+        <div className="flex items-center gap-2">
+          <span className={`flex items-center gap-1 text-sm font-semibold px-2 py-0.5 rounded-md border ${tempBadgeClasses(gpu.temperature_c)}`}>
+            <Thermometer size={14} />
             {gpu.temperature_c != null ? `${gpu.temperature_c}°C` : "—"}
           </span>
-          <span>
+          <span className="text-xs text-glyvex-bg-muted">
             VRAM {(gpu.vram_used_mb / 1024).toFixed(1)}/{(gpu.vram_total_mb / 1024).toFixed(0)}GB
           </span>
         </div>

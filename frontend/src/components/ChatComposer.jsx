@@ -4,7 +4,7 @@ import { Send, Square, Paperclip, AlertTriangle, Globe } from "lucide-react";
 import ReasoningControl from "./ReasoningControl.jsx";
 import AttachmentChips from "./AttachmentChips.jsx";
 import MicButton from "./MicButton.jsx";
-import { inputClasses } from "../lib/styles.js";
+import { composerInputClasses } from "../lib/styles.js";
 
 /**
  * El picker no filtra nada a propósito.
@@ -127,12 +127,12 @@ export default function ChatComposer({
   }
 
   return (
-    <div className="border-t border-white/10 p-3">
+    <div className="border-t border-glyvex-border-soft p-3">
       <ContextWarning estimate={estimate} />
       <AttachmentChips attachments={attachments} onRemove={onRemoveAttachment} />
 
       {interimTranscript && (
-        <p className="mb-2 px-2.5 py-1.5 rounded-md border border-white/10 bg-black/20 text-xs text-glyvex-muted italic">
+        <p className="mb-2 px-2.5 py-1.5 rounded-md border border-glyvex-border-soft bg-glyvex-veil-box text-xs text-glyvex-bg-muted italic">
           {interimTranscript}
         </p>
       )}
@@ -150,7 +150,7 @@ export default function ChatComposer({
               "flex items-center h-9 px-2 rounded-md border shrink-0 disabled:opacity-40 " +
               (toolsEnabled
                 ? "border-sky-500/40 bg-sky-500/10 text-sky-400"
-                : "border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30")
+                : "border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-bg-text hover:bg-glyvex-veil-disabled")
             }
           >
             <Globe size={16} />
@@ -159,7 +159,7 @@ export default function ChatComposer({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             title={attachTitle}
-            className="flex items-center h-9 px-2 rounded-md border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30"
+            className="flex items-center h-9 px-2 rounded-md border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-bg-text hover:bg-glyvex-veil-disabled"
           >
             <Paperclip size={16} />
           </button>
@@ -181,7 +181,7 @@ export default function ChatComposer({
         </div>
 
         <textarea
-          className={inputClasses + " min-h-[44px] max-h-40 resize-y flex-1"}
+          className={composerInputClasses + " min-h-[44px] max-h-40 resize-y flex-1"}
           value={input}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}

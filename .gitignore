@@ -8,29 +8,21 @@ venv/
 
 # Node
 node_modules/
+package-lock.json
 frontend/node_modules/
+frontend/package-lock.json
 vite.config.js.timestamp-*.mjs
 
 # Build
 frontend/dist/
 
-# Distribucion (clone local del repo open source; la crea sync-oss)
-distribution/oss-clone/
-
 # Data / logs (no commitear datos locales)
-# Instancias alternativas: environments/<nombre>.env define GLYVEX_DATA_DIR,
-# y por convención esos directorios se llaman data-<algo> (data-testing, etc).
-data-*/
-data/config.json
 data/models.json
-data/models_schema_version.json
-data/attachments/
 data/logs/
 data/benchmarks/
 data/*.db
 data/*.db-shm
 data/*.db-wal
-backend-prod.log
 
 # OS
 .DS_Store
@@ -39,6 +31,3 @@ Thumbs.db
 # IDE
 .vscode/settings.json
 .idea/
-
-# Documentacion local (solo en disco, no versionar)
-AGENTS.md

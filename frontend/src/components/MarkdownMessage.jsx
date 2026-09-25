@@ -77,7 +77,7 @@ const components = {
     // envuelve el `pre` de arriba.
     if (!className) {
       return (
-        <code className="px-1 py-0.5 rounded bg-black/40 text-[0.9em] font-mono [overflow-wrap:anywhere]">
+        <code className="px-1 py-0.5 rounded bg-glyvex-surface-code text-[0.9em] font-mono [overflow-wrap:anywhere]">
           {children}
         </code>
       );
@@ -113,13 +113,13 @@ const components = {
   },
   th({ children }) {
     return (
-      <th className="border border-white/10 px-2 py-1 bg-black/30 text-left font-medium">
+      <th className="border border-glyvex-border-soft px-2 py-1 bg-glyvex-veil-disabled text-left font-medium">
         {children}
       </th>
     );
   },
   td({ children }) {
-    return <td className="border border-white/10 px-2 py-1 align-top">{children}</td>;
+    return <td className="border border-glyvex-border-soft px-2 py-1 align-top">{children}</td>;
   },
 
   ul({ children }) {
@@ -130,7 +130,7 @@ const components = {
   },
   blockquote({ children }) {
     return (
-      <blockquote className="border-l-2 border-white/20 pl-3 my-2 text-glyvex-muted">
+      <blockquote className="border-l-2 border-glyvex-border-hi pl-3 my-2 text-glyvex-muted">
         {children}
       </blockquote>
     );
@@ -138,7 +138,7 @@ const components = {
   h1: ({ children }) => <h1 className="text-lg font-semibold mt-3 mb-1.5">{children}</h1>,
   h2: ({ children }) => <h2 className="text-base font-semibold mt-3 mb-1.5">{children}</h2>,
   h3: ({ children }) => <h3 className="text-sm font-semibold mt-2 mb-1">{children}</h3>,
-  hr: () => <hr className="my-3 border-white/10" />,
+  hr: () => <hr className="my-3 border-glyvex-border-soft" />,
   p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
 };
 

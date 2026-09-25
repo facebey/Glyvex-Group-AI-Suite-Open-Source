@@ -70,7 +70,7 @@ async def test_status_missing_on_windows(client, monkeypatch):
     res = await client.get("/api/runtime/status")
     assert res.status_code == 200
     data = res.json()
-    assert data["pin"] == "b11009"
+    assert data["pin"] == "b11146"
     assert data["state"] == "missing"
     assert data["build"] is None
     assert data["gpu"] == "cpu"
@@ -93,14 +93,14 @@ async def test_status_ready_when_binary_present(client, monkeypatch):
     d.mkdir(parents=True, exist_ok=True)
     (d / runtime_module.BINARY_NAME).touch()
     (d / runtime_module.META_FILENAME).write_text(
-        json.dumps({"pin": "b11009", "state": "ready", "build": "b11009", "source": "official"}),
+        json.dumps({"pin": "b11146", "state": "ready", "build": "b11146", "source": "official"}),
         encoding="utf-8",
     )
 
     res = await client.get("/api/runtime/status")
     data = res.json()
     assert data["state"] == "ready"
-    assert data["build"] == "b11009"
+    assert data["build"] == "b11146"
     assert data["source"] == "official"
     assert data["size_mb"] == 0.0
 

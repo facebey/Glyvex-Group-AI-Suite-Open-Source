@@ -3,10 +3,11 @@ import { useTranslation } from "react-i18next";
 import { createBrowserRouter, RouterProvider, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   MessageSquare, Rocket, Gauge, Activity, FileBarChart, Settings,
-  CheckCircle2, Circle, Sun, Moon, Cpu, Download, Loader2, AlertTriangle, Github,
+  CheckCircle2, Circle, Palette, Cpu, Download, Loader2, AlertTriangle, Github,
 } from "lucide-react";
 import { ToastProvider } from "./components/ToastNotification.jsx";
-import { useLocalStorage } from "./hooks/useLocalStorage.js";
+import { getStoredTheme, cycleTheme, nextTheme, THEMES, THEME_META, THEME_CHANGED_EVENT } from "./lib/theme.js";
+import MatrixRain from "./components/MatrixRain.jsx";
 import { consumeSSE } from "./lib/sse.js";
 import StatusWidget from "./components/StatusWidget.jsx";
 import LanguageSelector from "./components/LanguageSelector.jsx";
@@ -36,10 +37,10 @@ function makeNavLinkClasses(theme) {
     return [
       "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
       isActive
-        ? theme === "light"
+        ? "gx-nav-on " + (theme === "light"
           ? "bg-glyvex-accent/10 text-glyvex-accent"
-          : "bg-glyvex-accent/15 text-glyvex-accent"
-        : "text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card",
+          : "bg-glyvex-accent/15 text-glyvex-accent")
+        : "text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card",
     ].join(" ");
   };
 }
@@ -319,11 +320,17 @@ function Layout() {
   const mainWidth = WIDE_ROUTES.has(pathname) ? "max-w-[1800px]" : "max-w-6xl";
   const [shouldShowOnboarding, setShouldShowOnboarding] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  const [theme, setTheme] = useLocalStorage("glyvex-theme", "dark");
+  const [theme, setTheme] = useState(getStoredTheme());
+
+  useEffect(() => {
+    const onThemeChanged = (e) => setTheme(e.detail);
+    window.addEventListener(THEME_CHANGED_EVENT, onThemeChanged);
+    return () => window.removeEventListener(THEME_CHANGED_EVENT, onThemeChanged);
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.remove("dark", "light");
+    THEMES.forEach((t) => root.classList.remove(t));
     root.classList.add(theme);
   }, [theme]);
 
@@ -340,8 +347,9 @@ function Layout() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col bg-glyvex-bg text-glyvex-text">
-      <header className="border-b border-glyvex-border bg-glyvex-bg/95 backdrop-blur-md sticky top-0 z-50">
+    <div className="gx-app min-h-screen flex flex-col bg-glyvex-bg text-glyvex-bg-text">
+      {theme === "matrix" && <MatrixRain />}
+      <header className="gx-shell border-b border-glyvex-border bg-glyvex-bg/95 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-6xl mx-auto flex items-center gap-6 px-4 py-3">
           <a
             href="https://ai.glyvexgroup.com"
@@ -369,11 +377,24 @@ function Layout() {
             <LanguageSelector />
             <button
               type="button"
-              onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-              title={theme === "dark" ? t("common.themeLight") : t("common.themeDark")}
-              className="p-1.5 rounded-md text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card transition-colors"
+              onClick={() => cycleTheme(theme)}
+              title={t("common.themeCycle", {
+                current: t(THEME_META[theme].labelKey),
+                next: t(THEME_META[nextTheme(theme)].labelKey),
+              })}
+              aria-label={t("common.themeCycle", {
+                current: t(THEME_META[theme].labelKey),
+                next: t(THEME_META[nextTheme(theme)].labelKey),
+              })}
+              className="relative p-1.5 rounded-md text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card transition-colors"
             >
-              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+              <Palette size={17} />
+              {/* muestra del tema actual */}
+              <span
+                aria-hidden="true"
+                className="absolute bottom-0.5 right-0.5 w-2 h-2 rounded-full ring-1 ring-black/40"
+                style={{ backgroundColor: THEME_META[theme].swatch }}
+              />
             </button>
           </div>
         </div>
@@ -392,8 +413,8 @@ function Layout() {
         </main>
       </div>
 
-      <footer className="border-t border-glyvex-border bg-glyvex-bg-2 py-3 px-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between text-xs text-glyvex-muted-2">
+      <footer className="gx-shell relative z-10 border-t border-glyvex-border bg-glyvex-bg-2 py-3 px-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between text-xs text-glyvex-bg-muted">
           <span>
             {t("footer.developedBy")}{" "}
             <a
@@ -409,7 +430,7 @@ function Layout() {
               href="https://glyvexgroup.com"
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-glyvex-muted transition-colors"
+              className="hover:text-glyvex-bg-muted transition-colors"
             >
               Glyvex Group
             </a>
@@ -418,7 +439,7 @@ function Layout() {
               href="https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source"
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-glyvex-muted transition-colors"
+              className="hover:text-glyvex-bg-muted transition-colors"
               title="Código abierto — Apache 2.0"
             >
               <span className="inline-flex items-center gap-1">

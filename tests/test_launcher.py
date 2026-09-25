@@ -47,7 +47,7 @@ def test_build_command_all_params():
     assert "--model" in cmd and cmd[cmd.index("--model") + 1] == "/models/model.gguf"
     assert "--ctx-size" in cmd and cmd[cmd.index("--ctx-size") + 1] == "32768"
     assert "--flash-attn" in cmd
-    # use_mlock/use_mmap ya no existen: se unifican en --load-mode (b11009).
+    # use_mlock/use_mmap ya no existen: se unifican en --load-mode (b11146).
     assert "--load-mode" in cmd and cmd[cmd.index("--load-mode") + 1] == "mlock"
     assert "--spec-type" in cmd and cmd[cmd.index("--spec-type") + 1] == "draft-mtp"
     assert "--spec-draft-model" in cmd and cmd[cmd.index("--spec-draft-model") + 1] == "/models/draft.gguf"
@@ -59,6 +59,38 @@ def test_build_command_all_params():
     # El launcher es el único que escribe el log (_pump_output): llama-server
     # no recibe --log-file, así no hay líneas duplicadas.
     assert "--log-file" not in cmd
+
+
+def test_lora_scaled_feature_detect_b11146():
+    # b11146+ (v0.5.0) removió --lora-scale: la escala va en --lora-scaled
+    # PATH:SCALE. Con el probe (feature-detect) se usa el flag nuevo; sin
+    # probe (o build vieja) se conserva el par clásico.
+    cfg = launcher_module.LaunchConfig(
+        model_id="m",
+        backend="llama_server",
+        lora_path="/models/lora.gguf",
+        lora_scale=0.8,
+    )
+    cmd_new = launcher_module.build_llama_server_command(
+        cfg, "/opt/llama-server", "/models/model.gguf",
+        supported_flags={"--lora-scaled"},
+    )
+    assert "--lora-scaled" in cmd_new
+    assert cmd_new[cmd_new.index("--lora-scaled") + 1] == "/models/lora.gguf:0.8"
+    assert "--lora-scale" not in cmd_new
+
+    cmd_old = launcher_module.build_llama_server_command(
+        cfg, "/opt/llama-server", "/models/model.gguf",
+        supported_flags={"--lora", "--lora-scale"},
+    )
+    assert "--lora" in cmd_old and cmd_old[cmd_old.index("--lora") + 1] == "/models/lora.gguf"
+    assert "--lora-scale" in cmd_old and cmd_old[cmd_old.index("--lora-scale") + 1] == "0.8"
+
+    cmd_sin_probe = launcher_module.build_llama_server_command(
+        cfg, "/opt/llama-server", "/models/model.gguf",
+    )
+    assert "--lora-scale" in cmd_sin_probe
+    assert "--lora-scaled" not in cmd_sin_probe
 
 
 def test_idle_repetidos_se_colapsan():
@@ -810,8 +842,8 @@ async def test_probe_binary_parses_help_and_version(probeable_binary):
     info = await launcher_module.probe_binary(probeable_binary)
     assert info.probed is True
     assert info.path == probeable_binary
-    assert info.build == "b11009"
-    assert "b11009" in info.version_line
+    assert info.build == "b11146"
+    assert "b11146" in info.version_line
     # Los flags salen ordenados y sin repetidos.
     assert info.flags == sorted(set(info.flags))
     assert "--model" in info.flags
@@ -1010,7 +1042,7 @@ def test_build_command_thinking_flag_full():
         model_id="m", thinking_enabled=True, budget_tokens=4096, reasoning_effort="medium",
     )
     cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/m.gguf")
-    # reasoning_effort va por el flag nativo --reasoning-effort (b11009), ya no
+    # reasoning_effort va por el flag nativo --reasoning-effort (b11146), ya no
     # por chat_template_kwargs: el flag es la versión server-level del mismo.
     assert cmd[cmd.index("--reasoning-effort") + 1] == "medium"
     # thinking_enabled va por el flag nativo --reasoning: el kwarg
@@ -1297,7 +1329,7 @@ async def test_backend_info_returns_probe(client, probeable_binary):
     assert res.status_code == 200
     data = res.json()
     assert data["probed"] is True
-    assert data["build"] == "b11009"
+    assert data["build"] == "b11146"
     assert "--model" in data["flags"]
     assert "--ctx-checkpoints" not in data["flags"]
     # P1.5: el mapa de ayuda oficial viaja en la respuesta para los tooltips.
@@ -1371,7 +1403,7 @@ async def test_preview_command_masks_key_and_reports_dropped(client, sample_mode
     assert res.status_code == 200
     data = res.json()
     assert data["probed"] is True
-    assert data["build"] == "b11009"
+    assert data["build"] == "b11146"
     cmd = data["command"]
     # La api-key nunca sale en claro por la API.
     assert "--api-key" in cmd

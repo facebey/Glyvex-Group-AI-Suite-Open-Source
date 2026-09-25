@@ -15,14 +15,14 @@ export default function HistoryPanel({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="absolute inset-y-0 left-0 w-[280px] z-20 flex flex-col bg-glyvex-card border-r border-white/10 shadow-xl shadow-black/40">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10">
+    <div className="absolute inset-y-0 left-0 w-[280px] z-20 flex flex-col bg-glyvex-card border-r border-glyvex-border-soft shadow-xl shadow-black/40">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-glyvex-border-soft">
         <span className="text-sm font-medium text-glyvex-text flex-1">{t("historyPanel.title")}</span>
         <button
           type="button"
           onClick={onNew}
           title={t("historyPanel.newTitle")}
-          className="p-1 rounded-md text-glyvex-muted hover:text-glyvex-text hover:bg-white/5"
+          className="p-1 rounded-md text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil"
         >
           <Plus size={16} />
         </button>
@@ -30,13 +30,13 @@ export default function HistoryPanel({
           type="button"
           onClick={onClose}
           title={t("historyPanel.closeTitle")}
-          className="p-1 rounded-md text-glyvex-muted hover:text-glyvex-text hover:bg-white/5"
+          className="p-1 rounded-md text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil"
         >
           <X size={16} />
         </button>
       </div>
 
-      <div className="p-2 border-b border-white/10">
+      <div className="p-2 border-b border-glyvex-border-soft">
         <div className="relative">
           <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-glyvex-muted" />
           <input
@@ -69,7 +69,7 @@ export default function HistoryPanel({
                 "group relative rounded-md border p-2 cursor-pointer " +
                 (conv.id === currentId
                   ? "border-glyvex-accent/60 bg-glyvex-accent/10"
-                  : "border-white/10 hover:bg-white/5")
+                  : "border-glyvex-border-soft hover:bg-glyvex-veil")
               }
               onClick={() => onSelect(conv.id)}
             >
@@ -87,7 +87,7 @@ export default function HistoryPanel({
                   e.stopPropagation();
                   onDelete(conv.id);
                 }}
-                className="absolute top-2 right-2 p-1 rounded-md text-glyvex-muted opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-white/5"
+                className="absolute top-2 right-2 p-1 rounded-md text-glyvex-muted opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-glyvex-veil"
               >
                 <Trash2 size={13} />
               </button>

@@ -54,7 +54,7 @@ export function CopyButton({ text, label, className = "", size = 13 }) {
       onClick={handleCopy}
       title={copied ? t("code.copied") : label || t("code.copy")}
       className={
-        "inline-flex items-center gap-1 rounded hover:bg-white/10 " +
+        "inline-flex items-center gap-1 rounded hover:bg-glyvex-veil-strong " +
         (copied ? "text-emerald-400 " : "text-glyvex-muted hover:text-glyvex-text ") +
         className
       }
@@ -120,8 +120,8 @@ export default function CodeBlock({ language, code, children, filename }) {
   const [wrap, setWrap] = useState(() => !language || WRAP_BY_DEFAULT.has(language.toLowerCase()));
 
   return (
-    <div className="my-2 rounded-md border border-white/10 overflow-hidden bg-black/40 max-w-full min-w-0">
-      <div className="flex items-center justify-between gap-2 px-3 py-1 border-b border-white/10 bg-black/30">
+    <div className="my-2 rounded-md border border-glyvex-border-soft overflow-hidden bg-glyvex-surface-code max-w-full min-w-0">
+      <div className="flex items-center justify-between gap-2 px-3 py-1 border-b border-glyvex-border-soft bg-glyvex-veil-disabled">
         <span className="text-xs text-glyvex-muted font-mono truncate min-w-0">
           {labelFor(language, t)}
           {filename ? <span className="text-glyvex-text"> · {filename}</span> : null}
@@ -132,7 +132,7 @@ export default function CodeBlock({ language, code, children, filename }) {
               type="button"
               onClick={() => downloadText(filename, code)}
               title={t("code.download", { filename })}
-              className="p-1 rounded hover:bg-white/10 text-glyvex-muted hover:text-glyvex-text"
+              className="p-1 rounded hover:bg-glyvex-veil-strong text-glyvex-muted hover:text-glyvex-text"
             >
               <Download size={13} />
             </button>
@@ -143,7 +143,7 @@ export default function CodeBlock({ language, code, children, filename }) {
             aria-pressed={wrap}
             title={wrap ? t("code.showFullLines") : t("code.wrapLines")}
             className={
-              "p-1 rounded hover:bg-white/10 " +
+              "p-1 rounded hover:bg-glyvex-veil-strong " +
               (wrap ? "text-glyvex-accent" : "text-glyvex-muted hover:text-glyvex-text")
             }
           >

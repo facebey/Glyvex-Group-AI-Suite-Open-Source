@@ -18,7 +18,7 @@ const JUDGE_MODEL_CHIPS = [
 ];
 
 const inputClasses =
-  "w-full bg-black/30 border border-white/10 rounded-md px-3 py-2 text-sm " +
+  "w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-3 py-2 text-sm " +
   "text-glyvex-text placeholder:text-glyvex-muted/60 focus:outline-none " +
   "focus:ring-2 focus:ring-glyvex-accent/60";
 
@@ -98,7 +98,7 @@ function SetCard({ set, checked, onToggle, expanded, onToggleExpand, detail }) {
   const setName = t(`benchmark.sets.items.${set.id}.name`, { defaultValue: set.name });
   const setDesc = t(`benchmark.sets.items.${set.id}.description`, { defaultValue: set.description });
   return (
-    <div className="bg-glyvex-card rounded-lg border border-white/10 overflow-hidden">
+    <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft overflow-hidden">
       <div className="flex items-center gap-3 p-4">
         <input type="checkbox" checked={checked} onChange={onToggle} className="w-4 h-4 accent-glyvex-accent shrink-0" />
         <span className="text-xl">{set.icon}</span>
@@ -111,7 +111,7 @@ function SetCard({ set, checked, onToggle, expanded, onToggleExpand, detail }) {
         </button>
       </div>
       {expanded && (
-        <div className="border-t border-white/10 px-4 py-3 space-y-2 max-h-56 overflow-y-auto">
+        <div className="border-t border-glyvex-border-soft px-4 py-3 space-y-2 max-h-56 overflow-y-auto">
           {!detail ? <p className="text-xs text-glyvex-muted">{t("benchmark.sets.loading")}</p> : detail.prompts.map((p) => (
             <div key={p.id} className="text-xs">
               <span className="text-glyvex-text font-medium">{p.title}</span>
@@ -130,7 +130,7 @@ function ResultRow({ result, expanded, onToggle }) {
   const missing = result.keywords_missing || [];
   return (
     <>
-      <tr className="border-t border-white/10 hover:bg-white/5 cursor-pointer" onClick={onToggle}>
+      <tr className="border-t border-glyvex-border-soft hover:bg-glyvex-veil cursor-pointer" onClick={onToggle}>
         <td className="px-3 py-2">{result.set_id}</td>
         <td className="px-3 py-2 truncate max-w-xs">{result.prompt_title}</td>
         <td className="px-3 py-2">{result.error ? <X size={14} className="text-red-400" /> : <Check size={14} className="text-emerald-400" />}</td>
@@ -143,12 +143,12 @@ function ResultRow({ result, expanded, onToggle }) {
         <td className="px-3 py-2"><ReasoningCell reasoning={result.judge_reasoning} /></td>
       </tr>
       {expanded && (
-        <tr className="border-t border-white/10 bg-black/20">
+        <tr className="border-t border-glyvex-border-soft bg-glyvex-veil-box">
           <td colSpan={10} className="px-3 py-3 text-xs space-y-2">
             {result.error ? <p className="text-red-400">{t("benchmark.row.error", { msg: result.error })}</p> : (
               <>
-                {result.thinking && (<div><p className="text-glyvex-muted mb-1">{t("benchmark.row.thinking")}</p><pre className="whitespace-pre-wrap font-mono text-glyvex-muted bg-black/40 p-2 rounded">{result.thinking}</pre></div>)}
-                <div><p className="text-glyvex-muted mb-1">{t("benchmark.row.response")}</p><pre className="whitespace-pre-wrap font-mono text-glyvex-text bg-black/40 p-2 rounded">{result.response}</pre></div>
+                {result.thinking && (<div><p className="text-glyvex-muted mb-1">{t("benchmark.row.thinking")}</p><pre className="whitespace-pre-wrap font-mono text-glyvex-muted bg-glyvex-surface-code p-2 rounded">{result.thinking}</pre></div>)}
+                <div><p className="text-glyvex-muted mb-1">{t("benchmark.row.response")}</p><pre className="whitespace-pre-wrap font-mono text-glyvex-text bg-glyvex-surface-code p-2 rounded">{result.response}</pre></div>
               </>
             )}
             {result.judge_reasoning && (
@@ -157,7 +157,7 @@ function ResultRow({ result, expanded, onToggle }) {
                   <span>{t("benchmark.row.judge", { model: result.judge_model ? ` (${result.judge_model})` : "" })}</span>
                   <JudgeScoreBadge score={result.score_judge} />
                 </p>
-                <pre className="whitespace-pre-wrap font-mono text-glyvex-muted bg-black/40 p-2 rounded">{result.judge_reasoning}</pre>
+                <pre className="whitespace-pre-wrap font-mono text-glyvex-muted bg-glyvex-surface-code p-2 rounded">{result.judge_reasoning}</pre>
               </div>
             )}
           </td>
@@ -419,7 +419,7 @@ export default function Benchmark() {
     <div className="space-y-6 max-w-5xl">
       <h1 className="text-xl font-semibold">Benchmark</h1>
 
-      <div className="bg-glyvex-card rounded-lg border border-white/10 p-5 space-y-3">
+      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-3">
         <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">{t("benchmark.step1")}</h2>
         <div className="grid grid-cols-2 gap-4">
           <label className="block">
@@ -446,7 +446,7 @@ export default function Benchmark() {
         </div>
       </div>
 
-      <div className="bg-glyvex-card rounded-lg border border-white/10 p-5 space-y-3">
+      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-3">
         <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">{t("benchmark.step3")}</h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <label className="block"><span className="block text-xs text-glyvex-muted mb-1">Temperature</span><input type="number" step="0.1" className={inputClasses} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} /></label>
@@ -468,13 +468,13 @@ export default function Benchmark() {
           <Play size={16} />{t("benchmark.start")}
         </button>
       ) : (
-        <div className="bg-glyvex-card rounded-lg border border-white/10 p-5 space-y-3">
+        <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-sm text-glyvex-muted">{t("benchmark.progress", { done: progress.completed, total: progress.total })}</p>
             <button type="button" onClick={handleCancel} className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs bg-red-600 text-white hover:bg-red-500"><Square size={14} />{t("benchmark.cancel")}</button>
           </div>
-          <div className="w-full bg-black/30 rounded-full h-2">
-            <div className="bg-glyvex-accent h-2 rounded-full transition-all" style={{ width: progress.total ? `${(progress.completed / progress.total) * 100}%` : "0%" }} />
+          <div className="gx-bar w-full bg-glyvex-veil-disabled rounded-full h-2 overflow-hidden">
+            <div className="gx-bar-fill bg-glyvex-accent text-glyvex-accent h-2 rounded-full transition-all" style={{ width: progress.total ? `${(progress.completed / progress.total) * 100}%` : "0%" }} />
           </div>
           <div className="max-h-48 overflow-y-auto space-y-1">
             {liveResults.map((r, i) => (
@@ -491,42 +491,42 @@ export default function Benchmark() {
       {finishedRun && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">{t("benchmark.resultsTitle")}</h2>
+            <h2 className="text-sm font-medium text-glyvex-bg-muted uppercase tracking-wide">{t("benchmark.resultsTitle")}</h2>
             <div className="flex gap-2">
-              <button type="button" onClick={exportJson} className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30"><Download size={12} /> JSON</button>
-              <button type="button" onClick={exportCsv} className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30"><Download size={12} /> CSV</button>
-              <button type="button" onClick={exportHtml} className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs border border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-black/30"><Download size={12} /> HTML</button>
+              <button type="button" onClick={exportJson} className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-veil-disabled"><Download size={12} /> JSON</button>
+              <button type="button" onClick={exportCsv} className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-veil-disabled"><Download size={12} /> CSV</button>
+              <button type="button" onClick={exportHtml} className="flex items-center gap-1 px-3 py-1.5 rounded-md text-xs border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-veil-disabled"><Download size={12} /> HTML</button>
             </div>
           </div>
 
           {finishedRun.summary && (
             <div className="flex flex-wrap gap-3 text-sm">
-              <span className="bg-glyvex-card border border-white/10 rounded-md px-3 py-1.5">{t("benchmark.summary.avgTps")}: <b>{finishedRun.summary.avg_tps}</b></span>
-              <span className="bg-glyvex-card border border-white/10 rounded-md px-3 py-1.5">{t("benchmark.summary.avgTtft")}: <b>{finishedRun.summary.avg_ttft_ms}ms</b></span>
-              <span className="bg-glyvex-card border border-white/10 rounded-md px-3 py-1.5">{t("benchmark.summary.keywordHitRate")}: <b>{(finishedRun.summary.keyword_hit_rate * 100).toFixed(0)}%</b></span>
-              <span className="bg-glyvex-card border border-white/10 rounded-md px-3 py-1.5">{t("benchmark.summary.errors")}: <b>{finishedRun.summary.errors}</b></span>
+              <span className="bg-glyvex-card border border-glyvex-border-soft rounded-md px-3 py-1.5">{t("benchmark.summary.avgTps")}: <b>{finishedRun.summary.avg_tps}</b></span>
+              <span className="bg-glyvex-card border border-glyvex-border-soft rounded-md px-3 py-1.5">{t("benchmark.summary.avgTtft")}: <b>{finishedRun.summary.avg_ttft_ms}ms</b></span>
+              <span className="bg-glyvex-card border border-glyvex-border-soft rounded-md px-3 py-1.5">{t("benchmark.summary.keywordHitRate")}: <b>{(finishedRun.summary.keyword_hit_rate * 100).toFixed(0)}%</b></span>
+              <span className="bg-glyvex-card border border-glyvex-border-soft rounded-md px-3 py-1.5">{t("benchmark.summary.errors")}: <b>{finishedRun.summary.errors}</b></span>
               {finishedRun.summary.avg_judge_score != null && (
-                <span className="bg-glyvex-card border border-white/10 rounded-md px-3 py-1.5">{t("benchmark.summary.avgJudge")}: <b>{Number(finishedRun.summary.avg_judge_score).toFixed(1)}/10</b></span>
+                <span className="bg-glyvex-card border border-glyvex-border-soft rounded-md px-3 py-1.5">{t("benchmark.summary.avgJudge")}: <b>{Number(finishedRun.summary.avg_judge_score).toFixed(1)}/10</b></span>
               )}
             </div>
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-glyvex-card rounded-lg border border-white/10 p-4 h-64">
+            <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-4 h-64">
               <p className="text-xs text-glyvex-muted mb-2">{t("benchmark.chartTps")}</p>
               <ResponsiveContainer width="100%" height="90%">
-                <BarChart data={barData}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" /><XAxis dataKey="name" tick={{ fontSize: 10, fill: "#9ca3af" }} /><YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} /><Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.1)" }} /><Bar dataKey="tps" fill="#3b82f6" radius={[4, 4, 0, 0]} /></BarChart>
+                <BarChart data={barData}><CartesianGrid strokeDasharray="3 3" stroke="var(--color-glyvex-chart-grid)" /><XAxis dataKey="name" tick={{ fontSize: 10, fill: "var(--color-glyvex-chart-tick)" }} /><YAxis tick={{ fontSize: 10, fill: "var(--color-glyvex-chart-tick)" }} /><Tooltip contentStyle={{ background: "var(--color-glyvex-chart-tip-bg)", border: "1px solid var(--color-glyvex-chart-tip-bd)" }} /><Bar dataKey="tps" fill="var(--color-glyvex-chart-1)" radius={[4, 4, 0, 0]} /></BarChart>
               </ResponsiveContainer>
             </div>
-            <div className="bg-glyvex-card rounded-lg border border-white/10 p-4 h-64">
+            <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-4 h-64">
               <p className="text-xs text-glyvex-muted mb-2">{t("benchmark.chartTtft")}</p>
               <ResponsiveContainer width="100%" height="90%">
-                <ScatterChart><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" /><XAxis dataKey="ttft" name="TTFT (ms)" tick={{ fontSize: 10, fill: "#9ca3af" }} /><YAxis dataKey="tokens" name="Tokens" tick={{ fontSize: 10, fill: "#9ca3af" }} /><Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.1)" }} cursor={{ strokeDasharray: "3 3" }} /><Scatter data={scatterData} fill="#06b6d4" /></ScatterChart>
+                <ScatterChart><CartesianGrid strokeDasharray="3 3" stroke="var(--color-glyvex-chart-grid)" /><XAxis dataKey="ttft" name="TTFT (ms)" tick={{ fontSize: 10, fill: "var(--color-glyvex-chart-tick)" }} /><YAxis dataKey="tokens" name="Tokens" tick={{ fontSize: 10, fill: "var(--color-glyvex-chart-tick)" }} /><Tooltip contentStyle={{ background: "var(--color-glyvex-chart-tip-bg)", border: "1px solid var(--color-glyvex-chart-tip-bd)" }} cursor={{ strokeDasharray: "3 3" }} /><Scatter data={scatterData} fill="var(--color-glyvex-chart-2)" /></ScatterChart>
               </ResponsiveContainer>
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-white/10">
+          <div className="overflow-x-auto rounded-lg border border-glyvex-border-soft">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-glyvex-card text-left text-glyvex-muted">
@@ -548,7 +548,7 @@ export default function Benchmark() {
             </table>
           </div>
 
-          <div className="bg-glyvex-card rounded-lg border border-white/10 p-5 space-y-4">
+          <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-4">
             <div>
               <h3 className="text-sm font-medium">{t("benchmark.judge.title")}</h3>
               <p className="text-xs text-glyvex-muted mt-1">{t("benchmark.judge.hint")}</p>
@@ -560,7 +560,7 @@ export default function Benchmark() {
                   className={"px-3 py-1.5 rounded-full text-xs border transition-colors disabled:opacity-50 " +
                     (judgeModel === chip.value
                       ? "bg-glyvex-accent text-white border-glyvex-accent"
-                      : "bg-black/30 border-white/10 text-glyvex-muted hover:text-glyvex-text hover:bg-white/5")}>
+                      : "bg-glyvex-veil-disabled border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil")}>
                   {t(`benchmark.judgeChips.${chip.id}`)}
                 </button>
               ))}
@@ -604,8 +604,8 @@ export default function Benchmark() {
                   <span>{t("benchmark.judge.evaluated", { done: judgeProgress.evaluated, total: judgeProgress.total || "?" })}</span>
                   {judgeProgress.currentScore != null && <JudgeScoreBadge score={judgeProgress.currentScore} />}
                 </div>
-                <div className="w-full bg-black/30 rounded-full h-2">
-                  <div className="bg-glyvex-accent h-2 rounded-full transition-all"
+                <div className="gx-bar w-full bg-glyvex-veil-disabled rounded-full h-2 overflow-hidden">
+                  <div className="gx-bar-fill bg-glyvex-accent text-glyvex-accent h-2 rounded-full transition-all"
                     style={{ width: judgeProgress.total ? `${(judgeProgress.evaluated / judgeProgress.total) * 100}%` : "0%" }} />
                 </div>
                 {judgeProgress.currentPrompt && (

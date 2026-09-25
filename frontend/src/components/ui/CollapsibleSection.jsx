@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 
 export default function CollapsibleSection({ title, open, onToggle, children }) {
   return (
-    <div className="border-t border-white/10 pt-3">
+    <div className="border-t border-glyvex-border-soft pt-3">
       <button
         type="button"
         onClick={onToggle}

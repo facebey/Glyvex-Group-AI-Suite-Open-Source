@@ -21,7 +21,7 @@ export default function LanguageSelector() {
   }
 
   return (
-    <label className="flex items-center gap-1.5 text-glyvex-muted hover:text-glyvex-text transition-colors">
+    <label className="flex items-center gap-1.5 text-glyvex-bg-muted hover:text-glyvex-bg-text transition-colors">
       <Languages size={16} aria-hidden="true" />
       <select
         value={i18n.resolvedLanguage || i18n.language}
