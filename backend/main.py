@@ -16,6 +16,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.gzip import GZipMiddleware
 
 from config import config
 from paths import BUNDLE_DIR, DATA_DIR, ENV_NAME, FROZEN
@@ -148,6 +149,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Comprime JS/CSS/JSON del bundle en el cable (~70% de ahorro en el chunk de
+# ~1.3 MB). SSE y WebSocket quedan fuera: exclude_content_types incluye
+# text/event-stream por defecto y la middleware no toca conexiones no-HTTP.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 api_router = APIRouter(prefix="/api")
 

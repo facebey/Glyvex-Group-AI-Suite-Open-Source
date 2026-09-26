@@ -23,6 +23,10 @@ datas = [
     ("../frontend/dist", "frontend/dist"),
     # Semilla de templates de hardware (database.py / launcher.py).
     ("../data/templates/hw_templates.json", "data/templates"),
+    # Sets versionados de benchmark (benchmark.py: PROMPTS_DIR = BUNDLE_DIR/
+    # "backend"/"prompts"). Sin esto el step 2 del Benchmark queda vacío en
+    # la app instalada: /api/benchmark/sets devuelve [].
+    ("./prompts", "backend/prompts"),
 ]
 
 hiddenimports = [

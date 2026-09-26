@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createBrowserRouter, RouterProvider, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -11,12 +11,14 @@ import MatrixRain from "./components/MatrixRain.jsx";
 import { consumeSSE } from "./lib/sse.js";
 import StatusWidget from "./components/StatusWidget.jsx";
 import LanguageSelector from "./components/LanguageSelector.jsx";
-import Chat from "./pages/Chat.jsx";
-import Launcher from "./pages/Launcher.jsx";
-import Benchmark from "./pages/Benchmark.jsx";
-import Monitor from "./pages/Monitor.jsx";
-import Reports from "./pages/Reports.jsx";
-import Config from "./pages/Config.jsx";
+// Las páginas son chunk propios (React.lazy): el bundle inicial deja de cargar
+// recharts/markdown/highlight.js hasta que se visita cada módulo.
+const Chat = lazy(() => import("./pages/Chat.jsx"));
+const Launcher = lazy(() => import("./pages/Launcher.jsx"));
+const Benchmark = lazy(() => import("./pages/Benchmark.jsx"));
+const Monitor = lazy(() => import("./pages/Monitor.jsx"));
+const Reports = lazy(() => import("./pages/Reports.jsx"));
+const Config = lazy(() => import("./pages/Config.jsx"));
 
 const NAV_ITEMS = [
   { to: "/", labelKey: "nav.chat", icon: MessageSquare, end: true },
@@ -314,6 +316,14 @@ function OnboardingScreen({ onDismiss }) {
 // de configuración, y las respuestas con código o tablas se veían angostas.
 const WIDE_ROUTES = new Set(["/"]);
 
+function PageLoading() {
+  return (
+    <div className="flex items-center justify-center py-24">
+      <Loader2 size={22} className="animate-spin text-glyvex-muted" />
+    </div>
+  );
+}
+
 function Layout() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
@@ -409,7 +419,9 @@ function Layout() {
           <GlyvexAiWatermark size={400} />
         </div>
         <main className={`relative z-10 flex-1 ${mainWidth} w-full mx-auto px-4 py-6`}>
-          <Outlet />
+          <Suspense fallback={<PageLoading />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
 

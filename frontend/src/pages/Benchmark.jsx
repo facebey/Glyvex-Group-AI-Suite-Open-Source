@@ -1,6 +1,6 @@
 // frontend/src/pages/Benchmark.jsx
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Play, Square, Download, Check, X, Info } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ChevronDown, ChevronRight, Play, Square, Download, Check, X, Info } from "lucide-react";
 import { useLocalStorage } from "../hooks/useLocalStorage.js";
 import { useTranslation } from "react-i18next";
 import {
@@ -173,6 +173,7 @@ export default function Benchmark() {
   const [endpointUrl, setEndpointUrl] = useState("http://127.0.0.1:8080");
   const [modelName, setModelName] = useState("");
   const [sets, setSets] = useState([]);
+  const [setsError, setSetsError] = useState(false);
   const [selectedSetIds, setSelectedSetIds] = useLocalStorage("glyvex_benchmark_sets", []);
   const selectedSets = useMemo(() => new Set(selectedSetIds), [selectedSetIds]);
   const [expandedSetId, setExpandedSetId] = useState(null);
@@ -202,10 +203,26 @@ export default function Benchmark() {
   const judgeAbortRef = useRef(null);
   const judgeEndpointTouchedRef = useRef(false);
 
+  const loadSets = useCallback(() => {
+    setSetsError(false);
+    fetch("/api/benchmark/sets")
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        // Vacío también es error: los 6 sets versionados siempre deben llegar;
+        // un [] significa que la instalación no trae backend/prompts.
+        if (!Array.isArray(data) || data.length === 0) throw new Error("sets vacíos");
+        setSets(data);
+      })
+      .catch(() => setSetsError(true));
+  }, []);
+
   useEffect(() => {
     fetch("/api/chat/endpoints").then((r) => r.json()).then(setEndpoints).catch(() => {});
-    fetch("/api/benchmark/sets").then((r) => r.json()).then(setSets).catch(() => {});
-  }, []);
+    loadSets();
+  }, [loadSets]);
 
   useEffect(() => {
     return () => { wsRef.current?.close(); };
@@ -438,12 +455,25 @@ export default function Benchmark() {
 
       <div className="space-y-3">
         <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">{t("benchmark.step2")}</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {sets.map((s) => (
-            <SetCard key={s.id} set={s} checked={selectedSets.has(s.id)} onToggle={() => toggleSet(s.id)}
-              expanded={expandedSetId === s.id} onToggleExpand={() => toggleExpandSet(s.id)} detail={setDetails[s.id]} />
-          ))}
-        </div>
+        {setsError ? (
+          <div className="border border-amber-500/40 bg-amber-500/10 rounded-md p-4 text-sm text-amber-300 space-y-2">
+            <p className="flex items-center gap-2">
+              <AlertTriangle size={16} className="shrink-0" />
+              {t("benchmark.errors.setsLoad")}
+            </p>
+            <button type="button" onClick={loadSets}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium border border-amber-500/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25">
+              {t("benchmark.errors.setsRetry")}
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {sets.map((s) => (
+              <SetCard key={s.id} set={s} checked={selectedSets.has(s.id)} onToggle={() => toggleSet(s.id)}
+                expanded={expandedSetId === s.id} onToggleExpand={() => toggleExpandSet(s.id)} detail={setDetails[s.id]} />
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-3">

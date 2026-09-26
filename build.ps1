@@ -10,7 +10,7 @@ param(
     [switch]$SkipSmoke,
     [switch]$SkipSidecar,
     [switch]$MakeInstaller,
-    [string]$Version = "0.6.0-beta1"
+    [string]$Version = "0.6.1-beta1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -106,9 +106,9 @@ if ($MakeInstaller) {
     # Re-cosecha el bundle en cada build (files.wxi no se versiona).
     $relBundle = "backend\dist\glyvex-backend"
     $bundleDir = Join-Path $repo $relBundle
-    # -dr APPDIR: heat SIEMPRE anida el dir fuente como hijo del -dr, asi el
-    # bundle queda en %LOCALAPPDATA%\Glyvex-AI-Suite\glyvex-backend\ (sin un
-    # "app" intermedio; el atajo apunta a [APPDIR]glyvex-backend\glyvex-backend.exe)
+    # -dr APPDIR: heat anida el dir fuente como hijo del -dr (wrap).
+    # build.ps1 lo aplana despues (XmlDocument): los archivos caen directo en
+    # APPDIR. Resultado: %LOCALAPPDATA%\Glyvex-AI-Suite\glyvex-backend.exe
     & (Join-Path $wix "heat.exe") dir $bundleDir -var "var.SourceDir=$relBundle" -dr APPDIR -cg AppFiles -gg -nologo -out (Join-Path $wixdir "files.wxi")
     if ($LASTEXITCODE -ne 0) { throw "heat falló (exit $LASTEXITCODE)" }
     # heat 3.14 escribe $(var.SourceDir=<rel>) inline; candle no resuelve ese
@@ -116,11 +116,28 @@ if ($MakeInstaller) {
     $fwi = Join-Path $wixdir "files.wxi"
     $xml = [System.IO.File]::ReadAllText($fwi)
     $xml = $xml.Replace('$(var.SourceDir=' + $relBundle + ')', $bundleDir)
-    # heat anida el dir fuente bajo APPDIR con un Id generado (dir<hash>).
-    # Renombrarlo a APPBUNDLE (estable) para que glyvex.wxs lo use en los atajos.
-    if ($xml -match '<DirectoryRef Id="APPDIR">\s*<Directory Id="(dir[0-9A-Fa-f]+)"') {
-        $xml = $xml.Replace('Id="' + $Matches[1] + '"', 'Id="APPBUNDLE"')
-        $xml = $xml.Replace('Directory="' + $Matches[1] + '"', 'Directory="APPBUNDLE"')
+    # Heat genera MULTI-FRAGMENT: el primer Fragment tiene el DirectoryRef APPDIR
+    # con un wrap <Directory Id="dir<hash>" Name="glyvex-backend"> que envuelve
+    # todo. Los demas Fragments tienen el ComponentGroup (Directory="dir<hash>")
+    # y las definiciones de jerarquia (<DirectoryRef Id="dir<hash>">).
+    # Para aplanar:
+    #   1. Desenolver el <Directory wrapId>: quitar las tags de apertura/cierre
+    #      (sus hijos ya estan bajo DirectoryRef APPDIR, solo falta el wrapper).
+    #   2. Reemplazar Directory="wrapId" -> Directory="APPDIR" en Components.
+    #   3. Reemplazar <DirectoryRef Id="wrapId"> -> <DirectoryRef Id="APPDIR">
+    #      (WiX permite multiples DirectoryRef con el mismo Id: son aditivos).
+    if ($xml -match '<Directory Id="(dir[0-9A-Fa-f]+)"\s+Name="glyvex-backend"') {
+        $wrapId = $Matches[1]
+        # 1. Quitar la tag de apertura del wrap: <Directory Id="wrapId" Name="glyvex-backend">
+        $xml = [regex]::Replace($xml, "<Directory Id=`"$wrapId`\s+Name=`"glyvex-backend`">\s*", "")
+        # Quitar la primera </Directory> que lo cierra (la que sigue al ultimo Component
+        # antes de </DirectoryRef>). Usamos regex con singleline.
+        $xml = [regex]::Replace($xml, "(\s*)</Directory>\s*</DirectoryRef>", '$1</DirectoryRef>', 1)
+        # 2. Components que apuntan al wrap ahora apuntan a APPDIR
+        $xml = $xml.Replace("Directory=`"$wrapId`"", 'Directory="APPDIR"')
+        # 3. DirectoryRef del wrap -> APPDIR (additive, no duplicado)
+        $xml = $xml.Replace("<DirectoryRef Id=`"$wrapId`">", '<DirectoryRef Id="APPDIR">')
+        Write-Host "    Aplanando: $wrapId -> APPDIR (sin subcarpeta)"
     }
     [System.IO.File]::WriteAllText($fwi, $xml)
     # Banner del wizard (WixUI_Banner) e icono (Icon SourceFile) de glyvex.wxs
@@ -169,6 +186,10 @@ if ($MakeInstaller) {
     # MSI se escribe igual y msiexec lo instala sin problemas (verificado en beta).
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 204) { throw "light falló (exit $LASTEXITCODE)" }
     if (-not (Test-Path $msi)) { throw "MSI no generado: $msi" }
+    # Nota: el .msi es CFB/Ole (magic D0CF11E0), NO PE. El icono del archivo en
+    # Explorador no es inyectable (UpdateResourceW/rcedit son solo-PE y Explorer
+    # no lee icono custom de .msi). El logo vive en banner del wizard + ProductIcon
+    # (Panel de Control) + atajos + exe; basta. No se parchea el .msi post-build.
     $msimb = [math]::Round((Get-Item $msi).Length / 1MB, 1)
     Write-Host "    MSI: $msimb MB ($msi)"
 }

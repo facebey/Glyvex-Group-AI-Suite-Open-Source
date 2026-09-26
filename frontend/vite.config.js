@@ -88,6 +88,33 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: "dist",
+      // Rolldown (Vite 8) no acepta manualChunks como objeto: solo función
+      // id -> nombre de chunk (o undefined para dejarlo en el chunk de la página).
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            const m = id.match(/node_modules[\\/]+((?:@[^\\/]+[\\/]+)?[^\\/]+)/);
+            if (!m) return;
+            const pkg = m[1];
+            // Chunks de vendor compartidos: cada librería pesada carga una sola
+            // vez y se cachea; las páginas (lazy en App.jsx) van aparte.
+            if (
+              pkg === "react" || pkg === "react-dom" ||
+              pkg === "react-router-dom" || pkg === "react-router"
+            ) {
+              return "react";
+            }
+            if (pkg === "i18next" || pkg === "react-i18next") return "i18n";
+            if (pkg === "recharts") return "recharts";
+            if (
+              pkg === "react-markdown" || pkg === "remark-gfm" ||
+              pkg === "rehype-highlight" || pkg === "highlight.js"
+            ) {
+              return "markdown";
+            }
+          },
+        },
+      },
     },
   };
 });

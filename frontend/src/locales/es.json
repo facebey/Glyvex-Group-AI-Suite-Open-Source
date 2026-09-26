@@ -679,6 +679,8 @@
     "errors": {
       "startFailed": "No se pudo iniciar el benchmark",
       "startCatch": "Error al iniciar el benchmark.",
+      "setsLoad": "No se pudieron cargar los sets de prompts (falló la carga o llegaron vacíos).",
+      "setsRetry": "Reintentar",
       "judgeStatus": "El judge respondió {{status}}",
       "noStream": "El navegador no devolvió un stream para el judge.",
       "judgeCatch": "Error al evaluar con el judge."

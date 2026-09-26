@@ -40,7 +40,7 @@ from sqlalchemy import delete, select, update
 
 from chat import ThinkingStreamParser
 from stream_metrics import StreamMetrics, reasoning_from_delta
-from paths import BASE_DIR, DATA_DIR
+from paths import BUNDLE_DIR, DATA_DIR
 from database import (
     BenchmarkResultRow,
     BenchmarkRunRow,
@@ -53,8 +53,9 @@ from database import (
 logger = logging.getLogger(__name__)
 
 # PROMPTS_DIR es código (los 6 sets versionados viven en el repo), no estado:
-# sigue colgando de BASE_DIR y es COMPARTIDO entre instancias a propósito.
-PROMPTS_DIR = BASE_DIR / "backend" / "prompts"
+# colgar de BUNDLE_DIR (= BASE_DIR en dev) hace que en el bundle PyInstaller
+# apunte a _internal/backend/prompts, donde viaja por datas de glyvex.spec.
+PROMPTS_DIR = BUNDLE_DIR / "backend" / "prompts"
 RUNS_DIR = DATA_DIR / "benchmarks"
 
 PROGRESS_BUFFER_MAXLEN = 500
