@@ -11,7 +11,7 @@ httpx>=0.28.1
 sqlalchemy[asyncio]>=2.0.54
 aiosqlite>=0.22.1
 gguf>=0.19.0
-nvidia-ml-py>=13
+nvidia-ml-py>=13.610.43
 psutil>=7.2.2
 
 # Extracción de adjuntos del chat (módulo M3). Todas puras Python y livianas:
