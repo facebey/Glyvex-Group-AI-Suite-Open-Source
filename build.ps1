@@ -140,11 +140,18 @@ if ($MakeInstaller) {
         Write-Host "    Aplanando: $wrapId -> APPDIR (sin subcarpeta)"
     }
     [System.IO.File]::WriteAllText($fwi, $xml)
-    # Banner del wizard (WixUI_Banner) e icono (Icon SourceFile) de glyvex.wxs
-    # via $(var.*): ambos se resuelven contra el cwd de candle, no el .wxs,
-    # asi build.ps1 los pasa con ruta absoluta (por eso la -d va aca, no a light).
+    # Icono (Icon SourceFile) de glyvex.wxs via $(var.WixIcon): se resuelve
+    # contra el cwd de candle, no el .wxs, asi build.ps1 lo pasa con ruta
+    # absoluta. El banner del wizard y la imagen del ExitDialog NO se resuelven
+    # asi: WixUI 3.14.1 los fija en LIGHT (aqui se enlaza el wixlib de
+    # WixUIExtension) desde las variables preprocesador WixUIBannerBmp /
+    # WixUIDialogBmp, que sobreescriben los Binary WixUI_Bmp_Banner (default
+    # 2746B) / WixUI_Bmp_Dialog (default 68468B) al enlazar. Por eso las -d van
+    # a light (abajo), no a candle.
     $banner = Join-Path $repo "assets\wixui-banner.bmp"
     if (-not (Test-Path $banner)) { throw "Banner del wizard no encontrado: $banner" }
+    $dialog = Join-Path $repo "assets\glyvex_dialog_493x312.bmp"
+    if (-not (Test-Path $dialog)) { throw "Imagen del ExitDialog no encontrada: $dialog" }
     $ico = Join-Path $repo "assets\glyvex.ico"
     if (-not (Test-Path $ico)) { throw "Icono no encontrado: $ico" }
     # Licencia (Apache 2.0): LICENSE de la raiz del repo, usado en dos frentes:
@@ -169,18 +176,20 @@ if ($MakeInstaller) {
     [void]$rtfSb.Append('}')
     [System.IO.File]::WriteAllText($licRtf, $rtfSb.ToString())
     # files.wxi (heat) va como fuente separada, no via <?include ?>.
-    & (Join-Path $wix "candle.exe") "-dProductVersion=$pv" "-dWixBanner=$banner" "-dWixIcon=$ico" "-dWixLicense=$lic" (Join-Path $wixdir "glyvex.wxs") (Join-Path $wixdir "files.wxi") -nologo
+    & (Join-Path $wix "candle.exe") "-dProductVersion=$pv" "-dWixIcon=$ico" "-dWixLicense=$lic" (Join-Path $wixdir "glyvex.wxs") (Join-Path $wixdir "files.wxi") -nologo
     if ($LASTEXITCODE -ne 0) { throw "candle falló (exit $LASTEXITCODE)" }
     # Con varias fuentes, candle escribe los .wixobj en el cwd (raiz del repo).
     # -ext WixUIExtension (nombre solo): WixUIExtension.dll (junto a light.exe en
     # wix3/) trae embebidos wixui.wixlib + wixstd.wixlib, que el zip portable no
     # trae sueltos en sdk\. Con -ext:<ruta> falla: PowerShell 7 suelta el guion.
     $msi = Join-Path $repo "distribution\dist\Glyvex-AI-Suite-Setup-$Version.msi"
-    # El banner ya fue resuelto por candle ($(var.WixBanner)); light solo
-    # enlaza los .wixobj.
-    # -dWixUILicenseRtf va a LIGHT (aqui se enlaza el wixlib y se resuelve el
-    # !(WixUILicenseRtf=...) leyendo el RTF generado arriba).
-    & (Join-Path $wix "light.exe") (Join-Path $repo "glyvex.wixobj") (Join-Path $repo "files.wixobj") "-dWixUILicenseRtf=$licRtf" -ext WixUIExtension -cultures:en-us -nologo -out $msi
+    # -dWixUIBannerBmp (banner del wizard), -dWixUIDialogBmp (imagen del
+    # ExitDialog) y -dWixUILicenseRtf (RTF generado arriba) van a LIGHT: aqui se
+    # enlaza el wixlib del WixUIExtension y se resuelven
+    # !(wix.WixUIBannerBmp=...) / !(wix.WixUIDialogBmp=...) / !(WixUILicenseRtf=...).
+    # Verificado: pasar -dWixUIBannerBmp a CANDLE no cambia el banner (queda el
+    # default 2746B); solo a LIGHT se sobreescribe con el nuestro (85894B).
+    & (Join-Path $wix "light.exe") (Join-Path $repo "glyvex.wixobj") (Join-Path $repo "files.wixobj") "-dWixUIBannerBmp=$banner" "-dWixUIDialogBmp=$dialog" "-dWixUILicenseRtf=$licRtf" -ext WixUIExtension -cultures:en-us -nologo -out $msi
     # Exit 204 (LGHT0204) = solo errores de validacion ICE: ICE38/ICE18 (keypath HKCU
     # vs archivo, propio de installs perUser) e ICE91 (dirs per-user). Esperados: el
     # MSI se escribe igual y msiexec lo instala sin problemas (verificado en beta).
