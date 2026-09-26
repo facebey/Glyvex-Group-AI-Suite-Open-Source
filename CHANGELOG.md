@@ -3,6 +3,69 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
+## [0.6.2-beta] — 2026-09-26
+
+### Cambiado
+- **Migración mayor de dependencias del frontend** (una rama por
+  librería, build y tests en verde en cada paso):
+  | Dependencia | Antes | Después |
+  |---|---|---|
+  | `react` / `react-dom` | ^18.3.0 | ^19.3.0 |
+  | `lucide-react` | ^0.400.0 | ^1.47.0 |
+  | `react-markdown` | ^9.0.1 | ^10.1.0 |
+  | `recharts` | ^2.12.0 | ^3.10.0 |
+- **lucide-react 1.x** eliminó los iconos de marca: el ícono `Github` del
+  footer pasó a `ExternalLink` (`frontend/src/App.jsx`).
+
+### Baseline
+- Suite completa: **358 tests en verde**; build de producción OK; smoke
+  manual de las 6 vistas.
+
+## [0.6.1-beta1] — 2026-09-26
+
+### Agregado
+- **Branding del instalador MSI v3**: banner del wizard (sobrescribe el
+  default de WixUI), imagen personalizada en el ExitDialog e **ícono
+  molécula** en wizard, Panel de Control (`ProductIcon`) y
+  `ARPPRODUCTICON`.
+- Instalador **per-user** para Windows x64 (sin UAC): la data de la app
+  vive en `%LOCALAPPDATA%\Glyvex-AI-Suite\data`, independiente del
+  directorio de instalación.
+
+## [0.6.0] — 2026-09-25
+
+### Agregado
+- **Sistema de temas (5)**: carbon (textura fibra), metallic (por
+  superficie + textura metal) y matrix (lluvia digital en canvas), más el
+  modo claro rediseñado a **lavanda**. Ciclo desde el botón de paleta del
+  header o desde Config; texturas generadas por código (sin licencias de
+  terceros).
+- **Runtime embebido b11146 (llama.cpp v0.5.0)**: bump del pin b11009
+  (sha256 + feature-detect por probe).
+- **Packaging MSI WiX per-user** (`build.ps1 -MakeInstaller`): wizard,
+  atajos y upgrade; sidecar PyInstaller sin consola; bundle recortado
+  **143.6→88 MB** (excluye gguf/numpy y recorta babel locale-data).
+- **`GLYVEX_NO_BROWSER`**: el bundle FROZEN no abre el navegador solo.
+- **requires-python >= 3.11** declarado (pyproject + test de guarda).
+
+### Cambiado
+- **Floors de dependencias** (pip) a versiones probadas +
+  `react-router-dom` 7.18.4.
+- Empaquetado: Nuitka eliminado — la decisión fue PyInstaller (T-2).
+- Ícono Glyvex en el exe y el MSI (wxs Icon + WixUI_Banner).
+- Paleta light: tokens de contraste y fondo gris suave; temperatura en
+  recuadro de estado con tokens `-800` legibles en modo claro.
+
+### Corregido
+- MSI: fila `WIXUI_INSTALLDIR` faltante (error 2819) y `WIXUI_INSTALLDIR`
+  apuntando a `APPDIR` (error 2343, ERROR_BAD_PATH).
+- **TDP toggle**: se restaura desde el estado real de la GPU al cargar.
+- **fit toggle**: ON ahora envía `fit=true` en el payload.
+- Selector de tema de Config aplica el tema al instante.
+
+### Baseline
+- Suite completa: **356 tests en verde**.
+
 ## [0.5.0] — 2026-09-22
 
 ### Agregado

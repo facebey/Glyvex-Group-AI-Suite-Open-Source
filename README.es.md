@@ -51,9 +51,9 @@ de forma segura (ver sección de Módulos).
 
 | Plataforma | Estado | Notas |
 |---|---|---|
-| **Windows** | ✅ Desarrollo y pruebas | Scripts `start.cmd` (CMD) y `start.ps1` (PowerShell). |
-| **Linux** | ⏳ Próximamente | `start.sh` ya existe; el soporte formal (pruebas completas y CI) está en el roadmap. |
-| **macOS** | ⏳ Próximamente | Usa el mismo `start.sh`; no se prueba en el ciclo actual. |
+| **Windows** | ✅ Plataforma principal | La versión actual está optimizada para Windows: scripts `start.cmd` (CMD) y `start.ps1` (PowerShell), runtime embebido de llama.cpp e instalador MSI. |
+| **Linux** | ⏳ Después de la versión estable | `start.sh` ya existe; el soporte formal (pruebas completas y CI) arranca cuando haya una versión estable. |
+| **macOS** | ⏳ En el futuro | Comparte el camino de `start.sh`; llega después de Linux. |
 
 ## Instalación
 
@@ -329,17 +329,17 @@ El chat expone al modelo dos herramientas, invocadas de forma nativa vía
 - [x] **M7** — Base de datos SQLite (conversaciones, benchmarks, templates, sets)
 - [x] **M8** — Vitales del LLM server (Prometheus `/metrics`, histórico en `metrics.db`)
 - [ ] Aceleración GPU para AMD/Intel en el runtime embebido (Vulkan/ROCm, fase B — por hoy corre en CPU)
-- [ ] Soporte formal para Linux (y macOS): pruebas completas y CI
+- [ ] Soporte formal para Linux (tras la versión estable; macOS llega en el futuro): pruebas completas y CI
 
 ## Tests
 
-Suite de tests automatizados (pytest + pytest-asyncio + httpx, 356 tests,
+Suite de tests automatizados (pytest + pytest-asyncio + httpx, 358 tests,
 sin unittest, sin requests, sin GPU/modelos/red real — todo mockeado: mock
 LLM server uvicorn en `:18080`, binarios fake, SQLite en memoria):
 
 ```bash
-# Instalar dependencias de test
-pip install pytest>=8.0 pytest-asyncio>=0.24 pytest-mock>=3.14 httpx>=0.27 anyio>=4.0 pytest-cov
+# Instalar dependencias de test (floors probados, una sola fuente de verdad)
+pip install -r requirements-dev.txt
 
 # Correr todos los tests (desde la raíz del repositorio)
 pytest tests/ -v

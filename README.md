@@ -51,9 +51,9 @@ Without an NVIDIA GPU, the Monitor and the Launcher degrade gracefully
 
 | Platform | Status | Notes |
 |---|---|---|
-| **Windows** | ✅ Development & testing | `start.cmd` (CMD) and `start.ps1` (PowerShell) scripts. |
-| **Linux** | ⏳ Coming soon | `start.sh` already exists; formal support (full testing and CI) is on the roadmap. |
-| **macOS** | ⏳ Coming soon | Shares `start.sh`; not tested in the current cycle. |
+| **Windows** | ✅ Primary platform | The current version is optimized for Windows: `start.cmd` (CMD) and `start.ps1` (PowerShell) scripts, embedded llama.cpp runtime and MSI installer. |
+| **Linux** | ⏳ After the stable release | `start.sh` already exists; formal support (full testing and CI) starts once there is a stable release. |
+| **macOS** | ⏳ In the future | Shares the `start.sh` path; it comes after Linux. |
 
 ## Installation
 
@@ -334,17 +334,17 @@ The chat exposes two tools to the model, invoked natively via `tool_calls`
 - [x] **M7** — SQLite database (conversations, benchmarks, templates, sets)
 - [x] **M8** — LLM server vitals (Prometheus `/metrics`, history in `metrics.db`)
 - [ ] GPU acceleration for AMD/Intel in the embedded runtime (Vulkan/ROCm, phase B — for now it runs on CPU)
-- [ ] Formal Linux (and macOS) support: full testing and CI
+- [ ] Formal Linux support (after the stable release; macOS comes in the future): full testing and CI
 
 ## Tests
 
-Automated test suite (pytest + pytest-asyncio + httpx, 356 tests, no
+Automated test suite (pytest + pytest-asyncio + httpx, 358 tests, no
 unittest, no requests, no GPU/models/real network — everything mocked: mock
 LLM server uvicorn on `:18080`, fake binaries, in-memory SQLite):
 
 ```bash
-# Install test dependencies
-pip install pytest>=8.0 pytest-asyncio>=0.24 pytest-mock>=3.14 httpx>=0.27 anyio>=4.0 pytest-cov
+# Install test dependencies (tested floors, single source of truth)
+pip install -r requirements-dev.txt
 
 # Run all tests (from the repository root)
 pytest tests/ -v
