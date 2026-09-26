@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { createBrowserRouter, RouterProvider, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   MessageSquare, Rocket, Gauge, Activity, FileBarChart, Settings,
-  CheckCircle2, Circle, Palette, Cpu, Download, Loader2, AlertTriangle, Github,
+  CheckCircle2, Circle, Palette, Cpu, Download, Loader2, AlertTriangle, ExternalLink,
 } from "lucide-react";
 import { ToastProvider } from "./components/ToastNotification.jsx";
 import { getStoredTheme, cycleTheme, nextTheme, THEMES, THEME_META, THEME_CHANGED_EVENT } from "./lib/theme.js";
@@ -455,7 +455,7 @@ function Layout() {
               title="Código abierto — Apache 2.0"
             >
               <span className="inline-flex items-center gap-1">
-                <Github size={12} /> GitHub
+                <ExternalLink size={12} /> GitHub
               </span>
             </a>
           </span>
