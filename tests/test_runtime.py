@@ -394,6 +394,10 @@ def _stub_sources(monkeypatch, base_body: bytes, accel_body: bytes | None, famil
 
 def _setup_download(monkeypatch, tmp_path, family: str):
     _force_windows(monkeypatch)
+    # BINARY_NAME se fija en el import (runtime.py:61): en CI no-Windows la
+    # constante ya valio "llama-server", asi que el simulacro de Windows debe
+    # forzarla tambien (el archive fake trae el .exe).
+    monkeypatch.setattr(runtime_module, "BINARY_NAME", "llama-server.exe")
     monkeypatch.setattr(runtime_module, "DATA_DIR", tmp_path)
     monkeypatch.setattr(runtime_module, "detect_gpu", lambda: family.upper())
 

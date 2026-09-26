@@ -1,0 +1,11 @@
+# Dependencias de desarrollo y tests. Instalar junto con las de la app:
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# No entran en el bundle de produccion: solo sirven para correr la suite de
+# tests localmente y en CI (ver .github/workflows/ci.yml).
+#
+# pytest-asyncio >=0.24 es requerido: tests/pytest.ini usa
+# `asyncio_default_fixture_loop_scope` (opcion disponible desde 0.24).
+pytest>=8
+pytest-asyncio>=0.24
+pytest-cov>=5

@@ -4,7 +4,11 @@ python-multipart>=0.0.32
 pydantic>=2.13.5
 aiofiles>=24.0
 httpx>=0.28.1
-sqlalchemy>=2.0.54
+# [asyncio]: el engine de la app (y tests/conftest.py) usa
+# sqlalchemy.ext.asyncio, que requiere greenlet en todas las plataformas.
+# Sin el extra, en un venv limpio falla el import (verde solo si greenlet
+# entra de paso por otra dependencia).
+sqlalchemy[asyncio]>=2.0.54
 aiosqlite>=0.22.1
 gguf>=0.19.0
 nvidia-ml-py>=13
