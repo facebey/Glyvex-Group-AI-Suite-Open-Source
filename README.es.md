@@ -191,13 +191,13 @@ el modelo activo, o ver su consumo de HW en vivo (`/monitor`).
 
 En **Windows** la suite puede traer su propia build probada de
 [llama.cpp](https://github.com/ggml-org/llama.cpp) para que no tengas que
-instalar nada de inferencia: pin **b11009**, en layout plano, en dos niveles:
+instalar nada de inferencia: pin **b11146** (v0.5.0), en layout plano, en dos niveles:
 
 - **motor base** (~19 MB): corre en cualquier GPU/CPU.
 - **aceleración** (~531 MB para NVIDIA + CUDA 13.4; la de AMD/Intel llega
   en la fase B). Se elige según la familia de GPU detectada.
 
-- **Dónde vive:** `<DATA_DIR>/runtime/llama.cpp-b11009/` (exe + DLLs en la
+- **Dónde vive:** `<DATA_DIR>/runtime/llama.cpp-b11146/` (exe + DLLs en la
   misma carpeta, porque `llama-server.exe` busca sus DLLs en su propio
   directorio). No es parte del repo: se descarga bajo demanda y se verifica
   con **sha256**.

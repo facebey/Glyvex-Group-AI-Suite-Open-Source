@@ -10,7 +10,7 @@ variables de entorno, seguridad, release).
 - **Node.js 20 LTS+** (frontend Vite/React)
 - Un backend de inferencia, según qué uses:
   - **Windows:** el [runtime embebido](../README.md) — la suite descarga su
-    propia build probada de llama.cpp (pin b11009, CUDA), sin instalar nada —
+     propia build probada de llama.cpp (pin b11146, CUDA), sin instalar nada —
     **o** [`llama-server`](https://github.com/ggml-org/llama.cpp),
     [Ollama](https://ollama.com) o [LM Studio](https://lmstudio.ai) en modo servidor.
   - **Otras plataformas:** [`llama-server`](https://github.com/ggml-org/llama.cpp),
@@ -76,7 +76,7 @@ pasos y checkmarks en vivo:
    el backend de inferencia:
    - **Windows:** en el onboarding (o en `/config` → **Runtime**) tocá
      **Descargar runtime** y la suite instala su propia build probada de
-     llama.cpp (pin b11009). No tocás `binary_path`.
+      llama.cpp (pin b11146). No tocás `binary_path`.
    - **Otras plataformas / modo experto:** en `/config`, indicá el
      `binary_path` de `llama-server` (y/o Ollama/LM Studio).
 2. **Escanear** — tocá "Escanear ahora"; el inventario queda en el Launcher.

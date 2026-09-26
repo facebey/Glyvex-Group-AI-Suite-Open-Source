@@ -31,7 +31,7 @@ Dos conceptos que se repiten:
 | `flash_attn` | `--flash-attn` | `on` | Acepta `on`/`off`/`auto` (no 1/0). |
 | `load_mode` | `--load-mode` | `auto` | `auto` \| `none` \| `mmap` \| `mlock` \| `mmap+mlock` \| `dio`. Reemplaza a los viejos `--mlock`/`--no-mmap`. |
 | `mmproj_path` | `--mmproj` | — | Encoder de visión (sidecar o embebido). |
-| `lora_path` / `lora_scale` | `--lora` | — / 1.0 | `lora_scale` entre 0.0 y 2.0. |
+| `lora_path` / `lora_scale` | `--lora` / `--lora-scaled` | — / 1.0 | `lora_scale` entre 0.0 y 2.0. Desde b11146 (v0.5.0) `--lora-scale` no existe: con feature-detect del probe se emite `--lora-scaled PATH:SCALE`; en builds anteriores (o sin probe) el par clásico `--lora PATH --lora-scale N`. |
 
 ## Speculative decoding (MTP / NextN)
 
