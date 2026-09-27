@@ -1,0 +1,22 @@
+# Config de CodeQL del repo publico (GHAS no esta disponible en el repo
+# privado con plan Free). La referencia el workflow
+# .github/workflows/codeql.yml en el input config-file del paso init.
+#
+# Las tres exclusiones son falsos positivos del modelo de amenazas de
+# CodeQL (input remoto -> sink) aplicado a una app 100% local single-user:
+# no hay atacante remoto. Si la app deja de ser solo local (puerto expuesto
+# a red), revisar estas exclusiones antes de mantenerlas.
+query-filters:
+  # Los URLs provienen de la config local del usuario (endpoints
+  # llama-server/Ollama, descarga de runtimes).
+  - exclude:
+      id: py/full-ssrf
+  # Las rutas provienen de la config local (directorios de modelos y
+  # binarios). Sin input remoto.
+  - exclude:
+      id: py/path-injection
+  # El backend expone solo el mensaje de la excepcion (str(exc)), nunca el
+  # traceback. El taint no se rompe con cambios de codigo y un sanitizer
+  # custom (extension point) no esta soportado de forma fiable en GHAS.
+  - exclude:
+      id: py/stack-trace-exposure

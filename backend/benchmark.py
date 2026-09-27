@@ -1239,7 +1239,7 @@ async def judge_run(run_id: str, req: JudgeRequest) -> StreamingResponse:
             pending = await _load_pending_judge_targets(run_id)
         except Exception as exc:
             logger.warning("Judge: error leyendo la DB para %s: %s", run_id, exc)
-            yield sse({"status": "error", "message": f"Error leyendo la DB: {exc}"})
+            yield sse({"status": "error", "message": f"Error leyendo la DB: {str(exc)}"})
             return
 
         total = len(pending)
@@ -1276,7 +1276,7 @@ async def judge_run(run_id: str, req: JudgeRequest) -> StreamingResponse:
             except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                 yield sse({
                     "status": "error",
-                    "message": f"Endpoint no disponible: {exc}",
+                    "message": f"Endpoint no disponible: {str(exc)}",
                 })
                 return
             except httpx.HTTPError:
@@ -1300,7 +1300,7 @@ async def judge_run(run_id: str, req: JudgeRequest) -> StreamingResponse:
                     except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                         yield sse({
                             "status": "error",
-                            "message": f"Endpoint no disponible: {exc}",
+                            "message": f"Endpoint no disponible: {str(exc)}",
                             "evaluated": evaluated,
                             "total": total,
                         })

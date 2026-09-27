@@ -890,7 +890,7 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
             "error de conexion: endpoint=%s model=%s: %s",
             req.endpoint, req.model, exc,
         )
-        yield _sse({"type": "error", "message": f"No se pudo conectar al endpoint: {exc}"})
+        yield _sse({"type": "error", "message": f"No se pudo conectar al endpoint: {str(exc)}"})
         yield "data: [DONE]\n\n"
 
 

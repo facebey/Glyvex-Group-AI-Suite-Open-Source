@@ -449,7 +449,7 @@ async def influx_test(body: InfluxTestRequest) -> dict[str, Any]:
             res = await client.post(req["url"], params=req["params"], headers=req["headers"],
                                     auth=req["auth"], content=line.encode("utf-8"))
     except httpx.HTTPError as exc:
-        return {"ok": False, "status_code": None, "detail": f"no hubo respuesta: {type(exc).__name__}: {exc}"}
+        return {"ok": False, "status_code": None, "detail": f"no hubo respuesta: {type(exc).__name__}: {str(exc)}"}
     ok = 200 <= res.status_code < 300
     detail = "escritura aceptada" if ok else (res.text[:300] or f"HTTP {res.status_code}")
     return {"ok": ok, "status_code": res.status_code, "detail": detail}
