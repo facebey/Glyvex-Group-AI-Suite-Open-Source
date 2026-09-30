@@ -266,6 +266,23 @@ async def test_speak_no_windows_da_501(client, monkeypatch):
     assert res.status_code == 501
 
 
+async def test_speak_reescuchar_el_mismo_texto_no_resintetiza(client, fake_powershell):
+    await client.post("/api/tts/speak", json={"text": "hola de nuevo"})
+    res = await client.post("/api/tts/speak", json={"text": "hola de nuevo"})
+    assert res.status_code == 200
+    assert res.content == WAV_BYTES
+    speak_calls = [c for c in fake_powershell["calls"] if c["mode"] == "speak"]
+    assert len(speak_calls) == 1  # la 2ª petición se sirve del cache de WAV
+
+
+async def test_speak_cache_distingue_voz_y_rate(client, fake_powershell):
+    await client.post("/api/tts/speak", json={"text": "hola ritmo", "rate": 1})
+    await client.post("/api/tts/speak", json={"text": "hola ritmo", "rate": 2})
+    await client.post("/api/tts/speak", json={"text": "hola ritmo", "voice": HELENA, "rate": 1})
+    speak_calls = [c for c in fake_powershell["calls"] if c["mode"] == "speak"]
+    assert len(speak_calls) == 3  # cada combinación distinta sintetiza su propia
+
+
 async def test_voices_se_cachean_una_sola_vez(client, fake_powershell):
     await client.get("/api/tts/status")
     await client.get("/api/tts/status")
@@ -395,6 +412,15 @@ async def test_speak_piper_cachea_el_modelo_entre_sintesis(client, stub_piper):
     await client.post("/api/tts/speak", json={"text": "dos"})
     assert stub_piper["loads"] == 1
     assert len(stub_piper["synths"]) == 2
+
+
+async def test_speak_piper_reescuchar_el_mismo_texto_no_resintetiza(client, stub_piper):
+    config_module.config.set("tts.engine", "piper")
+    _download_stub_voice()
+    res = await client.post("/api/tts/speak", json={"text": "hola piper"})
+    res2 = await client.post("/api/tts/speak", json={"text": "hola piper"})
+    assert res.status_code == 200 and res2.status_code == 200
+    assert len(stub_piper["synths"]) == 1  # la 2ª se sirve del cache de WAV
 
 
 async def test_speak_piper_rate_mapea_a_length_scale(client, stub_piper):

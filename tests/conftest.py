@@ -223,6 +223,10 @@ async def _isolated_state(tmp_path):
     # tests (un test que la siembra a mano la colaría al siguiente).
     tts_module._reset_voices_cache()
 
+    # -- tts.py: cache de WAV por motor+voz+rate+texto (re-escucha); sin este
+    # reset un test calentaría la cache del siguiente.
+    tts_module._reset_wav_cache()
+
     # -- piper_runtime.py: voces neuronales a tmp y sin descargas colgadas ---
     # DATA_DIR es el nombre importado en el módulo (from paths import DATA_DIR),
     # así que se redirige ahí, igual que en launcher/runtime.

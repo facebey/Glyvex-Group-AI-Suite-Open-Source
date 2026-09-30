@@ -1241,13 +1241,14 @@ async def estimate_context(req: EstimateRequest) -> EstimateResponse:
 
 
 @router.get("/tools/status")
-async def tools_status() -> dict[str, Any]:
+async def tools_status(refresh: bool = False) -> dict[str, Any]:
     """
     Diagnóstico para la UI: si el proveedor de búsqueda no está listo, el
     toggle del globo lo dice en el tooltip antes de que el usuario lo active
-    y se coma un error a mitad de una respuesta.
+    y se coma un error a mitad de una respuesta. `refresh=true` (botón
+    Comprobar) saltea la caché de 60 s de check_search_provider.
     """
-    search = await tools_module.check_search_provider()
+    search = await tools_module.check_search_provider(refresh=refresh)
     return {
         "search": search,
         "providers": tools_module.provider_catalog(),

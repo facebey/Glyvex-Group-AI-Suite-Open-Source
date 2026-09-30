@@ -357,23 +357,44 @@ export default function ChatSettings({ config, onChange }) {
   // es una reconsulta silenciosa (arranque y polling). Antes un solo flag
   // hacía girar a los 4 semáforos a la vez.
   const [checking, setChecking] = useState(null);
-  const [downloading, setDownloading] = useState(null); // { kind, name, pct, detail }
-  const [downloadError, setDownloadError] = useState(null);
-  const downloadAbortRef = useRef(null);
-  useEffect(() => () => downloadAbortRef.current?.abort(), []);
+  // Progreso y errores POR descarga (key = kind: runtime | model | piperVoice |
+  // kokoroModel): antes era un solo estado compartido y dos descargas en
+  // paralelo (p. ej. voz Piper + modelo Kokoro) se pisaban — la barra de una
+  // desaparecía y aparecía la de la otra.
+  const [downloads, setDownloads] = useState({}); // { [kind]: { name, pct, detail } }
+  const [downloadErrors, setDownloadErrors] = useState({}); // { [kind]: { kind, message } }
+  const downloadAbortRefs = useRef({});
+  useEffect(
+    () => () => Object.values(downloadAbortRefs.current).forEach((c) => c.abort()),
+    []
+  );
 
+  // Cada fetch setea SU estado en cuanto termina (no un Promise.all que
+  // dejara la pantalla congelada hasta el más lento — la búsqueda real de
+  // web_search podía tardar 30-45 s y bloquear las 4 secciones). Con
+  // "Comprobar" (section != null) se fuerza el refresh del probe de búsqueda,
+  // que normalmente viene cacheado 60 s del backend.
   const loadStatus = useCallback(async (section) => {
     if (section) setChecking(section);
-    const [tools, stt, models, tts] = await Promise.all([
-      fetch("/api/chat/tools/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch("/api/stt/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch("/api/stt/runtime/models").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch("/api/tts/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    const refresh = section ? "?refresh=1" : "";
+    await Promise.all([
+      fetch(`/api/chat/tools/status${refresh}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+        .then(setToolsStatus),
+      fetch("/api/stt/status")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+        .then(setSttStatus),
+      fetch("/api/stt/runtime/models")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+        .then(setSttModels),
+      fetch("/api/tts/status")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+        .then(setTtsStatus),
     ]);
-    setToolsStatus(tools);
-    setSttStatus(stt);
-    setSttModels(models);
-    setTtsStatus(tts);
     setChecking(null);
   }, []);
 
@@ -402,10 +423,13 @@ export default function ChatSettings({ config, onChange }) {
   // signal a propósito: si la UI va, el backend termina la descarga igual.
   const startDownload = useCallback(
     async (kind, url, name) => {
-      setDownloadError(null);
-      setDownloading({ kind, name, pct: 0, detail: "" });
+      setDownloadErrors((prev) => {
+        const { [kind]: _limpiar, ...rest } = prev;
+        return rest;
+      });
+      setDownloads((prev) => ({ ...prev, [kind]: { name, pct: 0, detail: "" } }));
       const controller = new AbortController();
-      downloadAbortRef.current = controller;
+      downloadAbortRefs.current[kind] = controller;
       try {
         const res = await fetch(url, { method: "POST" });
         if (!res.ok) {
@@ -414,7 +438,10 @@ export default function ChatSettings({ config, onChange }) {
         }
         await consumeSSE(res, controller.signal, (event) => {
           if (event.type === "progress") {
-            setDownloading({ kind, name, pct: event.pct, detail: event.detail });
+            setDownloads((prev) => ({
+              ...prev,
+              [kind]: { name, pct: event.pct, detail: event.detail },
+            }));
           } else if (event.type === "error") {
             throw new Error(event.message);
           }
@@ -422,10 +449,17 @@ export default function ChatSettings({ config, onChange }) {
         await loadStatus();
       } catch (err) {
         if (err.name !== "AbortError") {
-          setDownloadError({ kind, message: err.message || String(err) });
+          setDownloadErrors((prev) => ({
+            ...prev,
+            [kind]: { kind, message: err.message || String(err) },
+          }));
         }
       } finally {
-        setDownloading(null);
+        delete downloadAbortRefs.current[kind];
+        setDownloads((prev) => {
+          const { [kind]: _terminada, ...rest } = prev;
+          return rest;
+        });
       }
     },
     [loadStatus]
@@ -435,6 +469,18 @@ export default function ChatSettings({ config, onChange }) {
   const stt = config.stt || {};
   const tts = config.tts || {};
   const attachments = config.attachments || {};
+
+  // Vista por sección: cada bloque renderiza solo SU descarga.
+  const sttDl = downloads.runtime || downloads.model || null;
+  const piperDl = downloads.piperVoice
+    ? { kind: "piperVoice", ...downloads.piperVoice }
+    : null;
+  const kokoroDl = downloads.kokoroModel
+    ? { kind: "kokoroModel", ...downloads.kokoroModel }
+    : null;
+  const sttError = downloadErrors.runtime || downloadErrors.model || null;
+  const piperError = downloadErrors.piperVoice || null;
+  const kokoroError = downloadErrors.kokoroModel || null;
 
   function patch(sectionName, values) {
     onChange((prev) => ({
@@ -607,7 +653,7 @@ export default function ChatSettings({ config, onChange }) {
             {whispercpp.runtime_state && whispercpp.runtime_state !== "ready" &&
               whispercpp.runtime_state !== "downloading" &&
               whispercpp.runtime_state !== "unsupported" &&
-              downloading?.kind !== "runtime" && (
+              !downloads.runtime && (
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
@@ -648,7 +694,7 @@ export default function ChatSettings({ config, onChange }) {
               </select>
             </Field>
 
-            {selectedModel && selectedModel.state !== "ready" && !downloading && (
+            {selectedModel && selectedModel.state !== "ready" && !sttDl && (
               <div className="flex items-center gap-3">
                 <button
                   type="button"
@@ -666,28 +712,28 @@ export default function ChatSettings({ config, onChange }) {
               </div>
             )}
 
-            {downloading && downloading.kind !== "piperVoice" && (
+            {sttDl && (
               <div>
                 <p className="text-sm text-glyvex-muted">
                   {t("chatSettings.cppDownloading", {
-                    model: downloading.name,
-                    pct: Math.round(downloading.pct),
+                    model: sttDl.name,
+                    pct: Math.round(sttDl.pct),
                   })}
-                  {downloading.detail ? ` — ${downloading.detail}` : ""}
+                  {sttDl.detail ? ` — ${sttDl.detail}` : ""}
                 </p>
                 <div className="h-1.5 rounded-full bg-glyvex-surface-code overflow-hidden mt-1.5">
                   <div
                     className="h-full bg-glyvex-accent transition-all"
-                    style={{ width: `${downloading.pct}%` }}
+                    style={{ width: `${sttDl.pct}%` }}
                   />
                 </div>
               </div>
             )}
 
-            {downloadError && downloadError.kind !== "piperVoice" && !downloading && (
+            {sttError && !sttDl && (
               <p className="flex items-start gap-1.5 text-sm text-red-400">
                 <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-                {downloadError.message}
+                {sttError.message}
               </p>
             )}
           </>
@@ -838,8 +884,8 @@ export default function ChatSettings({ config, onChange }) {
             piper={ttsStatus?.piper || {}}
             voiceName={tts.piper_voice || ""}
             onVoice={(name) => patch("tts", { piper_voice: name })}
-            downloading={downloading}
-            downloadError={downloadError}
+            downloading={piperDl}
+            downloadError={piperError}
             onDownload={(name) =>
               startDownload("piperVoice", `/api/tts/piper/voices/${name}/download`, name)
             }
@@ -852,8 +898,8 @@ export default function ChatSettings({ config, onChange }) {
             kokoro={ttsStatus?.kokoro || {}}
             voiceName={tts.kokoro_voice || ""}
             onVoice={(name) => patch("tts", { kokoro_voice: name })}
-            downloading={downloading}
-            downloadError={downloadError}
+            downloading={kokoroDl}
+            downloadError={kokoroError}
             onDownload={() => startDownload("kokoroModel", "/api/tts/kokoro/model/download", "kokoro")}
             onDelete={() => {
               if (

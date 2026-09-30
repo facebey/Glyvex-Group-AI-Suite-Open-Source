@@ -494,6 +494,12 @@ async def download_stt_runtime(on_progress=None) -> dict:
         _downloading = False
 
 
+# El resultado del probe no cambia mientras el binario no cambie: se cachea
+# por (path, mtime, size). /status lo pide en cada apertura de ajustes y el
+# subprocess `whisper-cli --help` cuesta unos segundos en el app empaquetado.
+_PROBE_CACHE: dict[tuple[str, int, int], bool] = {}
+
+
 async def probe_stt_binary(binary_path: str | None = None) -> bool:
     """Ejecuta `whisper-cli --help` con timeout corto; True si arranca.
 
@@ -501,8 +507,17 @@ async def probe_stt_binary(binary_path: str | None = None) -> bool:
     es un binario fijo del pin (no hay variación entre builds que gestionar).
     """
     binary = binary_path or str(stt_runtime_dir() / STT_BINARY_NAME)
-    if not Path(binary).exists():
+    p = Path(binary)
+    if not p.exists():
         return False
+    try:
+        st = p.stat()
+        key = (binary, st.st_mtime_ns, st.st_size)
+    except OSError:
+        return False
+    cached = _PROBE_CACHE.get(key)
+    if cached is not None:
+        return cached
     try:
         # whisper-cli --help escribe la ayuda por STDERR (verificado b5130);
         # se capturan los dos flujos y basta que uno tenga contenido.
@@ -520,7 +535,9 @@ async def probe_stt_binary(binary_path: str | None = None) -> bool:
             **kwargs,
         )
         out, err = await asyncio.wait_for(proc.communicate(), timeout=15.0)
-        return proc.returncode == 0 and bool((out or b"").strip() or (err or b"").strip())
+        ok = proc.returncode == 0 and bool((out or b"").strip() or (err or b"").strip())
+        _PROBE_CACHE[key] = ok
+        return ok
     except (OSError, asyncio.TimeoutError):
         return False
 

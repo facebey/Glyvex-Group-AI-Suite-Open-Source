@@ -664,16 +664,45 @@ async def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     return _failure(name, f"La tool `{name}` no existe.")
 
 
-async def check_search_provider() -> dict[str, Any]:
+_SEARCH_STATUS_TTL_S = 60.0
+_SEARCH_STATUS_CACHE: dict[str, Any] = {"ts": 0.0, "sig": None, "result": None}
+
+
+def _search_status_sig(settings: dict[str, Any]) -> tuple:
+    return (
+        settings["provider"],
+        settings["searxng_url"],
+        settings["brave_api_key"],
+        settings["tavily_api_key"],
+        settings["timeout_s"],
+    )
+
+
+async def check_search_provider(refresh: bool = False) -> dict[str, Any]:
     """
     Diagnóstico para la UI: ¿el proveedor configurado puede buscar ahora?
 
     Se hace una búsqueda real y descartable en vez de un ping: es la única
     forma de detectar el 403 de SearXNG por JSON deshabilitado, una API key
     vencida o un límite de tasa de DuckDuckGo antes de que el usuario active
-    el toggle y se coma el error a mitad de una respuesta.
+    el toggle y se coma el error a mitad de una respuesta. La búsqueda real
+    puede tardar decenas de segundos (red lenta / rate limit) y la UI la pide
+    al abrir la pantalla de ajustes y en cada "Comprobar": el resultado se
+    cachea 60 s por firma de config; `refresh=True` (botón Comprobar) obliga
+    a re-probar.
     """
     settings = _settings()
+    sig = _search_status_sig(settings)
+    now = time.monotonic()
+    if (
+        not refresh
+        and _SEARCH_STATUS_CACHE["result"] is not None
+        and _SEARCH_STATUS_CACHE["sig"] == sig
+        and now - _SEARCH_STATUS_CACHE["ts"] < _SEARCH_STATUS_TTL_S
+    ):
+        return {**_SEARCH_STATUS_CACHE["result"], "cached": True}
+
+    provider = settings["provider"]
     provider = settings["provider"]
     label = PROVIDER_LABELS[provider]
 
@@ -683,19 +712,22 @@ async def check_search_provider() -> dict[str, Any]:
 
     try:
         results = await PROVIDERS[provider]("glyvex", 1, settings)
+        result: dict[str, Any]
+        if not results:
+            result = {
+                **detail,
+                "ready": False,
+                "reason": f"{label} respondió pero no devolvió resultados.",
+            }
+        else:
+            result = {**detail, "ready": True, "reason": None}
     except ProviderError as exc:
-        return {**detail, "ready": False, "reason": str(exc)}
+        result = {**detail, "ready": False, "reason": str(exc)}
     except Exception as exc:  # noqa: BLE001
-        return {**detail, "ready": False, "reason": f"{type(exc).__name__}: {exc}"}
+        result = {**detail, "ready": False, "reason": f"{type(exc).__name__}: {exc}"}
 
-    if not results:
-        return {
-            **detail,
-            "ready": False,
-            "reason": f"{label} respondió pero no devolvió resultados.",
-        }
-
-    return {**detail, "ready": True, "reason": None}
+    _SEARCH_STATUS_CACHE.update(ts=time.monotonic(), sig=sig, result=result)
+    return {**result, "cached": False}
 
 
 def provider_catalog() -> list[dict[str, Any]]:

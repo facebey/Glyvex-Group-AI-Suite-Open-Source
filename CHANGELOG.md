@@ -5,6 +5,21 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.7.1-beta] — 2026-09-30
+
+### Corregido
+- **TTS**: la reproducción vuelve al elemento `<audio>` (el rewrite a WebAudio
+  dejaba el audio mudo en algunos entornos Chrome/Edge/WebView2). Un fallo de
+  reproducción o autoplay se muestra ahora en un aviso, en vez de silencio o
+  botón atascado.
+- **TTS**: cache de WAV en el backend (LRU 32): re-escuchar la misma respuesta
+  es instantáneo y no resintetiza.
+- **Config**: la detección de Web Search / STT / TTS en Opciones ya no tarda
+  30-45 s (caché TTL 60 s por firma de config; el botón "Comprobar" fuerza el
+  re-probe).
+- **Chat**: los últimos 5 endpoints personalizados se persisten (localStorage)
+  y aparecen en el selector para no volver a tipear la URL.
+
 ## [0.7.0-beta] — 2026-09-30
 
 ### Agregado

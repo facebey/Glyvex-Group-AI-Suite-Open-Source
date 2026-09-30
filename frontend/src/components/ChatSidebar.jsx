@@ -46,6 +46,7 @@ export default function ChatSidebar({
   endpointUrl,
   onEndpointChange,
   endpointStatus,
+  recentEndpoints = [],
   models,
   selectedModel,
   onModelChange,
@@ -102,9 +103,17 @@ export default function ChatSidebar({
                   {e.name}
                 </option>
               ))}
-              {!endpoints.some((e) => e.url === endpointUrl) && (
-                <option value={endpointUrl}>{endpointUrl}</option>
-              )}
+              {recentEndpoints
+                .filter((url) => !endpoints.some((e) => e.url === url))
+                .map((url) => (
+                  <option key={url} value={url}>
+                    {url}
+                  </option>
+                ))}
+              {!endpoints.some((e) => e.url === endpointUrl) &&
+                !recentEndpoints.includes(endpointUrl) && (
+                  <option value={endpointUrl}>{endpointUrl}</option>
+                )}
             </select>
           </div>
           <div className="flex gap-2 mt-2">

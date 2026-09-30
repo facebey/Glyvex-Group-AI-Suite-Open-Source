@@ -68,6 +68,20 @@ export default function Chat() {
     "glyvex_chat_endpoint",
     "http://127.0.0.1:8080"
   );
+  // Endpoints manuales recientes (máx 5, más reciente primero): sobreviven a
+  // la recarga y no dependen de la lista de procesos del Launcher.
+  const [recentEndpoints, setRecentEndpoints] = useLocalStorage("glyvex_chat_endpoints_recent", []);
+
+  function rememberEndpoint(url) {
+    const clean = (url || "").trim();
+    if (!clean) return;
+    setRecentEndpoints((prev) => [clean, ...prev.filter((u) => u !== clean)].slice(0, 5));
+  }
+
+  function handleEndpointChange(url) {
+    setEndpointUrl(url);
+    rememberEndpoint(url);
+  }
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [capabilities, setCapabilities] = useState(null);
@@ -153,9 +167,6 @@ export default function Chat() {
       .then((data) => {
         if (cancelled) return;
         setEndpoints(data);
-        if (data.length > 0 && !data.some((e) => e.url === endpointUrl)) {
-          setEndpointUrl(data[0].url);
-        }
       })
       .catch(() => {});
     return () => {
@@ -821,8 +832,9 @@ export default function Chat() {
         <ChatSidebar
           endpoints={endpoints}
           endpointUrl={endpointUrl}
-          onEndpointChange={setEndpointUrl}
+          onEndpointChange={handleEndpointChange}
           endpointStatus={activeEndpointStatus}
+          recentEndpoints={recentEndpoints}
           models={models}
           selectedModel={selectedModel}
           onModelChange={setSelectedModel}

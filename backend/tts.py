@@ -6,7 +6,8 @@ Tres motores, 100% locales, elegibles en config (tts.engine):
 - "sapi": SAPI (System.Speech) vía PowerShell, que viene con Windows — cero
   dependencias, cero descargas. El POC (T0.4) midió ~58 ms de latencia por
   frase de ~4 s y un WAV de ~250 KB, así que el audio se sintetiza por
-  petición (no conviene cachearlo por tamaño).
+  petición; el WAV generado se cachea en memoria (LRU acotada) por
+  motor+voz+rate+texto, y re-escuchar una respuesta es instantáneo.
 - "piper": motor neuronal local (piper-tts + onnxruntime, importados del
   entorno; las voces .onnx/.json las gestiona piper_runtime). Devuelve WAV.
 - "kokoro": motor neuronal local (kokoro-onnx + onnxruntime; el modelo
@@ -31,6 +32,7 @@ otro transporte, y el stdout de PowerShell pasa por la codepage de la consola
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -40,6 +42,7 @@ import subprocess
 import tempfile
 import threading
 import wave
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +68,35 @@ TTS_ENGINES = ("auto", "sapi", "piper", "kokoro")
 MAX_TEXT_CHARS = 3000
 SYNTH_TIMEOUT_S = 30
 MAX_WAV_BYTES = 20 * 1024 * 1024
+
+# WAV cacheado en memoria (LRU acotada): re-escuchar la misma respuesta no
+# resintetiza (con Kokoro/Piper eso son ~10 s de model load por palabra
+# nueva). La clave lleva motor+voz+rate+texto, así un mismo texto con
+# parámetros distintos no se pisa.
+_WAV_CACHE_MAX = 32
+_wav_cache: OrderedDict[str, bytes] = OrderedDict()
+
+
+def _reset_wav_cache() -> None:
+    _wav_cache.clear()
+
+
+def _wav_cache_key(engine_tag: str, voice: str, rate: int, text: str) -> str:
+    raw = f"{engine_tag}|{voice}|{rate}|{text}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _wav_cache_get(key: str) -> bytes | None:
+    wav = _wav_cache.get(key)
+    if wav is not None:
+        _wav_cache.move_to_end(key)
+    return wav
+
+
+def _wav_cache_put(key: str, wav: bytes) -> None:
+    _wav_cache[key] = wav
+    while len(_wav_cache) > _WAV_CACHE_MAX:
+        _wav_cache.popitem(last=False)
 
 # Script de detección de voces: escribe el JSON a archivo (no por stdout,
 # que pasa por la codepage de la consola y corrompe los acentos).
@@ -442,15 +474,25 @@ async def tts_speak(req: SpeakRequest) -> Response:
     )
 
     if use_kokoro:
+        cache_key = _wav_cache_key("kokoro", kokoro_voice_name, rate, text)
+        cached = _wav_cache_get(cache_key)
+        if cached is not None:
+            return Response(content=cached, media_type="audio/wav")
         wav = await _speak_kokoro_async(text, rate, kokoro_voice_name)
         if len(wav) > MAX_WAV_BYTES:
             raise HTTPException(status_code=502, detail="El WAV generado supera el tamaño máximo permitido.")
+        _wav_cache_put(cache_key, wav)
         return Response(content=wav, media_type="audio/wav")
 
     if use_piper:
+        cache_key = _wav_cache_key("piper", piper_voice_name, rate, text)
+        cached = _wav_cache_get(cache_key)
+        if cached is not None:
+            return Response(content=cached, media_type="audio/wav")
         wav = await _speak_piper_async(text, rate, piper_voice_name)
         if len(wav) > MAX_WAV_BYTES:
             raise HTTPException(status_code=502, detail="El WAV generado supera el tamaño máximo permitido.")
+        _wav_cache_put(cache_key, wav)
         return Response(content=wav, media_type="audio/wav")
 
     if not _is_windows():
@@ -464,6 +506,11 @@ async def tts_speak(req: SpeakRequest) -> Response:
     voice_name = _resolve_voice(req.voice or str(config.get("tts.voice", "")), voices)
     if req.voice and not voice_name:
         raise HTTPException(status_code=404, detail=f"La voz «{req.voice}» no está instalada en este equipo.")
+
+    cache_key = _wav_cache_key("sapi", voice_name or "", rate, text)
+    cached = _wav_cache_get(cache_key)
+    if cached is not None:
+        return Response(content=cached, media_type="audio/wav")
 
     with tempfile.TemporaryDirectory(prefix="glyvex-tts-") as tmp:
         tmp_dir = Path(tmp)
@@ -489,4 +536,5 @@ async def tts_speak(req: SpeakRequest) -> Response:
     if len(wav) > MAX_WAV_BYTES:
         raise HTTPException(status_code=502, detail="El WAV generado supera el tamaño máximo permitido.")
 
+    _wav_cache_put(cache_key, wav)
     return Response(content=wav, media_type="audio/wav")
