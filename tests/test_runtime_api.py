@@ -215,6 +215,9 @@ async def test_reset_noop_when_missing(client, monkeypatch):
     data = res.json()
     assert data["reset"] is False
     assert data["status"]["state"] == "missing"
+    # El frontend setea este status directo en su estado: sin platform la
+    # UI mostraría "Windows-only" en vez de la pantalla de descarga.
+    assert data["status"]["platform"] == "Windows"
 
 
 async def test_reset_removes_runtime_dir(client, monkeypatch):

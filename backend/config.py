@@ -124,6 +124,33 @@ class STTConfig(BaseModel):
     whisper_compute_type: str = "int8"
     # "" = que Whisper detecte el idioma solo.
     whisper_language: str = ""
+    # True = los motores locales transcriben directo a inglés (whisper.cpp
+    # --translate / faster-whisper task="translate"); el idioma de origen se
+    # detecta solo. El motor del navegador no lo soporta y lo ignora.
+    translate_english: bool = False
+
+
+class TTSConfig(BaseModel):
+    """Texto a voz de las respuestas del chat (100% local: SAPI, Piper o Kokoro)."""
+
+    # False desactiva el botón de lectura en voz alta sin tocar nada más.
+    enabled: bool = True
+    # "auto" | "sapi" | "piper" | "kokoro". auto: Kokoro si está listo (motor
+    # importable + modelo descargado), si no Piper listo (voz descargada), si
+    # no SAPI. piper/kokoro: siempre ese motor (error claro si no).
+    engine: str = "auto"
+    # "" = automático: cadena es-AR → es-MX → es-ES → voz por defecto del
+    # sistema (Windows no trae es-AR por defecto). Si se fija un nombre de
+    # voz instalada (ver /api/tts/status), esa voz gana. Solo engine SAPI.
+    voice: str = ""
+    # Velocidad: SAPI -10 (lento) a 10 (rápido), 0 = natural. En Piper se
+    # traduce a length_scale (rate 10 ≈ 2x más rápido, -10 ≈ más lento) y en
+    # Kokoro a speed (rate 10 ≈ 1.5x más rápido, -10 ≈ más lento).
+    rate: int = 0
+    # Voz neuronal Piper (ver /api/tts/piper/voices). Solo engines auto/piper.
+    piper_voice: str = "es_AR-daniela-high"
+    # Voz neuronal Kokoro (ver /api/tts/kokoro/voices). Solo engines auto/kokoro.
+    kokoro_voice: str = "ef_dora"
 
 
 class MonitorConfig(BaseModel):
@@ -196,6 +223,7 @@ class ConfigSchema(BaseModel):
     attachments: AttachmentsConfig = Field(default_factory=AttachmentsConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     stt: STTConfig = Field(default_factory=STTConfig)
+    tts: TTSConfig = Field(default_factory=TTSConfig)
     monitor: MonitorConfig = Field(default_factory=MonitorConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     exports: ExportsConfig = Field(default_factory=ExportsConfig)

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import i18n from "../lib/i18n.js";
+import { createCapture16k } from "../lib/wavEncoder.js";
 
 /** El primero que el navegador acepte. Chrome da webm/opus, Safari mp4. */
 const PREFERRED_MIME_TYPES = [
@@ -25,6 +26,7 @@ export const mediaRecorderSupported = () =>
 function extensionFor(mimeType) {
   if (mimeType.includes("ogg")) return "ogg";
   if (mimeType.includes("mp4")) return "mp4";
+  if (mimeType.includes("wav")) return "wav";
   return "webm";
 }
 
@@ -40,6 +42,7 @@ export function useAudioRecorder({ onError } = {}) {
   const [transcribing, setTranscribing] = useState(false);
 
   const recorderRef = useRef(null);
+  const captureRef = useRef(null);
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
   const resolveRef = useRef(null);
@@ -51,55 +54,86 @@ export function useAudioRecorder({ onError } = {}) {
     streamRef.current = null;
   }, []);
 
-  const start = useCallback(async () => {
-    if (recorderRef.current) return;
+  /**
+   * `options.format`: "webm" (default, MediaRecorder — para faster-whisper,
+   * que decodifica con PyAV) o "wav" (PCM 16 kHz mono — para whisper-cli,
+   * que no decodifica opus).
+   */
+  const start = useCallback(
+    async (options = {}) => {
+      if (recorderRef.current || captureRef.current) return;
 
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
-    } catch (err) {
-      const message =
-        err.name === "NotAllowedError"
-          ? i18n.t("mic.permission")
-          : err.name === "NotFoundError"
-            ? i18n.t("mic.notFound")
-            : i18n.t("mic.access");
-      onErrorRef.current?.(message);
-      return;
-    }
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            sampleRate: 16000,
+            channelCount: 1,
+          },
+        });
+      } catch (err) {
+        const message =
+          err.name === "NotAllowedError"
+            ? i18n.t("mic.permission")
+            : err.name === "NotFoundError"
+              ? i18n.t("mic.notFound")
+              : i18n.t("mic.access");
+        onErrorRef.current?.(message);
+        return;
+      }
 
-    const mimeType = pickMimeType();
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    chunksRef.current = [];
+      streamRef.current = stream;
 
-    recorder.ondataavailable = (event) => {
-      if (event.data && event.data.size > 0) chunksRef.current.push(event.data);
-    };
+      if (options.format === "wav") {
+        captureRef.current = createCapture16k(stream);
+        setRecording(true);
+        return;
+      }
 
-    recorder.onstop = () => {
-      const type = recorder.mimeType || mimeType || "audio/webm";
-      const blob = new Blob(chunksRef.current, { type });
+      const mimeType = pickMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
-      recorderRef.current = null;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) chunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = () => {
+        const type = recorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type });
+        chunksRef.current = [];
+        recorderRef.current = null;
+        releaseStream();
+        setRecording(false);
+        resolveRef.current?.(blob);
+        resolveRef.current = null;
+      };
+
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    },
+    [releaseStream]
+  );
+
+  /** Detiene la grabación y resuelve con el blob completo. */
+  const stop = useCallback(async () => {
+    const capture = captureRef.current;
+    if (capture) {
+      captureRef.current = null;
+      const blob = capture.stop();
       releaseStream();
       setRecording(false);
       resolveRef.current?.(blob);
       resolveRef.current = null;
-    };
+      return blob;
+    }
 
-    streamRef.current = stream;
-    recorderRef.current = recorder;
-    recorder.start();
-    setRecording(true);
-  }, [releaseStream]);
-
-  /** Detiene la grabación y resuelve con el blob completo. */
-  const stop = useCallback(() => {
     const recorder = recorderRef.current;
-    if (!recorder) return Promise.resolve(null);
-    return new Promise((resolve) => {
+    if (!recorder) return null;
+    return await new Promise((resolve) => {
       resolveRef.current = resolve;
       try {
         recorder.stop();
@@ -107,9 +141,17 @@ export function useAudioRecorder({ onError } = {}) {
         resolve(null);
       }
     });
-  }, []);
+  }, [releaseStream]);
 
   const cancel = useCallback(() => {
+    const capture = captureRef.current;
+    if (capture) {
+      captureRef.current = null;
+      capture.cancel();
+      releaseStream();
+      setRecording(false);
+      return;
+    }
     const recorder = recorderRef.current;
     resolveRef.current = null;
     recorderRef.current = null;
@@ -123,14 +165,17 @@ export function useAudioRecorder({ onError } = {}) {
     setRecording(false);
   }, [releaseStream]);
 
-  /** Manda el blob al backend y devuelve el texto transcripto. */
-  const transcribe = useCallback(async (blob, language = "") => {
+  /** Manda el blob al backend y devuelve el texto transcripto.
+   *  `translate`: los motores locales emiten inglés directo (el idioma de
+   *  origen se detecta solo); `language` queda ignorado cuando está activo. */
+  const transcribe = useCallback(async (blob, language = "", translate = false) => {
     if (!blob || blob.size === 0) return "";
     setTranscribing(true);
     try {
       const form = new FormData();
       form.append("audio", blob, `dictado.${extensionFor(blob.type)}`);
-      if (language) form.append("language", language);
+      if (!translate && language) form.append("language", language);
+      if (translate) form.append("translate", "true");
 
       const res = await fetch("/api/stt/transcribe", { method: "POST", body: form });
       if (!res.ok) {
@@ -154,6 +199,7 @@ export function useAudioRecorder({ onError } = {}) {
       } catch {
         // nada que limpiar
       }
+      captureRef.current?.cancel();
       streamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, []);

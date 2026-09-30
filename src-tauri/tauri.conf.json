@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Glyvex AI Suite",
+  "version": "0.6.3-beta",
+  "identifier": "com.glyvex.aisuite",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Glyvex AI Suite",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 940,
+        "minHeight": 600,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "resources/glyvex-backend",
+      "../THIRD-PARTY-NOTICES.txt"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English", "Spanish"],
+        "startMenuFolder": "Glyvex",
+        "headerImage": "../assets/brand/installer/nsis/nsis-header-oscuro.bmp",
+        "sidebarImage": "../assets/brand/installer/nsis/nsis-sidebar-oscuro.bmp",
+        "installerIcon": "../assets/brand/icons/tauri/icon.ico",
+        "uninstallerIcon": "../assets/brand/icons/tauri/icon.ico"
+      }
+    }
+  }
+}

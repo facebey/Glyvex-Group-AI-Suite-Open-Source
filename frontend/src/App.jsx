@@ -6,11 +6,13 @@ import {
   CheckCircle2, Circle, Palette, Cpu, Download, Loader2, AlertTriangle, ExternalLink,
 } from "lucide-react";
 import { ToastProvider } from "./components/ToastNotification.jsx";
+import { isTauri } from "./lib/tauri.js";
 import { getStoredTheme, cycleTheme, nextTheme, THEMES, THEME_META, THEME_CHANGED_EVENT } from "./lib/theme.js";
 import MatrixRain from "./components/MatrixRain.jsx";
 import { consumeSSE } from "./lib/sse.js";
 import StatusWidget from "./components/StatusWidget.jsx";
 import LanguageSelector from "./components/LanguageSelector.jsx";
+import SidecarOverlay from "./components/SidecarOverlay.jsx";
 // Las páginas son chunk propios (React.lazy): el bundle inicial deja de cargar
 // recharts/markdown/highlight.js hasta que se visita cada módulo.
 const Chat = lazy(() => import("./pages/Chat.jsx"));
@@ -19,6 +21,7 @@ const Benchmark = lazy(() => import("./pages/Benchmark.jsx"));
 const Monitor = lazy(() => import("./pages/Monitor.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Config = lazy(() => import("./pages/Config.jsx"));
+const Provision = lazy(() => import("./pages/Provision.jsx"));
 
 const NAV_ITEMS = [
   { to: "/", labelKey: "nav.chat", icon: MessageSquare, end: true },
@@ -327,7 +330,9 @@ function PageLoading() {
 function Layout() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
-  const mainWidth = WIDE_ROUTES.has(pathname) ? "max-w-[1800px]" : "max-w-6xl";
+  // style/responsive: el techo anterior (max-w-6xl = 1152px) dejaba espacio
+  // muerto en monitores >= 1440px; subido a 1600px (rutas amplias: 2100px).
+  const mainWidth = WIDE_ROUTES.has(pathname) ? "max-w-[2100px]" : "max-w-[1600px]";
   const [shouldShowOnboarding, setShouldShowOnboarding] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [theme, setTheme] = useState(getStoredTheme());
@@ -360,7 +365,7 @@ function Layout() {
     <div className="gx-app min-h-screen flex flex-col bg-glyvex-bg text-glyvex-bg-text">
       {theme === "matrix" && <MatrixRain />}
       <header className="gx-shell border-b border-glyvex-border bg-glyvex-bg/95 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto flex items-center gap-6 px-4 py-3">
+        <div className="max-w-[1600px] mx-auto flex items-center gap-6 px-4 py-3">
           <a
             href="https://ai.glyvexgroup.com"
             target="_blank"
@@ -426,7 +431,7 @@ function Layout() {
       </div>
 
       <footer className="gx-shell relative z-10 border-t border-glyvex-border bg-glyvex-bg-2 py-3 px-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between text-xs text-glyvex-bg-muted">
+        <div className="max-w-[1600px] mx-auto flex items-center justify-between text-xs text-glyvex-bg-muted">
           <span>
             {t("footer.developedBy")}{" "}
             <a
@@ -463,11 +468,35 @@ function Layout() {
         </div>
       </footer>
 
+      <AutoProvisionGuard />
       {shouldShowOnboarding && !dismissed && (
         <OnboardingScreen onDismiss={() => setDismissed(true)} />
       )}
     </div>
   );
+}
+
+/**
+ * Gap-1 (v0.6.3-beta): en el bundle empaquetado el runtime de llama.cpp no
+ * viene instalado; si el usuario llega a cualquier pantalla sin él (el
+ * instalador nunca pasó --provision), se lo redirige una vez a /provision
+ * en vez de dejarlo en una app sin motor. En dev (sin sidecar) no hace nada.
+ */
+function AutoProvisionGuard() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const checked = useRef(false);
+  useEffect(() => {
+    if (checked.current || !isTauri() || location.pathname === "/provision") return;
+    checked.current = true;
+    fetch("/api/runtime/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && data.state !== "ready") navigate("/provision", { replace: true });
+      })
+      .catch(() => {});
+  }, [navigate, location.pathname]);
+  return null;
 }
 
 const router = createBrowserRouter([
@@ -479,6 +508,7 @@ const router = createBrowserRouter([
       { path: "monitor", element: <Monitor /> },
       { path: "reports", element: <Reports /> },
       { path: "config", element: <Config /> },
+      { path: "provision", element: <Provision /> },
     ],
   },
 ]);
@@ -486,6 +516,8 @@ const router = createBrowserRouter([
 export default function App() {
   return (
     <ToastProvider>
+      {/* Solo activo dentro de la shell Tauri (sidecar de backend); inactivo en el browser */}
+      <SidecarOverlay />
       <RouterProvider router={router} />
     </ToastProvider>
   );

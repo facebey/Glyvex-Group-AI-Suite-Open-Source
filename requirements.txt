@@ -1,5 +1,5 @@
 fastapi>=0.141.1
-uvicorn[standard]>=0.53.0
+uvicorn[standard]>=0.54.0
 python-multipart>=0.0.32
 pydantic>=2.13.5
 aiofiles>=25.1.0
@@ -8,10 +8,10 @@ httpx>=0.28.1
 # sqlalchemy.ext.asyncio, que requiere greenlet en todas las plataformas.
 # Sin el extra, en un venv limpio falla el import (verde solo si greenlet
 # entra de paso por otra dependencia).
-sqlalchemy[asyncio]>=2.0.54
+sqlalchemy[asyncio]>=2.1.1
 aiosqlite>=0.22.1
 gguf>=0.19.0
-nvidia-ml-py>=13.610.43
+nvidia-ml-py>=13.615.71
 psutil>=7.2.2
 
 # Extracción de adjuntos del chat (módulo M3). Todas puras Python y livianas:
@@ -34,3 +34,21 @@ openpyxl>=3.1.5
 ddgs>=9.16.0
 trafilatura>=2.2.0
 readability-lxml>=0.9
+
+# TTS neuronal (Piper + Kokoro) — voz neural, va EN EL BUNDLE de Tauri (Fase 1b
+# del plan T-1, Approach A: la cadena completa se colecciona con collect_all en
+# backend/glyvex.spec). Las VOCES/MODELOS (.onnx/.bin) NO son dependencias: se
+# descargan en provisión a <DATA_DIR>/runtime/tts/. Fallback `auto` -> SAPI
+# cuando no hay motor neural listo.
+#   - piper-tts / kokoro-onnx: los dos motores.
+#   - onnxruntime / numpy: runtime de inferencia (numpy NO se excluye del bundle).
+#   - phonemizer-fork (import `phonemizer`) + espeakng-loader: G2P y datos
+#     espeak-ng que Piper necesita.
+#   - num2words: normalización de texto de Piper.
+piper-tts>=1.7.0
+kokoro-onnx>=0.4.7
+onnxruntime>=1.29.0
+numpy>=2.5.2
+phonemizer-fork>=3.3.1
+espeakng-loader>=0.2.4
+num2words>=0.5.14

@@ -86,7 +86,7 @@ export default function ChatSidebar({
   }
 
   return (
-    <aside className="w-[300px] shrink-0 overflow-y-auto space-y-3 pr-2">
+    <aside className="w-[300px] 2xl:w-[360px] shrink-0 overflow-y-auto space-y-3 pr-2">
       <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-4 space-y-3">
         <div>
           <span className="block text-sm text-glyvex-muted mb-1">{t("chatSidebar.endpoint")}</span>

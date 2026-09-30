@@ -5,14 +5,18 @@
  * y hace falta poder cancelarlo con AbortController.
  */
 
-/** Lee el body SSE de fetch como stream y llama onEvent por cada evento. */
+/**
+ * Lee el body SSE de fetch como stream y llama onEvent por cada evento.
+ * `signal` es opcional (null ok): algunos flujos (p. ej. descargas) no
+ * necesitan abortar porque el backend sigue el trabajo aunque la UI vaya.
+ */
 export async function consumeSSE(response, signal, onEvent) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
   while (true) {
-    if (signal.aborted) {
+    if (signal?.aborted) {
       await reader.cancel().catch(() => {});
       return;
     }

@@ -106,6 +106,7 @@ export default function Chat() {
   const [toolsEnabled, setToolsEnabled] = useState(false);
   const [toolsStatus, setToolsStatus] = useState(null);
   const [sttStatus, setSttStatus] = useState(null);
+  const [ttsStatus, setTtsStatus] = useState(null);
   const [interimTranscript, setInterimTranscript] = useState("");
 
   const dragDepthRef = useRef(0);
@@ -244,10 +245,12 @@ export default function Chat() {
     Promise.all([
       fetch("/api/chat/tools/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch("/api/stt/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    ]).then(([tools, stt]) => {
+      fetch("/api/tts/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([tools, stt, tts]) => {
       if (cancelled) return;
       setToolsStatus(tools);
       setSttStatus(stt);
+      setTtsStatus(tts);
     });
     return () => {
       cancelled = true;
@@ -946,6 +949,8 @@ export default function Chat() {
                 onEdit={handleEdit}
                 onRegenerate={handleRegenerate}
                 onContinue={handleContinue}
+                ttsAvailable={ttsStatus?.platform_ok && ttsStatus?.enabled !== false}
+                onTtsError={(message) => addToast(message, "error")}
               />
               );
             })

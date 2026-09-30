@@ -53,7 +53,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import platform
 import re
+import subprocess
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -601,6 +603,14 @@ def _binary_cache_key(binary_path: str) -> tuple[str, int, int]:
         return (binary_path, 0, 0)
 
 
+# La app empaquetada corre sin consola: sin CREATE_NO_WINDOW, cada hijo
+# (probe --help/--version, el propio llama-server) crea una consola visible
+# que parpadea ante el usuario. En POSIX creationflags debe ser 0.
+_CREATION_FLAGS = (
+    subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+)
+
+
 async def _run_capture(binary_path: str, arg: str, timeout: float = 15.0) -> str | None:
     """Corre `binary --<arg>` y devuelve su salida combinada, o None si falla."""
     try:
@@ -608,6 +618,7 @@ async def _run_capture(binary_path: str, arg: str, timeout: float = 15.0) -> str
             binary_path, arg,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            creationflags=_CREATION_FLAGS,
         )
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except (OSError, asyncio.TimeoutError, NotImplementedError) as exc:
@@ -657,12 +668,19 @@ async def probe_binary(binary_path: str) -> BinaryInfo:
     build = None
     version_line = None
     version_text = await _run_capture(binary_path, "--version", timeout=10.0)
-    if version_text:
-        version_line = version_text.strip().splitlines()[0] if version_text.strip() else None
-        if version_line:
-            m = _BUILD_RE.search(version_line)
+    if version_text and version_text.strip():
+        # Desde ~b11146 `--version` imprime primero un log de
+        # inicialización sin número de build; la línea real de versión
+        # puede no ser la primera, así que se recorre hasta encontrarla.
+        lines = version_text.strip().splitlines()
+        for line in lines:
+            m = _BUILD_RE.search(line)
             if m:
+                version_line = line
                 build = f"b{m.group(1)}"
+                break
+        if version_line is None:
+            version_line = lines[0]
 
     info = BinaryInfo(
         path=binary_path,
@@ -1287,6 +1305,7 @@ class ModelProcessManager:
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                creationflags=_CREATION_FLAGS,
             )
         except (FileNotFoundError, PermissionError, NotImplementedError, OSError) as exc:
             raise HTTPException(

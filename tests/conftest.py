@@ -67,7 +67,10 @@ import llm_metrics as llm_metrics_module  # noqa: E402
 import main as main_module  # noqa: E402
 import metrics as metrics_module  # noqa: E402
 import models as models_module  # noqa: E402
+import piper_runtime as piper_runtime_module  # noqa: E402
+import kokoro_runtime as kokoro_runtime_module  # noqa: E402
 import runtime as runtime_module  # noqa: E402
+import tts as tts_module  # noqa: E402
 
 from mock_llm_server import build_mock_app  # noqa: E402
 
@@ -216,6 +219,26 @@ async def _isolated_state(tmp_path):
     metrics_module.manager.history.clear()
     metrics_module.manager.configure_store(tmp_path / "metrics.db")
 
+    # -- tts.py: la cache de voces SAPI vive en el módulo y sobreviviría entre
+    # tests (un test que la siembra a mano la colaría al siguiente).
+    tts_module._reset_voices_cache()
+
+    # -- piper_runtime.py: voces neuronales a tmp y sin descargas colgadas ---
+    # DATA_DIR es el nombre importado en el módulo (from paths import DATA_DIR),
+    # así que se redirige ahí, igual que en launcher/runtime.
+    piper_runtime_module.DATA_DIR = tmp_path
+    piper_runtime_module._downloading_voices.clear()
+
+    # -- kokoro_runtime.py: modelo + bin a tmp, sin descargas colgadas -------
+    kokoro_runtime_module.DATA_DIR = tmp_path
+    kokoro_runtime_module._downloading = False
+    kokoro_runtime_module.reset_kokoro_model_cache()
+    # El parche de speed reescribe Kokoro._create_audio; se reaplica por
+    # proceso, así que borrarlo no restaura el original (idempotente).
+
+    # -- tts.py: cache de modelos ONNX de Piper (PiperVoice) por voz ---------
+    tts_module._piper_voices.clear()
+
     # -- llm_metrics.py: sin buffers ni tasas de un test anterior -----------
     llm_metrics_module.manager.buffers.clear()
     llm_metrics_module.manager.rates = llm_metrics_module.RateTracker()
@@ -242,6 +265,45 @@ async def _isolated_state(tmp_path):
     await test_engine.dispose()
     database_module._engine = None
     database_module._session_factory = None
+
+
+# --------------------------------------------------------------------------
+# _piper_engine_off — hermeticidad del motor Piper (autouse)
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _piper_engine_off(monkeypatch):
+    """
+    piper-tts está instalado en el venv de dev, así que sin este fixture un
+    test de TTS podría tomar el camino Piper (o pagar el import de onnxruntime
+    en _import_piper_engine) dependiendo de qué haya en disco. Con Piper
+    deshabilitado por defecto, TODOS los tests de TTS son determinísticos y
+    van por SAPI; los tests que necesitan Piper inyectan su propio stub con
+    monkeypatch (que aplica después de este fixture y lo pisa).
+    """
+    monkeypatch.setattr(tts_module, "_import_piper_engine", lambda: None)
+
+
+# --------------------------------------------------------------------------
+# _kokoro_engine_off — hermeticidad del motor Kokoro (autouse)
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _kokoro_engine_off(monkeypatch):
+    """
+    kokoro-onnx está instalado en el venv de dev, así que sin este fixture un
+    test de TTS podría tomar el camino Kokoro (o pagar el import de onnxruntime
+    en kokoro_engine_status) dependiendo de qué haya en disco. Con Kokoro
+    deshabilitado por defecto, TODOS los tests de TTS son determinísticos y
+    van por SAPI (o por el Piper stub del test); los tests que necesitan
+    Kokoro inyectan su propio stub con monkeypatch (que aplica después y pisa).
+    """
+    monkeypatch.setattr(
+        kokoro_runtime_module, "kokoro_engine_status",
+        lambda: {"available": False, "detail": "kokoro-onnx deshabilitado en tests"},
+    )
 
 
 # --------------------------------------------------------------------------

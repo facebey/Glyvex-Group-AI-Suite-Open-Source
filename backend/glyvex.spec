@@ -15,8 +15,16 @@
 # en el bundle — ver requirements-optional.txt. El STT de la app empaquetada
 # usa whisper.cpp binario (Fase 2 del plan Tauri); hasta ahí el motor
 # `whisper` reporta "no instalado" (probe de stt.py:110).
+#
+# TTS neural (Piper + Kokoro): SÍ va en el bundle desde la fase T-1. La cadena
+# completa (onnxruntime, numpy, piper, kokoro-onnx, num2words, phonemizer,
+# espeak-ng y language_tags) se colecciona con collect_all (ver bloque _tts_*
+# abajo). Las VOCES y el modelo (.onnx/.bin) NO van en el bundle: se descargan
+# en provisión a <DATA_DIR>/runtime/tts/, igual que whisper.cpp en STT.
 
 import sys
+
+from PyInstaller.utils.hooks import collect_all
 
 datas = [
     # El backend sirve el SPA: el WebView2 de Tauri carga http://127.0.0.1:7981.
@@ -54,12 +62,34 @@ hiddenimports = [
     "aiosqlite.parity",
 ]
 
+# TTS neural (Piper + Kokoro): coleccionar la cadena completa en el bundle.
+# collect_all captura en un paso los datos, las DLLs nativas (onnxruntime,
+# espeak-ng) y los submodules que el analisis estatico de PyInstaller no ve.
+# numpy se resuelve al des-excluirlo (hook propio). Las voces/modelos (.onnx)
+# NO van aqui: provision a <DATA_DIR>/runtime/tts/.
+_tts_datas = []
+_tts_binaries = []
+_tts_hidden = []
+# language_tags: data transitivo de phonemizer (phonemizer -> segments ->
+# csvw -> language_tags/data/json/*.json). El analisis estatico trae el codigo
+# pero NO los json; sin collect_all, /api/tts/status rompe con FileNotFoundError
+# al importar piper en el bundle.
+for _pkg in ("onnxruntime", "kokoro_onnx", "piper", "num2words", "phonemizer",
+             "espeakng_loader", "language_tags"):
+    try:
+        _d, _b, _h = collect_all(_pkg)
+        _tts_datas += _d
+        _tts_binaries += _b
+        _tts_hidden += _h
+    except Exception as _e:
+        print(f"[spec] collect_all({_pkg}) omitido: {_e}")
+
 a = Analysis(
     ["main.py"],
     pathex=["."],
-    binaries=[],
-    datas=datas,
-    hiddenimports=hiddenimports,
+    binaries=_tts_binaries,
+    datas=datas + _tts_datas,
+    hiddenimports=hiddenimports + _tts_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=["glyvex_console_hook.py"],
@@ -67,7 +97,9 @@ a = Analysis(
         # Cadena nativa de STT (faster-whisper): fuera del bundle por diseño.
         "faster_whisper",
         "ctranslate2",
-        "onnxruntime",
+        # onnx (lib de grafos) no hace falta para inferencia onnxruntime: solo
+        # lo usa el submodule quantization (se salta en el build) y cuantizar
+        # modelos, que la app no hace.
         "onnx",
         "av",
         "tokenizers",
@@ -75,12 +107,10 @@ a = Analysis(
         "tqdm",
         "flatbuffers",
         "protobuf",
-        # gguf + numpy (~55 MB: numpy.libs, primp.pyd, DLLs en raiz): solo el
-        # FALLBACK lento de read_gguf_metadata lo usa; el parser rapido de
-        # models.py (puro, sin numpy) cubre los headers reales. Si el fallback
-        # no encuentra la libreria devuelve _metadata_error(...) sin romper.
+        # gguf: solo el FALLBACK lento de read_gguf_metadata lo usa; el parser
+        # rapido de models.py (puro) cubre los headers reales. (numpy ya NO se
+        # excluye: Piper y Kokoro lo necesitan, ver coleccion _tts de arriba.)
         "gguf",
-        "numpy",
     ],
     noarchive=False,
 )
@@ -98,7 +128,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    icon="../assets/glyvex.ico",
+    icon="../assets/brand/icons/glyvex-ai-suite.ico",
 )
 
 coll = COLLECT(

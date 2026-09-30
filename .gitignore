@@ -13,23 +13,20 @@ vite.config.js.timestamp-*.mjs
 
 # Build
 frontend/dist/
-# WiX (candle con varias fuentes escribe los objs en el cwd)
-*.wixobj
 # Artefactos PyInstaller (sidecar Tauri, T-1): los genera build.ps1
 backend/build/
 backend/dist/
+# Junction que apunta a backend/dist/glyvex-backend (la crea build.ps1):
+# sin ella el resource se instala bajo _up_/backend/dist/ y el sidecar no resuelve
+src-tauri/resources/glyvex-backend/
 
 # Documentacion local puntual (solo en disco)
 REVIEW_PLAN.md
 
 # Distribucion (clone local del repo open source; la crea sync-oss)
 distribution/oss-clone/
-# Instalador MSI generado por build.ps1 -MakeInstaller (WiX)
-distribution/dist/
-distribution/wix/files.wxi
-distribution/wix/license.rtf
-distribution/wix/*.wixobj
-distribution/wix/obj/
+# Brand kit: el zip se guarda en Files (fuente de verdad: la carpeta extraida)
+assets/brand.zip
 
 # Data / logs (no commitear datos locales)
 # Instancias alternativas: environments/<nombre>.env define GLYVEX_DATA_DIR,

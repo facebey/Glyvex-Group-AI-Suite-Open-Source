@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useLlmStream } from "../hooks/useLlmStream.js";
 import { useDisplay } from "../lib/metricsDisplay.js";
 import { useToast } from "../components/ToastNotification.jsx";
+import CollapsiblePanel from "../components/ui/CollapsiblePanel.jsx";
 
 const GPU_KEYS = ["monitor.gpu.vram", "monitor.gpu.util", "monitor.gpu.temp", "monitor.gpu.power_clocks", "monitor.gpu.power_limit", "monitor.gpu.chart"];
 const CPU_KEYS = ["monitor.cpu.total", "monitor.cpu.cores", "monitor.cpu.freq", "monitor.cpu.chart"];
@@ -753,12 +754,7 @@ export default function Monitor() {
 
       {/* Card GPU */}
       {anyVisible(GPU_KEYS) && (
-      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5">
-        <div className="flex items-center gap-2 mb-3">
-          <Gauge size={16} className="text-glyvex-muted" />
-          <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">GPU</h2>
-        </div>
-
+      <CollapsiblePanel icon={Gauge} title="GPU" storageKey="monitor_panel_gpu">
         {!gpu ? (
           <p className="text-sm text-glyvex-muted">
             {snapshot?.gpu_error || t("monitor.gpu.notDetected")}
@@ -884,18 +880,14 @@ export default function Monitor() {
             )}
           </div>
         )}
-      </div>
+      </CollapsiblePanel>
       )}
 
       {(anyVisible(CPU_KEYS) || show("monitor.ram")) && (
       <div className={`grid grid-cols-1 gap-4 ${anyVisible(CPU_KEYS) && show("monitor.ram") ? "md:grid-cols-2" : ""}`}>
         {/* Card CPU */}
         {anyVisible(CPU_KEYS) && (
-        <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <Cpu size={16} className="text-glyvex-muted" />
-            <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">CPU</h2>
-          </div>
+        <CollapsiblePanel icon={Cpu} title="CPU" storageKey="monitor_panel_cpu">
           {!cpu ? (
             <p className="text-sm text-glyvex-muted">{snapshot?.cpu_error || t("monitor.cpu.psutilUnavailable")}</p>
           ) : (
@@ -924,16 +916,12 @@ export default function Monitor() {
               )}
             </>
           )}
-        </div>
+        </CollapsiblePanel>
         )}
 
         {/* Card RAM */}
         {show("monitor.ram") && (
-        <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <MemoryStick size={16} className="text-glyvex-muted" />
-            <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">RAM</h2>
-          </div>
+        <CollapsiblePanel icon={MemoryStick} title="RAM" storageKey="monitor_panel_ram">
           {!ram ? (
             <p className="text-sm text-glyvex-muted">{t("monitor.ram.unavailable")}</p>
           ) : (
@@ -952,23 +940,23 @@ export default function Monitor() {
               </div>
             </>
           )}
-        </div>
+        </CollapsiblePanel>
         )}
       </div>
       )}
 
       {/* Histórico */}
       {show("monitor.history") && (
-      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <History size={16} className="text-glyvex-muted" />
-            <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">{t("monitor.history.title")}</h2>
+      <CollapsiblePanel
+        icon={History}
+        title={t("monitor.history.title")}
+        storageKey="monitor_panel_history"
+        headerRight={
+          <>
             {historyTier && (
               <span className="text-xs text-glyvex-muted">· {tierLabel(t, historyTier)}</span>
             )}
-          </div>
-          <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1">
             {RANGES.map((r) => (
               <button
                 key={r.id}
@@ -992,9 +980,10 @@ export default function Monitor() {
             >
               <RefreshCw size={13} className={historyLoading ? "animate-spin" : ""} />
             </button>
-          </div>
-        </div>
-
+            </div>
+          </>
+        }
+      >
         {!historyEnabled ? (
           <p className="text-sm text-glyvex-muted">
             {t("monitor.history.disabledBefore")}<code className="font-mono">monitor.history_enabled</code>{t("monitor.history.disabledAfter")}
@@ -1035,21 +1024,21 @@ export default function Monitor() {
             </div>
           </div>
         )}
-      </div>
+      </CollapsiblePanel>
       )}
 
       {/* LLM Server */}
       {llmSectionVisible && (
-      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <Server size={16} className="text-glyvex-muted" />
-            <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">LLM Server</h2>
+      <CollapsiblePanel
+        icon={Server}
+        title="LLM Server"
+        storageKey="monitor_panel_llm"
+        headerRight={
+          <>
             {llmTier && llmSelected && (
               <span className="text-xs text-glyvex-muted">· {tierLabel(t, llmTier)} · {t("monitor.llm.rangeLabel")} {rangeLabel(t, range)}</span>
             )}
-          </div>
-          {!show("monitor.history") && show("monitor.llm.history") && (
+            {!show("monitor.history") && show("monitor.llm.history") && (
             <div className="flex items-center gap-1">
               {RANGES.map((r) => (
                 <button
@@ -1083,8 +1072,9 @@ export default function Monitor() {
               ))}
             </select>
           )}
-        </div>
-
+          </>
+        }
+      >
         {llmOptions.length === 0 ? (
           <p className="text-sm text-glyvex-muted">
             {t("monitor.llm.noProcessBefore")}<code className="font-mono">--metrics</code>{t("monitor.llm.noProcessAfter")}
@@ -1221,13 +1211,12 @@ export default function Monitor() {
             </>)}
           </>
         )}
-      </div>
+      </CollapsiblePanel>
       )}
 
       {/* Card procesos */}
       {show("monitor.processes") && (
-      <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5">
-        <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide mb-3">{t("monitor.processes.title")}</h2>
+      <CollapsiblePanel title={t("monitor.processes.title")} storageKey="monitor_panel_processes">
         {processes.length === 0 ? (
           <p className="text-sm text-glyvex-muted">{t("monitor.processes.empty")}</p>
         ) : (
@@ -1258,7 +1247,7 @@ export default function Monitor() {
             </table>
           </div>
         )}
-      </div>
+      </CollapsiblePanel>
       )}
     </div>
   );

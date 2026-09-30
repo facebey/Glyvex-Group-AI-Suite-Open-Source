@@ -97,4 +97,10 @@ async def download() -> StreamingResponse:
 async def reset() -> dict:
     was_reset = runtime.reset_runtime()
     logger.info("runtime reseteado: %s", was_reset)
-    return {"reset": was_reset, "status": runtime.runtime_status()}
+    # El frontend setea este status directo en el estado de runtime; sin
+    # `platform` la UI cree que no está en Windows y muestra el aviso
+    # "Windows-only" en vez de la pantalla de descarga.
+    return {
+        "reset": was_reset,
+        "status": {**runtime.runtime_status(), "platform": platform.system()},
+    }

@@ -31,6 +31,7 @@ COMPONENTS: dict[str, tuple[str, list[str]]] = {
     "models": ("models", ["models", "glyvex.models"]),
     "tools": ("tools", ["tools", "glyvex.tools"]),
     "stt": ("stt", ["stt", "glyvex.stt"]),
+    "tts": ("tts", ["tts", "glyvex.tts"]),
     "database": ("database", ["database"]),
 }
 

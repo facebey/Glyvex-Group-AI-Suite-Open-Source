@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import platform
+import socket
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.gzip import GZipMiddleware
@@ -31,7 +33,11 @@ import metrics_export
 import models
 import runtime_api
 import attachments
+import piper_runtime_api
+import kokoro_runtime_api
 import stt
+import stt_runtime_api
+import tts
 import asyncio
 import sys
 
@@ -227,12 +233,47 @@ api_router.include_router(metrics.router, prefix="/metrics", tags=["metrics"])
 api_router.include_router(metrics_export.router, prefix="/metrics", tags=["metrics-export"])
 api_router.include_router(llm_metrics.router, prefix="/llm-metrics", tags=["llm-metrics"])
 api_router.include_router(stt.router, prefix="/stt", tags=["stt"])
+api_router.include_router(stt_runtime_api.router, prefix="/stt/runtime", tags=["stt-runtime"])
+api_router.include_router(tts.router, prefix="/tts", tags=["tts"])
+api_router.include_router(piper_runtime_api.router, prefix="/tts/piper", tags=["tts-piper"])
+api_router.include_router(kokoro_runtime_api.router, prefix="/tts/kokoro", tags=["tts-kokoro"])
 api_router.include_router(runtime_api.router, prefix="/runtime", tags=["runtime"])
 
 app.include_router(api_router)
 
 if FRONTEND_DIST.exists():
+    @app.get("/provision", include_in_schema=False)
+    async def provision_spa() -> FileResponse:
+        # T5.2: la ruta vive en react-router (SPA); el backend sirve
+        # index.html para que el deep-link de Tauri (--provision) resuelva.
+        return FileResponse(FRONTEND_DIST / "index.html")
+
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
+
+
+def _bind_with_fallback(host: str, preferred: int) -> tuple[socket, int]:
+    """
+    Bind de `preferred` con escalera de vecinos. Devuelve (socket ya bound,
+    puerto final). Con `preferred == 0` se pide uno libre al SO directamente.
+
+    El orden importa para la persistencia de la UI (PERS-1): el primer
+    candidato es siempre el que pidió el orquestador (7981), de modo que el
+    origen de la webview sea el mismo en cada arranque; los vecinos solo
+    entran cuando algo ocupa el preferido.
+    """
+    candidates = [preferred] if preferred else [0]
+    candidates += [p for p in range(preferred + 1, preferred + 10)]
+    last_err: OSError | None = None
+    for candidate in candidates:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, candidate))
+            return s, s.getsockname()[1]
+        except OSError as err:
+            last_err = err
+            s.close()
+    raise last_err  # type: ignore[misc]
 
 
 if __name__ == '__main__':
@@ -243,7 +284,20 @@ if __name__ == '__main__':
     import uvicorn
     # 127.0.0.1 por defecto (app local, sin autenticación); GLYVEX_HOST y
     # GLYVEX_PORT lo sobreescriben (mismo contrato que start.cmd/start.ps1).
+    host = os.environ.get("GLYVEX_HOST", "127.0.0.1")
     port = int(os.environ.get("GLYVEX_PORT", "7981"))
+    # Pre-bind con fallback: la webview vive en http://127.0.0.1:<puerto> y
+    # localStorage es POR ORIGEN, así que el puerto debe ser estable entre
+    # arranques (PERS-1). Se intenta el puerto pedido, luego el vecindario
+    # (+1…+9: segunda instancia de la app, dev corriendo a la vez) y solo si
+    # todo falla el SO asigna uno libre. El socket va pre-boundeado a
+    # uvicorn: el puerto reportado es el realmente en uso (sin ventana entre
+    # bind y re-bind que otro proceso podría ocupar).
+    sock, port = _bind_with_fallback(host, port)
+    # Marker para el orquestador: línea limpia con el puerto final. El
+    # console hook (frozen sin consola) redirige stdout al log a menos que
+    # GLYVEX_STDOUT_PIPE=1 (Tauri), en cuyo caso Rust lo lee por pipe.
+    print(f"#PORT_ASSIGNED:{port}#", flush=True)
     # GLYVEX_NO_BROWSER lo exporta el launcher de Tauri: la ventana la da la
     # shell y no hay que abrir el navegador.
     _no_browser = os.environ.get("GLYVEX_NO_BROWSER", "").strip().lower() in ("1", "true", "yes")
@@ -268,4 +322,6 @@ if __name__ == '__main__':
                 time.sleep(1)
 
         threading.Thread(target=_open_when_ready, daemon=True).start()
-    uvicorn.run(app, host=os.environ.get("GLYVEX_HOST", "127.0.0.1"), port=port, loop='asyncio')
+    # uvicorn hereda el socket ya bound (el puerto reportado arriba es el
+    # definitivo). `sockets` va en Server.run(), no en Config (uvicorn >= 0.10).
+    uvicorn.Server(uvicorn.Config(app, loop='asyncio')).run(sockets=[sock])

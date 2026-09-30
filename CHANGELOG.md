@@ -3,6 +3,98 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
+## [Unreleased]
+
+### Agregado
+- **TTS neuronal (Piper + Kokoro) empaquetado en el sidecar**: la cadena
+  neural (piper, kokoro-onnx, onnxruntime, espeak-ng) ahora viaja dentro del
+  `glyvex-backend` (Fase 1b del empaquetado Tauri). Voces y modelo se descargan
+  en Ajustes → TTS; el motor `auto` elige Kokoro → Piper → SAPI según qué esté
+  listo.
+- **Pantalla de provisión — paso TTS**: además del check de voces SAPI, un
+  puntero directo para configurar el TTS neuronal en Ajustes.
+
+## [0.6.3-beta] — 2026-09-28
+
+### Agregado
+- **Empaquetado nativo Windows (Tauri 2 + NSIS)** per-user (sin UAC):
+  bootstrapper de WebView2 (auto-download en Win10 antiguos), branding del
+  wizard (header 150x57 + sidebar 164x314), shortcut en Inicio → "Glyvex".
+- **Ciclo de vida del sidecar**: la app arranca `glyvex-backend` (PyInstaller),
+  health-check con auto-reintento, kill al cerrar la ventana, y overlay
+  splash/error con botón Reintentar en la UI.
+- **Origen SPA estable (7981)**: el release arranca siempre en 7981 (con
+  fallback secuencial 7982…7990 solo si está ocupado); la SPA la sirve el
+  backend con rutas relativas `/api/...`.
+- **Arranque `--provision`**: la app abre directo en la pantalla de
+  provisión.
+- **Pantalla de provisión (T5.3)**: 3 pasos — runtime llama.cpp (obligatorio),
+  STT whisper.cpp + modelo base, TTS (check de voces SAPI) — con progreso
+  real de las descargas, reintentos y "Entrar a la app".
+- **STT whisper.cpp (nativo)**: runtime descargable (binario + modelo
+  ggml-base), dictado del micrófono a WAV 16 kHz y selector de motor
+  (auto / navegador / whisper.cpp / faster-whisper) en Opciones.
+- **TTS SAPI (local de Windows)**: botón "escuchar" en las respuestas del
+  chat y sección en Opciones con estado, activar/desactivar, voz y velocidad.
+- **Idioma de transcripción unificado**: un solo selector para todos los
+  motores (automático / es / en / pt / fr / de / it) en Opciones.
+- **Paneles colapsables** en Launcher (los 11, incluidos Opciones básicas y
+  Avanzadas) y Monitor (GPU, CPU, RAM, Historial, LLM Server, Procesos):
+  header clicable, estado por panel persistido (localStorage).
+
+### Corregido
+- **Descarga de modelo STT en Opciones**: el crash `Cannot read properties
+  of null (reading 'aborted')` cortaba el progreso en la UI (la descarga
+  seguía en el backend y el reintento caía en "ya hay una descarga en
+  curso"); ahora el stream se lee con signal válido y la pantalla se
+  refresca sola hasta que el modelo queda listo.
+- **Mensaje de faster-whisper en la app empaquetada**: antes mandaba a
+  `pip install` (no aplica al bundle); ahora el estado STT reporta
+  `packaged` y la UI deja de mostrar la tarjeta de advertencia de ese motor
+  con motor `auto` (y lo ofrece deshabilitado en el selector), porque en el
+  bundle nunca se puede instalar.
+- **Idioma heredado en STT local**: whisper.cpp y faster-whisper ignoraban
+  `stt.language` y transcribían en inglés (el default de los motores); ahora
+  lo heredan salvo override explícito.
+- **host/port en templates**: el puerto configurado se perdía al
+  guardar/editar un template (faltaban esos campos en `TEMPLATE_FIELDS`).
+- **App empaquetada: tema/opciones no persistían** (PERS-1): el backend
+  release pedía un puerto libre aleatorio al SO, el `localStorage` era por
+  origen y cada arranque caía en uno distinto; ahora el release arranca
+  siempre en 7981 (con fallback secuencial 7982…7990 si está ocupado) y la
+  persistencia sobrevive al cierre/abrir de la app.
+- **App empaquetada: `ERR_CONNECTION_REFUSED` / pantalla de error al
+  abrir**: el shell Tauri redirigía a la SPA antes de que el backend
+  escuchara (race de bootstrap); ahora el shell emite el estado del sidecar
+  por eventos (con heartbeat de 5 s) y la UI redirige solo cuando el
+  health-check pasa, con fallback a recargar a los 180 s.
+- **Launcher: "build desconocida" con llama.cpp b11146**: el probe de
+  `--version` leía solo la primera línea (que en esa build es un log de
+  inicialización sin número); ahora recorre todas las líneas hasta
+  encontrar el build.
+- **Config → Runtime → Reinstalar: aviso falso "Windows-only"**: el
+  endpoint de reset no devolvía `platform` (solo lo devolvía el de status);
+  ahora el reset incluye la plataforma y la UI muestra la pantalla de
+  descarga correcta.
+- **STT: fallback automático a faster-whisper**: con el motor `auto` y el
+  runtime whisper.cpp no disponible, antes quedaba sin transcripción;
+  ahora cae a faster-whisper si está instalado (y la UI empaquetada no
+  ofrece ese motor, ya que en el bundle no se puede instalar).
+- **Ventanas CMD parpadeantes al abrir el Launcher y al lanzar modelos**:
+  los hijos de consola (probe de `--help`/`--version` del launcher y
+  whisper-cli, arranque de llama-server) se crean ahora sin ventana
+  (`CREATE_NO_WINDOW` en Windows).
+
+### Cambiado
+- **Layout responsive**: max-w de la app 1600 px (2100 en ruta Launcher),
+  sidebar 360 px en 2xl+ y drawer de historial 360 px (antes se cortaba en
+  pantallas de 1280 px).
+
+### Baseline
+- Suite completa: **471 tests en verde**; build de producción OK; instalador
+  NSIS verificado en máquina (install silencioso → sidecar → SPA → shortcut),
+  re-empaquetado 2026-09-28 con los fixes de arriba validado en el exe.
+
 ## [0.6.2-beta] — 2026-09-26
 
 ### Cambiado

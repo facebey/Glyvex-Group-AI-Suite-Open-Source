@@ -1,27 +1,31 @@
 """
 stt.py — Voz a texto para el chat (Bloque 3 / módulo M3).
 
-Dos motores:
+Tres motores:
 
-  browser   El navegador transcribe con la Web Speech API y el backend no se
-            entera. Cero latencia de red hacia acá, cero dependencias — pero
-            en Chrome el audio viaja a servidores de Google, así que NO es
-            local, y la API no está disponible en el WebView de Tauri ni en
-            Firefox.
-  whisper   El navegador graba con MediaRecorder y manda el blob acá, que lo
-            transcribe con faster-whisper. Totalmente local, funciona en
-            cualquier contenedor web, pero necesita el paquete instalado y
-            descarga los pesos del modelo la primera vez.
+  browser     El navegador transcribe con la Web Speech API y el backend no
+              se entera. Cero latencia de red hacia acá, cero dependencias —
+              pero en Chrome el audio viaja a servidores de Google, así que
+              NO es local, y la API no está disponible en el WebView de
+              Tauri ni en Firefox.
+  whispercpp  (D6, Tauri) El navegador graba y manda el audio acá, que lo
+              pasa a whisper-cli (binario nativo descargado en el primer uso,
+              ver stt_runtime.py). Totalmente local, sin pip, y es el único
+              que funciona dentro del bundle de Tauri sin PyInstaller.
+  whisper     El navegador graba con MediaRecorder y manda el blob acá, que
+              lo transcribe con faster-whisper. Totalmente local, funciona en
+              cualquier contenedor web, pero necesita el paquete instalado y
+              descarga los pesos del modelo la primera vez.
 
 El motor se elige con `stt.engine` (o la variable de entorno STT_ENGINE):
 
-  auto      (default) El frontend consulta /api/stt/status, mira si el
-            navegador soporta SpeechRecognition y decide. Es lo que hace
-            falta para que la misma build funcione en Chrome durante el
-            desarrollo y dentro del bundle de Tauri, donde el motor del
-            navegador no existe.
-  browser   Fuerza Web Speech API.
-  whisper   Fuerza faster-whisper.
+  auto        (default) Elige whispercpp si el runtime está listo, si no
+            faster-whisper, si no el navegador. Es lo que hace falta para que
+            la misma build funcione en Chrome durante el desarrollo y dentro
+            del bundle de Tauri, donde el motor del navegador no existe.
+  browser     Fuerza Web Speech API.
+  whispercpp  Fuerza el binario nativo.
+  whisper     Fuerza faster-whisper.
 
 faster-whisper NO está en requirements.txt. Arrastra CTranslate2 y descarga
 pesos en el primer uso, así que empaquetarlo por defecto inflaría el bundle
@@ -35,8 +39,11 @@ TTS (texto a voz) queda fuera de esta versión a propósito.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import platform
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -46,6 +53,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from config import config
+from paths import FROZEN
+import stt_runtime
 
 logger = logging.getLogger("glyvex.stt")
 
@@ -70,6 +79,131 @@ WHISPER_MODEL_SIZES_MB = {
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
+# whisper.cpp como binario nativo (decisión D6, POC T2.1): 8 threads era el
+# punto dulce medido (4t=2.6 s, 8t=1.9 s, 16t=1.9 s para 17 s de audio).
+WHISPERCPP_THREADS = 8
+# Tope duro por transcripción: el binario no tiene flag de timeout, así que
+# si algo se cuelga (modelo corrupto, CPU saturada) se mata el proceso.
+WHISPERCPP_TIMEOUT_S = 180
+
+
+def _whispercpp_binary() -> Path | None:
+    """Ruta de whisper-cli si el runtime STT está instalado y probeado."""
+    if stt_runtime.stt_runtime_status()["state"] != "ready":
+        return None
+    return stt_runtime.stt_runtime_dir() / stt_runtime.STT_BINARY_NAME
+
+
+def _whispercpp_model_path(model_name: str) -> Path | None:
+    """Ruta del modelo .bin si existe y es de un modelo del catálogo STT."""
+    if model_name not in stt_runtime.STT_MODELS:
+        return None
+    path = stt_runtime.stt_model_path(model_name)
+    return path if path.is_file() else None
+
+
+def _app_language() -> str:
+    """Código corto del idioma de la app ('es-AR' → 'es'). Es el default
+    cuando no se elige idioma: el auto-detect nativo de whisper.cpp (modelo
+    base) sesga a inglés y el motor del navegador ya defaultea a es-AR."""
+    return str(config.get("app.language", "es")).split("-")[0]
+
+
+def _stt_language(settings: dict, override: str | None = None) -> str:
+    """Idioma pedido para transcribir (todos los motores): override de la
+    petición, luego `stt.whisper_language` (override legado M3), después
+    `stt.language` y, si todo queda vacío, el idioma de la app: sin `-l`,
+    whisper.cpp detecta solo y con el modelo base sesga a inglés aunque el
+    audio sea español (mismo default que el motor del navegador)."""
+    return (
+        override
+        or settings.get("whisper_language")
+        or settings.get("language")
+        or _app_language()
+    )
+
+
+def _faster_whisper_language(settings: dict, override: str | None = None) -> str:
+    """Misma jerarquía que `_stt_language`, pero con el sufijo regional
+    cortado: faster-whisper solo acepta códigos de 2 letras ("es-AR" → "es").
+    Solo 'auto' explícito → "" (detección); el vacío ya resuelve al idioma de
+    la app en `_stt_language`."""
+    lang = _stt_language(settings, override).strip()
+    if not lang or lang.lower() == "auto":
+        return ""
+    return lang.split("-")[0]
+
+
+def _transcribe_whispercpp_sync(
+    binary: Path,
+    model_path: Path,
+    wav_path: str,
+    out_prefix: str,
+    threads: int,
+    language: str,
+    translate: bool = False,
+) -> tuple[str, str, float]:
+    """
+    Corre whisper-cli contra un WAV (16 kHz mono) y devuelve
+    (texto, idioma_detectado, duracion_s).
+
+    `-np -nt` limpia la salida de stdout y `-oj -of` escribe el JSON en
+    `<out_prefix>.json`, que es donde se lee el texto de verdad: el stdout
+    del binario pasa por la codepage de la consola de Windows y las tildes
+    salen corruptas, el JSON sí es UTF-8 puro.
+    """
+    cmd = [
+        str(binary),
+        "-m", str(model_path),
+        "-f", wav_path,
+        "-t", str(threads),
+        "-np", "-nt",
+        "-oj", "-of", out_prefix,
+    ]
+    # whisper-cli solo acepta códigos de idioma de 2 letras; "es-AR" → "es".
+    # "" o "auto" se omiten: el binario detecta solo.
+    lang_code = (language or "").strip().split("-")[0].lower()
+    if translate:
+        # --translate traduce a inglés. El origen normalmente se detecta solo,
+        # pero con el modelo base la detección sesga a inglés y la traducción
+        # queda en no-op (vuelve el texto original). Si hay origen conocido
+        # (override o default de la app) se ancla con -l para que sea fiable.
+        cmd += ["--translate"]
+        if lang_code and lang_code != "auto":
+            cmd += ["-l", lang_code]
+    elif lang_code and lang_code != "auto":
+        cmd += ["-l", lang_code]
+
+    kwargs: dict[str, Any] = {}
+    if platform.system() == "Windows":
+        # Sin CREATE_NO_WINDOW, cada transcripción abre una consola visible.
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=WHISPERCPP_TIMEOUT_S,
+        **kwargs,
+    )
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip()[-400:]
+        raise RuntimeError(f"whisper-cli terminó con {proc.returncode}: {tail}")
+
+    out_file = Path(out_prefix + ".json")
+    if not out_file.is_file():
+        raise RuntimeError("whisper-cli no produjo el JSON de salida")
+
+    data = json.loads(out_file.read_text(encoding="utf-8"))
+    segments = data.get("transcription") or []
+    text = " ".join(str(seg.get("text", "")).strip() for seg in segments).strip()
+    detected = str((data.get("result") or {}).get("language") or "")
+    duration_ms = max(
+        (int(seg.get("offsets", {}).get("to", 0)) for seg in segments),
+        default=0,
+    )
+    return text, detected, duration_ms / 1000.0
+
 # El modelo se carga una sola vez y se comparte. El lock evita que dos
 # grabaciones simultáneas disparen dos descargas del mismo modelo.
 _model: Any = None
@@ -93,7 +227,7 @@ def _settings() -> dict[str, Any]:
     # La variable de entorno gana: sirve para probar un motor sin tocar
     # config.json.
     engine = (os.environ.get("STT_ENGINE") or config.get("stt.engine", "auto")).lower()
-    if engine not in ("auto", "browser", "whisper"):
+    if engine not in ("auto", "browser", "whispercpp", "whisper"):
         engine = "auto"
     return {
         "engine": engine,
@@ -103,7 +237,27 @@ def _settings() -> dict[str, Any]:
         "compute_type": str(config.get("stt.whisper_compute_type", "int8")),
         # "" = que Whisper detecte el idioma solo.
         "whisper_language": str(config.get("stt.whisper_language", "")),
+        "translate_english": bool(config.get("stt.translate_english", False)),
+        "whispercpp_threads": WHISPERCPP_THREADS,
     }
+
+
+def _effective_engine(settings: dict[str, Any]) -> str:
+    """
+    `auto` resuelve a whispercpp si el runtime está completo (binario probeado
+    + modelo presente), si no a faster-whisper. En el bundle empaquetado
+    faster-whisper nunca existe, así que el fallback es `browser`: el dictado
+    no debe morir con 501 solo porque falta el runtime (STT-1). `browser` se
+    resuelve en el frontend: este backend nunca transcribe en modo browser.
+    """
+    engine = settings["engine"]
+    if engine != "auto":
+        return engine
+    binary = _whispercpp_binary()
+    model = _whispercpp_model_path(settings["model"]) if binary else None
+    if binary and model:
+        return "whispercpp"
+    return "browser" if FROZEN else "whisper"
 
 
 def _faster_whisper_installed() -> bool:
@@ -205,9 +359,59 @@ async def stt_status() -> dict[str, Any]:
     installed = _faster_whisper_installed()
     cached = _model_is_cached(settings["model"]) if installed else False
 
+    runtime = stt_runtime.stt_runtime_status()
+    binary = _whispercpp_binary()
+    model_path = _whispercpp_model_path(settings["model"])
+    if runtime["state"] == "ready" and model_path is None:
+        cpp_reason = (
+            f"El modelo `{settings['model']}` no está disponible para "
+            "whisper.cpp. Modelos: "
+            + ", ".join(sorted(stt_runtime.STT_MODELS))
+            + "."
+        )
+    elif runtime["state"] == "missing":
+        # STT-2: sin directorio no hay nada roto — hay que descargarlo, y el
+        # botón "Descargar runtime" de esta misma sección lo hace.
+        cpp_reason = (
+            "El runtime de whisper.cpp no está descargado: usá el botón "
+            "«Descargar runtime» de esta sección o la pantalla de Provisión."
+        )
+    elif runtime["state"] == "downloading":
+        cpp_reason = "Descargando el runtime de whisper.cpp…"
+    elif runtime["state"] == "unsupported":
+        cpp_reason = "whisper.cpp requiere Windows; usá otro motor."
+    elif runtime["state"] == "error":
+        missing = runtime.get("missing_files") or []
+        cause = runtime.get("error") or "El runtime de whisper.cpp tiene un error."
+        cpp_reason = (
+            cause
+            + (f" Faltan: {', '.join(missing)}." if missing else "")
+            + " Usá «Descargar runtime» para reintentar."
+        )
+    else:
+        cpp_reason = None
+
     return {
         "engine": settings["engine"],
+        "engine_effective": _effective_engine(settings),
+        # App empaquetada (PyInstaller): faster-whisper no puede instalarse
+        # ahí, y la UI lo usa para no ofrecerlo como motor ni mostrar su
+        # estado como advertencia.
+        "packaged": FROZEN,
         "language": settings["language"],
+        # Default del toggle de traducción del chat (stt.translate_english).
+        "translate_english": settings["translate_english"],
+        "whispercpp": {
+            "installed": runtime["state"] == "ready",
+            # STT-2: el estado fino del runtime para que la UI distinga
+            # "bajar" (missing) de "roto" (error con archivos faltantes).
+            "runtime_state": runtime["state"],
+            "missing_files": runtime.get("missing_files") or [],
+            "model": settings["model"],
+            "model_ready": model_path is not None,
+            "threads": settings["whispercpp_threads"],
+            "reason": cpp_reason,
+        },
         "whisper": {
             "installed": installed,
             "model": settings["model"],
@@ -219,7 +423,13 @@ async def stt_status() -> dict[str, Any]:
             "reason": None
             if installed
             else (
-                "faster-whisper no está instalado. `pip install -r "
+                # En el bundle no se empaqueta faster-whisper (dependencia
+                # opcional): el motor local es whisper.cpp.
+                "faster-whisper no viene en la app empaquetada; usá el motor "
+                "whisper.cpp. En desarrollo: `pip install -r "
+                "requirements-optional.txt`."
+                if FROZEN
+                else "faster-whisper no está instalado. `pip install -r "
                 "requirements-optional.txt` para habilitar la transcripción local."
             ),
         },
@@ -245,11 +455,13 @@ async def stt_warmup() -> dict[str, Any]:
 
 
 def _transcribe_sync(
-    model: Any, path: str, language: str
+    model: Any, path: str, language: str, translate: bool = False
 ) -> tuple[str, str, float]:
     segments, info = model.transcribe(
         path,
-        language=language or None,
+        # translate: el origen se detecta solo y la salida siempre es inglés.
+        language=None if translate else (language or None),
+        task="translate" if translate else "transcribe",
         beam_size=5,
         vad_filter=True,
     )
@@ -262,15 +474,23 @@ def _transcribe_sync(
 async def transcribe(
     audio: UploadFile = File(...),
     language: str = Form(""),
+    translate: bool = Form(False),
 ) -> TranscriptionResponse:
     """
     Transcribe el audio grabado por MediaRecorder.
 
-    El navegador manda webm/opus. faster-whisper decodifica con PyAV, que
-    trae sus propios decoders, así que no hace falta un ffmpeg instalado
-    aparte en la máquina del usuario.
+    El navegador manda webm/opus a faster-whisper (decodifica con PyAV, que
+    trae sus propios decoders: no hace falta ffmpeg aparte) o WAV 16 kHz mono
+    a whisper-cli. Con `translate` los motores locales detectan el idioma de
+    origen y transcriben directo a inglés (whisper.cpp `--translate` /
+    faster-whisper `task="translate"`); el `language` queda ignorado.
     """
     settings = _settings()
+    engine = _effective_engine(settings)
+    if engine == "browser":
+        # El frontend nunca manda audio en modo browser; si llega, cae al
+        # motor local de antes en vez de explotar.
+        engine = "whisper"
 
     raw = await audio.read()
     if not raw:
@@ -281,38 +501,90 @@ async def transcribe(
             detail=f"El audio supera los {MAX_AUDIO_BYTES // (1024 * 1024)} MB.",
         )
 
-    model = await _get_model()
     started = time.monotonic()
-    logger.info("transcripcion inicio: bytes=%d model=%s", len(raw), settings["model"])
+    logger.info("transcripcion inicio: engine=%s bytes=%d model=%s", engine, len(raw), settings["model"])
 
-    suffix = Path(audio.filename or "audio.webm").suffix or ".webm"
-    tmp_path: str | None = None
-    try:
-        # delete=False porque en Windows no se puede reabrir un NamedTemporary
-        # todavía abierto; se borra a mano en el finally.
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(raw)
-            tmp_path = tmp.name
+    if engine == "whispercpp":
+        binary = _whispercpp_binary()
+        model_path = _whispercpp_model_path(settings["model"])
+        if binary is None or model_path is None:
+            raise HTTPException(
+                status_code=501,
+                detail=(
+                    "El runtime de whisper.cpp no está listo: bajalo desde "
+                    "Configuración → Voz con el botón «Descargar runtime» "
+                    "(o /api/stt/runtime/download)."
+                ),
+            )
+        suffix = Path(audio.filename or "audio.wav").suffix or ".wav"
+        tmp_path: str | None = None
+        out_prefix: str | None = None
+        try:
+            # delete=False porque en Windows no se puede reabrir un
+            # NamedTemporary todavía abierto; se borra a mano en el finally.
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(raw)
+                tmp_path = tmp.name
+            out_prefix = f"{tmp_path}.stt"
 
-        text, detected, duration = await asyncio.to_thread(
-            _transcribe_sync, model, tmp_path, language or settings["whisper_language"]
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500, detail=f"No se pudo transcribir el audio: {exc}"
-        ) from exc
-    finally:
-        if tmp_path:
-            try:
-                Path(tmp_path).unlink(missing_ok=True)
-            except OSError:
-                pass
+            text, detected, duration = await asyncio.to_thread(
+                _transcribe_whispercpp_sync,
+                binary,
+                model_path,
+                tmp_path,
+                out_prefix,
+                settings["whispercpp_threads"],
+                _stt_language(settings, language),
+                translate,
+            )
+        except HTTPException:
+            raise
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(
+                status_code=504,
+                detail=f"La transcripción superó los {WHISPERCPP_TIMEOUT_S} s.",
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500, detail=f"No se pudo transcribir el audio: {exc}"
+            ) from exc
+        finally:
+            for path in (tmp_path, out_prefix):
+                if path:
+                    try:
+                        Path(path).unlink(missing_ok=True)
+                        Path(path + ".json").unlink(missing_ok=True)
+                    except OSError:
+                        pass
+    else:
+        model = await _get_model()
+        suffix = Path(audio.filename or "audio.webm").suffix or ".webm"
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(raw)
+                tmp_path = tmp.name
+
+            text, detected, duration = await asyncio.to_thread(
+                _transcribe_sync, model, tmp_path, _faster_whisper_language(settings, language),
+                translate,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500, detail=f"No se pudo transcribir el audio: {exc}"
+            ) from exc
+        finally:
+            if tmp_path:
+                try:
+                    Path(tmp_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     logger.info(
-        "transcripcion fin: chars=%d lang=%s audio_s=%.1f duracion_s=%.1f",
-        len(text), detected, duration, time.monotonic() - started,
+        "transcripcion fin: engine=%s chars=%d lang=%s translate=%s audio_s=%.1f duracion_s=%.1f",
+        engine, len(text), detected, translate, duration, time.monotonic() - started,
     )
 
     return TranscriptionResponse(

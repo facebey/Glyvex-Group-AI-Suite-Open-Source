@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Check, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, Download, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import Section from "./ui/Section.jsx";
 import Field from "./ui/Field.jsx";
 import { formInputClasses } from "../lib/styles.js";
+import { consumeSSE } from "../lib/sse.js";
 
 /**
  * Secciones de configuración del módulo de chat: búsqueda web, voz a texto y
@@ -33,6 +34,23 @@ const WHISPER_MODELS = [
 ];
 
 const FALLBACK_PROVIDERS = [{ id: "ddgs", label: "DuckDuckGo", requires: null, hint: null }];
+
+// Nombres nativos: no se traducen. El backend corta la región para los
+// motores que solo aceptan 2 letras ("es-AR" → "es"); el navegador la usa
+// completa como BCP-47.
+const STT_LANGUAGES = [
+  { id: "es-AR", label: "Español (AR)" },
+  { id: "es", label: "Español" },
+  { id: "en-US", label: "Inglés (US)" },
+  { id: "en", label: "Inglés" },
+  { id: "pt-BR", label: "Portugués (BR)" },
+  { id: "pt", label: "Portugués" },
+  { id: "fr", label: "Francés" },
+  { id: "de", label: "Alemán" },
+  { id: "it", label: "Italiano" },
+];
+
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function Toggle({ label, hint, checked, onChange }) {
   return (
@@ -123,6 +141,196 @@ function NumberField({ label, hint, value, min, max, step, onCommit }) {
   );
 }
 
+/**
+ * Voz neuronal Piper (TTS-1): selector de voz del catálogo, botón de descarga
+ * con progreso por SSE y estado del motor. Solo se muestra cuando el engine
+ * de TTS es auto o piper.
+ */
+function PiperVoice({ t, piper, voiceName, onVoice, downloading, downloadError, onDownload }) {
+  const engine = piper.engine || {};
+  const voices = piper.voices || [];
+  const selected =
+    voices.find((v) => v.name === (voiceName || piper.default_voice)) || voices[0] || null;
+
+  if (!engine.available) {
+    return (
+      <p className="flex items-start gap-1.5 text-sm text-amber-400">
+        <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+        <span>{t("chatSettings.ttsPiperEngineMissing", { detail: engine.detail || "" })}</span>
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <Field label={t("chatSettings.ttsPiperVoice")} hint={t("chatSettings.ttsPiperVoiceHint")}>
+        <select
+          className={formInputClasses}
+          value={selected?.name || ""}
+          onChange={(e) => onVoice(e.target.value)}
+        >
+          {voices.map((v) => (
+            <option key={v.name} value={v.name}>
+              {v.label}
+              {v.state === "ready" ? ` — ${Math.round(v.size_mb)} MB` : ""}{" "}
+              ({t(`chatSettings.state${cap(v.state)}`)})
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      {selected &&
+        selected.state !== "ready" &&
+        selected.state !== "downloading" &&
+        downloading?.kind !== "piperVoice" && (
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => onDownload(selected.name)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border border-glyvex-border-soft text-glyvex-text hover:bg-glyvex-veil-disabled"
+            >
+              <Download size={14} />
+              {t("chatSettings.ttsPiperDownload", {
+                mb: Math.round(selected.download_mb || 0),
+              })}
+            </button>
+            {selected.error && <span className="text-xs text-amber-400">{selected.error}</span>}
+          </div>
+        )}
+
+      {downloading?.kind === "piperVoice" && (
+        <div>
+          <p className="text-sm text-glyvex-muted">
+            {t("chatSettings.ttsPiperDownloading", {
+              voice: downloading.name,
+              pct: Math.round(downloading.pct),
+            })}
+            {downloading.detail ? ` — ${downloading.detail}` : ""}
+          </p>
+          <div className="h-1.5 rounded-full bg-glyvex-surface-code overflow-hidden mt-1.5">
+            <div
+              className="h-full bg-glyvex-accent transition-all"
+              style={{ width: `${downloading.pct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {downloadError?.kind === "piperVoice" && !downloading && (
+        <p className="flex items-start gap-1.5 text-sm text-red-400">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+          {downloadError.message}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * Voz neuronal Kokoro (TTS-2): descarga del modelo compartido (ONNX + bin con
+ * las 54 voces) con progreso por SSE, selector de voz del catálogo y borrado
+ * del modelo. Solo se muestra cuando el engine de TTS es auto o kokoro.
+ */
+function KokoroVoice({
+  t,
+  kokoro,
+  voiceName,
+  onVoice,
+  downloading,
+  downloadError,
+  onDownload,
+  onDelete,
+}) {
+  const engine = kokoro.engine || {};
+  const voices = kokoro.voices || [];
+  const selected = voices.find((v) => v.name === voiceName) || voices[0] || null;
+  const modelState = kokoro.model_state || "missing";
+
+  if (!engine.available) {
+    return (
+      <p className="flex items-start gap-1.5 text-sm text-amber-400">
+        <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+        <span>{t("chatSettings.ttsKokoroEngineMissing", { detail: engine.detail || "" })}</span>
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <Field label={t("chatSettings.ttsKokoroVoice")} hint={t("chatSettings.ttsKokoroVoiceHint")}>
+        <select
+          className={formInputClasses}
+          value={selected?.name || ""}
+          onChange={(e) => onVoice(e.target.value)}
+        >
+          {voices.map((v) => (
+            <option key={v.name} value={v.name}>
+              {v.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      {modelState !== "ready" &&
+        modelState !== "downloading" &&
+        downloading?.kind !== "kokoroModel" && (
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border border-glyvex-border-soft text-glyvex-text hover:bg-glyvex-veil-disabled"
+            >
+              <Download size={14} />
+              {t("chatSettings.ttsKokoroDownload", {
+                mb: Math.round(kokoro.download_mb || 0),
+              })}
+            </button>
+            {modelState === "error" && (
+              <span className="text-xs text-amber-400">
+                {t("chatSettings.ttsKokoroModelError")}
+              </span>
+            )}
+          </div>
+        )}
+
+      {modelState === "ready" && downloading?.kind !== "kokoroModel" && (
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border border-glyvex-border-soft text-amber-400 hover:bg-glyvex-veil-disabled"
+          >
+            <Trash2 size={14} />
+            {t("chatSettings.ttsKokoroDelete")}
+          </button>
+        </div>
+      )}
+
+      {downloading?.kind === "kokoroModel" && (
+        <div>
+          <p className="text-sm text-glyvex-muted">
+            {t("chatSettings.ttsKokoroDownloading", { pct: Math.round(downloading.pct) })}
+            {downloading.detail ? ` — ${downloading.detail}` : ""}
+          </p>
+          <div className="h-1.5 rounded-full bg-glyvex-surface-code overflow-hidden mt-1.5">
+            <div
+              className="h-full bg-glyvex-accent transition-all"
+              style={{ width: `${downloading.pct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {downloadError?.kind === "kokoroModel" && !downloading && (
+        <p className="flex items-start gap-1.5 text-sm text-red-400">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+          {downloadError.message}
+        </p>
+      )}
+    </>
+  );
+}
+
 function CheckButton({ onClick, checking }) {
   const { t } = useTranslation();
   return (
@@ -143,25 +351,89 @@ export default function ChatSettings({ config, onChange }) {
   const { t } = useTranslation();
   const [toolsStatus, setToolsStatus] = useState(null);
   const [sttStatus, setSttStatus] = useState(null);
-  const [checking, setChecking] = useState(false);
+  const [sttModels, setSttModels] = useState(null);
+  const [ttsStatus, setTtsStatus] = useState(null);
+  // STT-3: el spinner es por sección ("search" | "stt" | "tts"); sin sección
+  // es una reconsulta silenciosa (arranque y polling). Antes un solo flag
+  // hacía girar a los 4 semáforos a la vez.
+  const [checking, setChecking] = useState(null);
+  const [downloading, setDownloading] = useState(null); // { kind, name, pct, detail }
+  const [downloadError, setDownloadError] = useState(null);
+  const downloadAbortRef = useRef(null);
+  useEffect(() => () => downloadAbortRef.current?.abort(), []);
 
-  const loadStatus = useCallback(async () => {
-    setChecking(true);
-    const [tools, stt] = await Promise.all([
+  const loadStatus = useCallback(async (section) => {
+    if (section) setChecking(section);
+    const [tools, stt, models, tts] = await Promise.all([
       fetch("/api/chat/tools/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch("/api/stt/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/stt/runtime/models").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/tts/status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     setToolsStatus(tools);
     setSttStatus(stt);
-    setChecking(false);
+    setSttModels(models);
+    setTtsStatus(tts);
+    setChecking(null);
   }, []);
 
   useEffect(() => {
     loadStatus();
   }, [loadStatus]);
 
+  // Descargas que arrancaron desde otra vista (p. ej. /provision): el
+  // backend sigue trabajando aunque la UI no lea el stream, así se
+  // reconsulta periódicamente (silencioso: sin spinner) hasta que el
+  // modelo o el runtime salgan de "downloading".
+  const modelBusy = (sttModels?.models || []).some((m) => m.state === "downloading");
+  const runtimeBusy = sttStatus?.whispercpp?.runtime_state === "downloading";
+  const piperVoiceBusy = (ttsStatus?.piper?.voices || []).some(
+    (v) => v.state === "downloading"
+  );
+  const kokoroModelBusy = ttsStatus?.kokoro?.model_state === "downloading";
+  useEffect(() => {
+    if (!modelBusy && !runtimeBusy && !piperVoiceBusy && !kokoroModelBusy) return undefined;
+    const id = setInterval(() => loadStatus(), 2500);
+    return () => clearInterval(id);
+  }, [modelBusy, runtimeBusy, piperVoiceBusy, kokoroModelBusy, loadStatus]);
+
+  // Descarga por SSE (modelo o runtime): progreso en vivo, y al terminar se
+  // reconsultan los estados para refrescar los selectores. El fetch NO lleva
+  // signal a propósito: si la UI va, el backend termina la descarga igual.
+  const startDownload = useCallback(
+    async (kind, url, name) => {
+      setDownloadError(null);
+      setDownloading({ kind, name, pct: 0, detail: "" });
+      const controller = new AbortController();
+      downloadAbortRef.current = controller;
+      try {
+        const res = await fetch(url, { method: "POST" });
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          throw new Error(detail.detail || `El servidor respondió ${res.status}`);
+        }
+        await consumeSSE(res, controller.signal, (event) => {
+          if (event.type === "progress") {
+            setDownloading({ kind, name, pct: event.pct, detail: event.detail });
+          } else if (event.type === "error") {
+            throw new Error(event.message);
+          }
+        });
+        await loadStatus();
+      } catch (err) {
+        if (err.name !== "AbortError") {
+          setDownloadError({ kind, message: err.message || String(err) });
+        }
+      } finally {
+        setDownloading(null);
+      }
+    },
+    [loadStatus]
+  );
+
   const tools = config.tools || {};
   const stt = config.stt || {};
+  const tts = config.tts || {};
   const attachments = config.attachments || {};
 
   function patch(sectionName, values) {
@@ -174,20 +446,24 @@ export default function ChatSettings({ config, onChange }) {
   const providers = toolsStatus?.providers?.length ? toolsStatus.providers : FALLBACK_PROVIDERS;
   const activeProvider = providers.find((p) => p.id === (tools.search_provider || "ddgs"));
   const whisper = sttStatus?.whisper || {};
+  const whispercpp = sttStatus?.whispercpp || {};
+  const packaged = Boolean(sttStatus?.packaged);
+  const cppModels = sttModels?.models || [];
+  const selectedModel = cppModels.find((m) => m.name === (stt.whisper_model || "base")) || null;
 
   return (
     <>
       <Section title={t("chatSettings.sectionSearch")}>
         <div className="flex items-start justify-between gap-4">
           <StatusLine
-            loading={checking}
+            loading={checking === "search"}
             ready={toolsStatus?.search?.ready}
             reason={toolsStatus?.search?.reason}
             okLabel={t("chatSettings.searchOk", {
               provider: toolsStatus?.search?.provider_label || t("chatSettings.providerDefault"),
             })}
           />
-          <CheckButton onClick={loadStatus} checking={checking} />
+          <CheckButton onClick={() => loadStatus("search")} checking={checking === "search"} />
         </div>
 
         <Field label={t("chatSettings.provider")} hint={activeProvider?.hint}>
@@ -270,9 +546,11 @@ export default function ChatSettings({ config, onChange }) {
           hint={
             stt.engine === "browser"
               ? t("chatSettings.engineHintBrowser")
-              : stt.engine === "whisper"
-                ? t("chatSettings.engineHintWhisper")
-                : t("chatSettings.engineHintAuto")
+              : stt.engine === "whispercpp"
+                ? t("chatSettings.engineHintWhisperCpp")
+                : stt.engine === "whisper"
+                  ? t("chatSettings.engineHintWhisper")
+                  : t("chatSettings.engineHintAuto")
           }
         >
           <select
@@ -281,16 +559,145 @@ export default function ChatSettings({ config, onChange }) {
             onChange={(e) => patch("stt", { engine: e.target.value })}
           >
             <option value="auto">{t("chatSettings.engineAuto")}</option>
+            <option value="whispercpp">{t("chatSettings.engineWhisperCpp")}</option>
             <option value="browser">{t("chatSettings.engineBrowser")}</option>
-            <option value="whisper">{t("chatSettings.engineWhisper")}</option>
+            <option value="whisper" disabled={packaged}>{t("chatSettings.engineWhisper")}</option>
+          </select>
+        </Field>
+
+        <Field label={t("chatSettings.sttLanguage")} hint={t("chatSettings.sttLanguageHint")}>
+          <select
+            className={formInputClasses}
+            value={stt.language ?? "es-AR"}
+            onChange={(e) => patch("stt", { language: e.target.value })}
+          >
+            <option value="">{t("chatSettings.sttLanguageAuto")}</option>
+            {STT_LANGUAGES.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.label}
+              </option>
+            ))}
+            {stt.language && !STT_LANGUAGES.some((l) => l.id === stt.language) && (
+              <option value={stt.language}>{stt.language}</option>
+            )}
           </select>
         </Field>
 
         {stt.engine !== "browser" && (
+          <Toggle
+            label={t("chatSettings.sttTranslate")}
+            hint={t("chatSettings.sttTranslateHint")}
+            checked={stt.translate_english}
+            onChange={(v) => patch("stt", { translate_english: v })}
+          />
+        )}
+
+        {(stt.engine === "auto" || stt.engine === "whispercpp") && (
           <>
             <div className="flex items-start justify-between gap-4">
               <StatusLine
-                loading={checking}
+                loading={checking === "stt"}
+                ready={whispercpp.installed && whispercpp.model_ready}
+                reason={whispercpp.reason}
+                okLabel={t("chatSettings.cppReady", { model: whispercpp.model })}
+              />
+              <CheckButton onClick={() => loadStatus("stt")} checking={checking === "stt"} />
+            </div>
+
+            {whispercpp.runtime_state && whispercpp.runtime_state !== "ready" &&
+              whispercpp.runtime_state !== "downloading" &&
+              whispercpp.runtime_state !== "unsupported" &&
+              downloading?.kind !== "runtime" && (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => startDownload("runtime", "/api/stt/runtime/download", "whisper.cpp runtime")}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border border-glyvex-border-soft text-glyvex-text hover:bg-glyvex-veil-disabled"
+                  >
+                    <Download size={14} />
+                    {t("chatSettings.cppRuntimeDownload")}
+                  </button>
+                  {whispercpp.missing_files?.length > 0 && (
+                    <span className="text-xs text-amber-400 break-all">
+                      {t("chatSettings.cppMissingFiles")}: {whispercpp.missing_files.join(", ")}
+                    </span>
+                  )}
+                </div>
+              )}
+
+            <Field label={t("chatSettings.model")} hint={t("chatSettings.cppModelHint")}>
+              <select
+                className={formInputClasses}
+                value={stt.whisper_model || "base"}
+                onChange={(e) => patch("stt", { whisper_model: e.target.value })}
+              >
+                {(cppModels.length
+                  ? cppModels
+                  : [
+                      { name: "base", label: "base", size: 141 * 1024 * 1024, state: "missing" },
+                      { name: "small", label: "small", size: 466 * 1024 * 1024, state: "missing" },
+                      { name: "medium", label: "medium", size: 1422 * 1024 * 1024, state: "missing" },
+                      { name: "large-v3", label: "large-v3", size: 3 * 1024 * 1024 * 1024, state: "missing" },
+                    ]
+                ).map((m) => (
+                  <option key={m.name} value={m.name}>
+                    {m.label} — {Math.round(m.size / (1024 * 1024))} MB
+                    {" "}({t(`chatSettings.state${cap(m.state)}`)})
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            {selectedModel && selectedModel.state !== "ready" && !downloading && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => startDownload("model", `/api/stt/runtime/models/${selectedModel.name}/download`, selectedModel.name)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border border-glyvex-border-soft text-glyvex-text hover:bg-glyvex-veil-disabled"
+                >
+                  <Download size={14} />
+                  {t("chatSettings.cppDownload", {
+                    mb: Math.round(selectedModel.size / (1024 * 1024)),
+                  })}
+                </button>
+                {selectedModel.error && (
+                  <span className="text-xs text-amber-400">{selectedModel.error}</span>
+                )}
+              </div>
+            )}
+
+            {downloading && downloading.kind !== "piperVoice" && (
+              <div>
+                <p className="text-sm text-glyvex-muted">
+                  {t("chatSettings.cppDownloading", {
+                    model: downloading.name,
+                    pct: Math.round(downloading.pct),
+                  })}
+                  {downloading.detail ? ` — ${downloading.detail}` : ""}
+                </p>
+                <div className="h-1.5 rounded-full bg-glyvex-surface-code overflow-hidden mt-1.5">
+                  <div
+                    className="h-full bg-glyvex-accent transition-all"
+                    style={{ width: `${downloading.pct}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {downloadError && downloadError.kind !== "piperVoice" && !downloading && (
+              <p className="flex items-start gap-1.5 text-sm text-red-400">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                {downloadError.message}
+              </p>
+            )}
+          </>
+        )}
+
+        {(stt.engine === "whisper" || (stt.engine === "auto" && !packaged)) && (
+          <>
+            <div className="flex items-start justify-between gap-4">
+              <StatusLine
+                loading={checking === "stt"}
                 ready={whisper.installed}
                 reason={whisper.reason}
                 okLabel={
@@ -299,7 +706,7 @@ export default function ChatSettings({ config, onChange }) {
                     : t("chatSettings.whisperInstalled", { mb: whisper.download_mb || "?" })
                 }
               />
-              <CheckButton onClick={loadStatus} checking={checking} />
+              <CheckButton onClick={() => loadStatus("stt")} checking={checking === "stt"} />
             </div>
 
             <Field label={t("chatSettings.model")}>
@@ -357,16 +764,120 @@ export default function ChatSettings({ config, onChange }) {
           </>
         )}
 
-        {stt.engine !== "whisper" && (
-          <Field label={t("chatSettings.browserLanguage")} hint={t("chatSettings.browserLanguageHint")}>
-            <input
+      </Section>
+
+      <Section title={t("chatSettings.sectionTts")}>
+        <div className="flex items-start justify-between gap-4">
+          <StatusLine
+            loading={checking === "tts"}
+            ready={ttsStatus?.platform_ok}
+            reason={ttsStatus?.reason}
+            okLabel={
+              ttsStatus?.active_engine === "kokoro"
+                ? t("chatSettings.ttsOkKokoro", { voice: ttsStatus?.kokoro?.voice || "—" })
+                : ttsStatus?.active_engine === "piper"
+                  ? t("chatSettings.ttsOkPiper", { voice: ttsStatus?.piper?.voice || "—" })
+                  : t("chatSettings.ttsOk", {
+                      voice: ttsStatus?.voice || t("chatSettings.ttsVoiceSystem"),
+                    })
+            }
+          />
+          <CheckButton onClick={() => loadStatus("tts")} checking={checking === "tts"} />
+        </div>
+
+        <Toggle
+          label={t("chatSettings.ttsEnable")}
+          checked={tts.enabled !== false}
+          onChange={(v) => patch("tts", { enabled: v })}
+        />
+
+        <Field
+          label={t("chatSettings.ttsEngine")}
+          hint={
+            tts.engine === "sapi"
+              ? t("chatSettings.ttsEngineHintSapi")
+              : tts.engine === "piper"
+                ? t("chatSettings.ttsEngineHintPiper")
+                : tts.engine === "kokoro"
+                  ? t("chatSettings.ttsEngineHintKokoro")
+                  : t("chatSettings.ttsEngineHintAuto")
+          }
+        >
+          <select
+            className={formInputClasses}
+            value={tts.engine || "auto"}
+            onChange={(e) => patch("tts", { engine: e.target.value })}
+          >
+            <option value="auto">{t("chatSettings.ttsEngineAuto")}</option>
+            <option value="sapi">{t("chatSettings.ttsEngineSapi")}</option>
+            <option value="piper">{t("chatSettings.ttsEnginePiper")}</option>
+            <option value="kokoro">{t("chatSettings.ttsEngineKokoro")}</option>
+          </select>
+        </Field>
+
+        {(tts.engine || "auto") !== "piper" && (tts.engine || "auto") !== "kokoro" && (
+          <Field label={t("chatSettings.ttsVoice")} hint={t("chatSettings.ttsVoiceHint")}>
+            <select
               className={formInputClasses}
-              value={stt.language || ""}
-              onChange={(e) => patch("stt", { language: e.target.value })}
-              placeholder="es-AR"
-            />
+              value={tts.voice || ""}
+              onChange={(e) => patch("tts", { voice: e.target.value })}
+            >
+              <option value="">{t("chatSettings.ttsVoiceAuto")}</option>
+              {(ttsStatus?.voices || []).map((v) => (
+                <option key={v.name} value={v.name}>
+                  {v.name} ({v.culture})
+                </option>
+              ))}
+            </select>
           </Field>
         )}
+
+        {(tts.engine || "auto") !== "sapi" && (
+          <PiperVoice
+            t={t}
+            piper={ttsStatus?.piper || {}}
+            voiceName={tts.piper_voice || ""}
+            onVoice={(name) => patch("tts", { piper_voice: name })}
+            downloading={downloading}
+            downloadError={downloadError}
+            onDownload={(name) =>
+              startDownload("piperVoice", `/api/tts/piper/voices/${name}/download`, name)
+            }
+          />
+        )}
+
+        {(tts.engine || "auto") !== "piper" && (tts.engine || "auto") !== "sapi" && (
+          <KokoroVoice
+            t={t}
+            kokoro={ttsStatus?.kokoro || {}}
+            voiceName={tts.kokoro_voice || ""}
+            onVoice={(name) => patch("tts", { kokoro_voice: name })}
+            downloading={downloading}
+            downloadError={downloadError}
+            onDownload={() => startDownload("kokoroModel", "/api/tts/kokoro/model/download", "kokoro")}
+            onDelete={() => {
+              if (
+                !window.confirm(
+                  t("chatSettings.ttsKokoroDeleteConfirm", {
+                    mb: Math.round(ttsStatus?.kokoro?.download_mb || 0),
+                  })
+                )
+              )
+                return;
+              fetch("/api/tts/kokoro/model", { method: "DELETE" }).then(() => loadStatus());
+            }}
+          />
+        )}
+
+        <NumberField
+          label={t("chatSettings.ttsRate")}
+          hint={t("chatSettings.ttsRateHint")}
+          min={-10}
+          max={10}
+          step={1}
+          value={tts.rate ?? 0}
+          onCommit={(n) => patch("tts", { rate: n })}
+        />
       </Section>
 
       <Section title={t("chatSettings.sectionAttachments")}>

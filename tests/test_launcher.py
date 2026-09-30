@@ -886,6 +886,34 @@ async def test_probe_binary_missing_binary_fails_gracefully(tmp_path):
     assert await launcher_module.probe_supported_flags(str(tmp_path / "no-existe.exe")) == set()
 
 
+async def test_probe_binary_version_not_on_first_line(make_probeable_binary):
+    """Las builds >= b11146 imprimen primero un log de inicialización
+    (sin número de build); el número está en la segunda línea de --version."""
+    binary = make_probeable_binary(
+        ["--model PATH  ruta del modelo GGUF"],
+        (
+            "0.00.001.456 I srv  llama_server: initializing ...",
+            "llama-server version: 0.5.0-dev build 11146 commit 7fe450e19",
+            "built with Clang 20.1.8 for Windows x86_64",
+        ),
+    )
+    info = await launcher_module.probe_binary(binary)
+    assert info.probed is True
+    assert info.build == "b11146"
+    assert "11146" in info.version_line
+
+
+async def test_probe_binary_no_build_number(make_probeable_binary):
+    binary = make_probeable_binary(
+        ["--model PATH  ruta del modelo GGUF"],
+        ("llama-server: version desconocida",),
+    )
+    info = await launcher_module.probe_binary(binary)
+    assert info.probed is True
+    assert info.build is None
+    assert info.version_line == "llama-server: version desconocida"
+
+
 # --------------------------------------------------------------------------
 # Build 11003: validaciones de LaunchConfig (FA_QUANTS + rangos nuevos)
 # --------------------------------------------------------------------------

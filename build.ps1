@@ -1,16 +1,14 @@
 # build.ps1 — Sidecar backend para el empaquetado Tauri (T-1, Fase 1).
-# Pipeline: npm run build → PyInstaller (backend/glyvex.spec) → smoke test del exe
-# → (opcional) instalador MSI con WiX 3.14 (distribution/wix/glyvex.wxs).
-# Uso: .\build.ps1 [-SkipFrontend] [-SkipSmoke] [-SkipSidecar] [-MakeInstaller] [-Version 0.6.0-beta1]
+# Pipeline: npm run build → PyInstaller (backend/glyvex.spec) → smoke test del exe.
+# El instalador se genera aparte con `tauri build` (NSIS).
+# Uso: .\build.ps1 [-SkipFrontend] [-SkipSmoke] [-SkipSidecar]
 # -SkipSidecar: no correr PyInstaller; usar el bundle ya existente en
 # backend\dist\glyvex-backend.
 
 param(
     [switch]$SkipFrontend,
     [switch]$SkipSmoke,
-    [switch]$SkipSidecar,
-    [switch]$MakeInstaller,
-    [string]$Version = "0.6.1-beta1"
+    [switch]$SkipSidecar
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,6 +39,21 @@ if ($SkipSidecar) {
 $bundle = Join-Path $repo "backend\dist\glyvex-backend"
 $exe = Join-Path $bundle "glyvex-backend.exe"
 if (-not (Test-Path $exe)) { throw "exe no generado: $exe" }
+# Junction src-tauri\resources\glyvex-backend -> backend\dist\glyvex-backend:
+# tauri-bundler instala cada ".." fuera de src-tauri como "_up_", asi el
+# resource debe vivir DENTRO de src-tauri para que caiga aplanado en $INSTDIR
+# (resource_dir()/glyvex-backend/, que es lo que resuelve el shell Rust).
+$junction = Join-Path $repo "src-tauri\resources\glyvex-backend"
+if (Test-Path $junction) {
+    $j = Get-Item $junction
+    if ($j.LinkType -ne 'Junction' -or $j.Target -ne @($bundle)) {
+        Remove-Item $junction -Force
+        New-Item -ItemType Junction -Path $junction -Target $bundle | Out-Null
+    }
+} else {
+    New-Item -ItemType Directory -Force -Path (Join-Path $repo "src-tauri\resources") | Out-Null
+    New-Item -ItemType Junction -Path $junction -Target $bundle | Out-Null
+}
 # babel\locale-data (28 MB, 1000+ .dat por locale; entra via courlan/trafilatura
 # solo para formatear fechas): la app trabaja en en/es, el resto se recorta
 # post-build. babel sigue importable: Locale cae a fallback si falta un .dat.
@@ -90,117 +103,6 @@ finally {
     Remove-Item Env:GLYVEX_NO_BROWSER -ErrorAction SilentlyContinue
 }
     if (-not $ok) { throw "smoke test falló: /api/health no respondió en 60s" }
-}
-
-if ($MakeInstaller) {
-    Write-Host "==> [4/4] Instalador MSI (WiX 3.14: heat + candle + light)" -ForegroundColor Cyan
-    # WiX portable (sin admin): wix314-binaries.zip de wixtoolset/wix3 en wix3/.
-    $wix = "D:\Proyectos\glyvex-ai-suite\wix3"
-    if (-not (Test-Path (Join-Path $wix "candle.exe"))) { throw "WiX no encontrado en $wix (descargar wix314-binaries.zip de github.com/wixtoolset/wix3)" }
-    $wixdir = Join-Path $repo "distribution\wix"
-    New-Item -ItemType Directory -Force -Path (Join-Path $repo "distribution\dist") | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $wixdir "obj") | Out-Null
-    # La version MSI debe tener 4 partes numericas: 0.6.0-beta1 -> 0.6.0.0.
-    $pv = $Version -replace '[-+].*$', ''
-    while (($pv -split '\.').Count -lt 4) { $pv += ".0" }
-    # Re-cosecha el bundle en cada build (files.wxi no se versiona).
-    $relBundle = "backend\dist\glyvex-backend"
-    $bundleDir = Join-Path $repo $relBundle
-    # -dr APPDIR: heat anida el dir fuente como hijo del -dr (wrap).
-    # build.ps1 lo aplana despues (XmlDocument): los archivos caen directo en
-    # APPDIR. Resultado: %LOCALAPPDATA%\Glyvex-AI-Suite\glyvex-backend.exe
-    & (Join-Path $wix "heat.exe") dir $bundleDir -var "var.SourceDir=$relBundle" -dr APPDIR -cg AppFiles -gg -nologo -out (Join-Path $wixdir "files.wxi")
-    if ($LASTEXITCODE -ne 0) { throw "heat falló (exit $LASTEXITCODE)" }
-    # heat 3.14 escribe $(var.SourceDir=<rel>) inline; candle no resuelve ese
-    # formato. Reemplazarlo por la ruta absoluta del bundle.
-    $fwi = Join-Path $wixdir "files.wxi"
-    $xml = [System.IO.File]::ReadAllText($fwi)
-    $xml = $xml.Replace('$(var.SourceDir=' + $relBundle + ')', $bundleDir)
-    # Heat genera MULTI-FRAGMENT: el primer Fragment tiene el DirectoryRef APPDIR
-    # con un wrap <Directory Id="dir<hash>" Name="glyvex-backend"> que envuelve
-    # todo. Los demas Fragments tienen el ComponentGroup (Directory="dir<hash>")
-    # y las definiciones de jerarquia (<DirectoryRef Id="dir<hash>">).
-    # Para aplanar:
-    #   1. Desenolver el <Directory wrapId>: quitar las tags de apertura/cierre
-    #      (sus hijos ya estan bajo DirectoryRef APPDIR, solo falta el wrapper).
-    #   2. Reemplazar Directory="wrapId" -> Directory="APPDIR" en Components.
-    #   3. Reemplazar <DirectoryRef Id="wrapId"> -> <DirectoryRef Id="APPDIR">
-    #      (WiX permite multiples DirectoryRef con el mismo Id: son aditivos).
-    if ($xml -match '<Directory Id="(dir[0-9A-Fa-f]+)"\s+Name="glyvex-backend"') {
-        $wrapId = $Matches[1]
-        # 1. Quitar la tag de apertura del wrap: <Directory Id="wrapId" Name="glyvex-backend">
-        $xml = [regex]::Replace($xml, "<Directory Id=`"$wrapId`\s+Name=`"glyvex-backend`">\s*", "")
-        # Quitar la primera </Directory> que lo cierra (la que sigue al ultimo Component
-        # antes de </DirectoryRef>). Usamos regex con singleline.
-        $xml = [regex]::Replace($xml, "(\s*)</Directory>\s*</DirectoryRef>", '$1</DirectoryRef>', 1)
-        # 2. Components que apuntan al wrap ahora apuntan a APPDIR
-        $xml = $xml.Replace("Directory=`"$wrapId`"", 'Directory="APPDIR"')
-        # 3. DirectoryRef del wrap -> APPDIR (additive, no duplicado)
-        $xml = $xml.Replace("<DirectoryRef Id=`"$wrapId`">", '<DirectoryRef Id="APPDIR">')
-        Write-Host "    Aplanando: $wrapId -> APPDIR (sin subcarpeta)"
-    }
-    [System.IO.File]::WriteAllText($fwi, $xml)
-    # Icono (Icon SourceFile) de glyvex.wxs via $(var.WixIcon): se resuelve
-    # contra el cwd de candle, no el .wxs, asi build.ps1 lo pasa con ruta
-    # absoluta. El banner del wizard y la imagen del ExitDialog NO se resuelven
-    # asi: WixUI 3.14.1 los fija en LIGHT (aqui se enlaza el wixlib de
-    # WixUIExtension) desde las variables preprocesador WixUIBannerBmp /
-    # WixUIDialogBmp, que sobreescriben los Binary WixUI_Bmp_Banner (default
-    # 2746B) / WixUI_Bmp_Dialog (default 68468B) al enlazar. Por eso las -d van
-    # a light (abajo), no a candle.
-    $banner = Join-Path $repo "assets\wixui-banner.bmp"
-    if (-not (Test-Path $banner)) { throw "Banner del wizard no encontrado: $banner" }
-    $dialog = Join-Path $repo "assets\glyvex_dialog_493x312.bmp"
-    if (-not (Test-Path $dialog)) { throw "Imagen del ExitDialog no encontrada: $dialog" }
-    $ico = Join-Path $repo "assets\glyvex.ico"
-    if (-not (Test-Path $ico)) { throw "Icono no encontrado: $ico" }
-    # Licencia (Apache 2.0): LICENSE de la raiz del repo, usado en dos frentes:
-    # (a) -dWixLicense (candle): el File Id="License" lo instala en [APPDIR]LICENSE;
-    # (b) -dWixUILicenseRtf (LIGHT, SIN prefijo wix.): el wixlib de WixUI fija el
-    #     control LicenseText con !(WixUILicenseRtf=<path>) = leer un archivo RTF y
-    #     embeber su contenido. Por eso generamos un RTF desde LICENSE y lo pasamos
-    #     a light. OJO: -dwix.WixUILicenseRtf (con prefijo) se ignora, wix.* es un
-    #     namespace interno de WiX. Y debe ser un RTF, no el LICENSE de texto plano.
-    $lic = Join-Path $repo "LICENSE"
-    if (-not (Test-Path $lic)) { throw "LICENSE no encontrado: $lic" }
-    # RTF del wizard generado desde LICENSE (una sola fuente de verdad). Estilo
-    # Tahoma fs20 como el default de WixUI. Escapar \ { } y unir lineas con \par.
-    $licRtf = Join-Path $wixdir "license.rtf"
-    $licLines = [System.IO.File]::ReadAllLines($lic)
-    $rtfSb = [System.Text.StringBuilder]::new()
-    [void]$rtfSb.Append('{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fswiss\fprq2\fcharset0 Tahoma;}}\f0\fs20 ')
-    for ($i = 0; $i -lt $licLines.Count; $i++) {
-        $ln = $licLines[$i].Replace('\','\\').Replace('{','\{').Replace('}','\}')
-        if ($i -lt $licLines.Count - 1) { [void]$rtfSb.Append($ln).Append('\par ') } else { [void]$rtfSb.Append($ln) }
-    }
-    [void]$rtfSb.Append('}')
-    [System.IO.File]::WriteAllText($licRtf, $rtfSb.ToString())
-    # files.wxi (heat) va como fuente separada, no via <?include ?>.
-    & (Join-Path $wix "candle.exe") "-dProductVersion=$pv" "-dWixIcon=$ico" "-dWixLicense=$lic" (Join-Path $wixdir "glyvex.wxs") (Join-Path $wixdir "files.wxi") -nologo
-    if ($LASTEXITCODE -ne 0) { throw "candle falló (exit $LASTEXITCODE)" }
-    # Con varias fuentes, candle escribe los .wixobj en el cwd (raiz del repo).
-    # -ext WixUIExtension (nombre solo): WixUIExtension.dll (junto a light.exe en
-    # wix3/) trae embebidos wixui.wixlib + wixstd.wixlib, que el zip portable no
-    # trae sueltos en sdk\. Con -ext:<ruta> falla: PowerShell 7 suelta el guion.
-    $msi = Join-Path $repo "distribution\dist\Glyvex-AI-Suite-Setup-$Version.msi"
-    # -dWixUIBannerBmp (banner del wizard), -dWixUIDialogBmp (imagen del
-    # ExitDialog) y -dWixUILicenseRtf (RTF generado arriba) van a LIGHT: aqui se
-    # enlaza el wixlib del WixUIExtension y se resuelven
-    # !(wix.WixUIBannerBmp=...) / !(wix.WixUIDialogBmp=...) / !(WixUILicenseRtf=...).
-    # Verificado: pasar -dWixUIBannerBmp a CANDLE no cambia el banner (queda el
-    # default 2746B); solo a LIGHT se sobreescribe con el nuestro (85894B).
-    & (Join-Path $wix "light.exe") (Join-Path $repo "glyvex.wixobj") (Join-Path $repo "files.wixobj") "-dWixUIBannerBmp=$banner" "-dWixUIDialogBmp=$dialog" "-dWixUILicenseRtf=$licRtf" -ext WixUIExtension -cultures:en-us -nologo -out $msi
-    # Exit 204 (LGHT0204) = solo errores de validacion ICE: ICE38/ICE18 (keypath HKCU
-    # vs archivo, propio de installs perUser) e ICE91 (dirs per-user). Esperados: el
-    # MSI se escribe igual y msiexec lo instala sin problemas (verificado en beta).
-    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 204) { throw "light falló (exit $LASTEXITCODE)" }
-    if (-not (Test-Path $msi)) { throw "MSI no generado: $msi" }
-    # Nota: el .msi es CFB/Ole (magic D0CF11E0), NO PE. El icono del archivo en
-    # Explorador no es inyectable (UpdateResourceW/rcedit son solo-PE y Explorer
-    # no lee icono custom de .msi). El logo vive en banner del wizard + ProductIcon
-    # (Panel de Control) + atajos + exe; basta. No se parchea el .msi post-build.
-    $msimb = [math]::Round((Get-Item $msi).Length / 1MB, 1)
-    Write-Host "    MSI: $msimb MB ($msi)"
 }
 
 Write-Host "==> Build listo: $exe" -ForegroundColor Green

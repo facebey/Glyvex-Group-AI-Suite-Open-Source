@@ -72,6 +72,10 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), tailwindcss()],
     server: {
       port: devPort,
+      // Bind IPv4 explícito: Vite 8 escucha por defecto en "localhost" que en
+      // esta máquina resuelve a ::1, y el devUrl de Tauri (tauri dev) apunta a
+      // 127.0.0.1 — sin esto la shell no conecta con el dev server.
+      host: "127.0.0.1",
       // Sin esto Vite busca el próximo puerto libre si el elegido está
       // ocupado: con dos instancias en la misma máquina eso hace que testing
       // arranque callado en el puerto de producción. Mejor que falle.

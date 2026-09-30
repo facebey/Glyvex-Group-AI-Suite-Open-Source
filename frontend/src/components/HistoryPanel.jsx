@@ -15,7 +15,7 @@ export default function HistoryPanel({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="absolute inset-y-0 left-0 w-[280px] z-20 flex flex-col bg-glyvex-card border-r border-glyvex-border-soft shadow-xl shadow-black/40">
+    <div className="absolute inset-y-0 left-0 w-[300px] max-w-[85vw] 2xl:w-[360px] z-20 flex flex-col bg-glyvex-card border-r border-glyvex-border-soft shadow-xl shadow-black/40">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-glyvex-border-soft">
         <span className="text-sm font-medium text-glyvex-text flex-1">{t("historyPanel.title")}</span>
         <button

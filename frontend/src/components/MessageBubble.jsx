@@ -9,6 +9,7 @@ import ToolSummary, { ToolActivityLive } from "./ToolActivity.jsx";
 import StreamStatus from "./StreamStatus.jsx";
 import MarkdownMessage from "./MarkdownMessage.jsx";
 import { CopyButton } from "./CodeBlock.jsx";
+import SpeakButton from "./SpeakButton.jsx";
 import ReasoningControl from "./ReasoningControl.jsx";
 import { composerInputClasses } from "../lib/styles.js";
 
@@ -215,6 +216,8 @@ export default function MessageBubble({
   // StreamStatus.streamPhase) y tools en curso.
   livePhase = null,
   liveTools = null,
+  ttsAvailable = false,
+  onTtsError,
 }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
@@ -350,6 +353,10 @@ export default function MessageBubble({
 
           {!streaming && message.content && (
             <CopyButton text={message.content} label={t("message.copyMessage")} className="p-0.5" size={12} />
+          )}
+
+          {!isUser && !streaming && hasText && ttsAvailable && (
+            <SpeakButton content={message.content} onError={onTtsError} />
           )}
 
           {isUser && !streaming && !busy && (

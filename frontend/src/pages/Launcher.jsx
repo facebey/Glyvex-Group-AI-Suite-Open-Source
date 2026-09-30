@@ -31,6 +31,7 @@ import { useNavigate } from "react-router-dom";
 import { useLlmStream } from "../hooks/useLlmStream.js";
 import { useDisplay } from "../lib/metricsDisplay.js";
 import { useTranslation } from "react-i18next";
+import CollapsiblePanel from "../components/ui/CollapsiblePanel.jsx";
 
 // Espejo de SAMPLING_PRESETS de backend/launcher.py. Vive acá para poder
 // previsualizar los valores sin round-trip; si cambian en el backend, hay
@@ -183,6 +184,9 @@ function togglesFromConfig(cfg) {
 }
 
 const TEMPLATE_FIELDS = [
+  // host/port: sin esto el template no conservaba el endpoint configurado
+  // (al reaplicarlo volvía el default 127.0.0.1:8080).
+  "host", "port",
   "auto_mode",
   "n_ctx", "n_batch", "n_ubatch", "n_gpu_layers", "gpu_mode",
   "cache_type_k", "cache_type_v", "flash_attn", "load_mode",
@@ -244,13 +248,13 @@ function wsUrlFor(path) {
 
 function Panel({ icon: Icon, title, children }) {
   return (
-    <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-glyvex-muted uppercase tracking-wide mb-4">
-        <Icon size={14} />
-        {title}
-      </h3>
-      <div className="space-y-4">{children}</div>
-    </div>
+    <CollapsiblePanel
+      icon={Icon}
+      title={title}
+      storageKey={`launcher_panel_${String(title).toLowerCase().replace(/[^a-z0-9]+/g, "_")}`}
+    >
+      {children}
+    </CollapsiblePanel>
   );
 }
 

@@ -21,7 +21,10 @@
         if (raw) {
           try { t = JSON.parse(raw); } catch (e) { t = raw; }
         }
-        if (t !== 'light') t = 'dark';
+        // Mismos valores que THEMES en src/lib/theme.js: si se agrega un
+        // tema ahí, agregarlo acá también (si no, arranca con flash dark).
+        var THEMES = ['dark', 'light', 'carbon', 'metallic', 'matrix'];
+        if (THEMES.indexOf(t) === -1) t = 'dark';
         var root = document.documentElement;
         root.classList.remove('dark', 'light');
         root.classList.add(t);
