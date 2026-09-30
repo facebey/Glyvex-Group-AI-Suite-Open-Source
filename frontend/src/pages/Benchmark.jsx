@@ -191,6 +191,11 @@ export default function Benchmark() {
   const [runError, setRunError] = useState(null);
   const [expandedRowId, setExpandedRowId] = useState(null);
   const wsRef = useRef(null);
+  // Reconexión del WS de progreso (D4): mismo backoff que useLlmStream
+  // (1 s → 15 s). Un corte de conexión ya no deja la barra congelada.
+  const wsReconnectAttemptRef = useRef(0);
+  const wsRetryRef = useRef(null);
+  const wsClosedByUsRef = useRef(false);
 
   // --- Judge ---
   const [judgeEndpoint, setJudgeEndpoint] = useState("http://127.0.0.1:8080");
@@ -225,7 +230,11 @@ export default function Benchmark() {
   }, [loadSets]);
 
   useEffect(() => {
-    return () => { wsRef.current?.close(); };
+    return () => {
+      wsClosedByUsRef.current = true;
+      clearTimeout(wsRetryRef.current);
+      wsRef.current?.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -241,8 +250,11 @@ export default function Benchmark() {
 
   function connectProgress(id) {
     wsRef.current?.close();
+    clearTimeout(wsRetryRef.current);
+    wsClosedByUsRef.current = false;
     const ws = new WebSocket(wsUrlFor(`/api/benchmark/run/${id}/progress`));
     wsRef.current = ws;
+    ws.onopen = () => { wsReconnectAttemptRef.current = 0; };
     ws.onmessage = (event) => {
       let data;
       try { data = JSON.parse(event.data); } catch { return; }
@@ -256,8 +268,17 @@ export default function Benchmark() {
         if (data.type === "error") setRunError(data.message);
         localStorage.removeItem(ACTIVE_RUN_KEY);
         fetch(`/api/benchmark/run/${id}`).then((r) => r.json()).then(setFinishedRun).catch(() => {});
+        wsClosedByUsRef.current = true;
         ws.close();
       }
+    };
+    ws.onclose = () => {
+      // Cerrado por nosotros (run terminado o unmount) o reemplazado por una
+      // conexión nueva: no reintentar. Corte inesperado: backoff 1→15 s.
+      if (wsClosedByUsRef.current || wsRef.current !== ws) return;
+      const delay = Math.min(1000 * 2 ** wsReconnectAttemptRef.current, 15000);
+      wsReconnectAttemptRef.current += 1;
+      wsRetryRef.current = setTimeout(() => connectProgress(id), delay);
     };
     return ws;
   }

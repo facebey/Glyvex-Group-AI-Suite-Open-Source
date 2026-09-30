@@ -6,6 +6,10 @@ import i18n from "../lib/i18n.js";
  *  disparar un re-render extra por cada token del stream. */
 const METRICS_FLUSH_MS = 80;
 
+/** Tokens: se acumulan en un buffer y se vuelcan cada 60 ms (D3). Un
+ *  setNodes por token a 60+ t/s disparaba un re-render por token. */
+const TOKEN_FLUSH_MS = 60;
+
 /**
  * Una generación contra el endpoint, volcada en un nodo del árbol.
  *
@@ -39,6 +43,32 @@ export function useChatStream({ setNodes, onFinish, onError }) {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      let pendingContent = "";
+      let pendingThinking = "";
+      let flushTimer = 0;
+      const flushPending = () => {
+        flushTimer = 0;
+        const content = pendingContent;
+        const thinking = pendingThinking;
+        pendingContent = "";
+        pendingThinking = "";
+        if (!content && !thinking) return;
+        setNodes((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  ...(content ? { content: (m.content || "") + content } : {}),
+                  ...(thinking ? { thinking: (m.thinking || "") + thinking } : {}),
+                }
+              : m
+          )
+        );
+      };
+      const scheduleFlush = () => {
+        if (!flushTimer) flushTimer = setTimeout(flushPending, TOKEN_FLUSH_MS);
+      };
+
       try {
         const res = await fetch("/api/chat/completions", {
           method: "POST",
@@ -51,17 +81,11 @@ export function useChatStream({ setNodes, onFinish, onError }) {
 
         await consumeSSE(res, controller.signal, (event) => {
           if (event.type === "token") {
-            setNodes((prev) =>
-              prev.map((m) =>
-                m.id === assistantId ? { ...m, content: (m.content || "") + event.content } : m
-              )
-            );
+            pendingContent += event.content;
+            scheduleFlush();
           } else if (event.type === "thinking_token") {
-            setNodes((prev) =>
-              prev.map((m) =>
-                m.id === assistantId ? { ...m, thinking: (m.thinking || "") + event.content } : m
-              )
-            );
+            pendingThinking += event.content;
+            scheduleFlush();
           } else if (event.type === "metrics") {
             metricsRef.current = event;
             const t = performance.now();
@@ -97,6 +121,9 @@ export function useChatStream({ setNodes, onFinish, onError }) {
               )
             );
           } else if (event.type === "done") {
+            // Vaciar el buffer antes del update final: los tokens restantes
+            // entran en el mismo nodo que los métricas de cierre.
+            flushPending();
             metricsRef.current = event;
             setLiveMetrics(event);
             setNodes((prev) =>
@@ -141,6 +168,9 @@ export function useChatStream({ setNodes, onFinish, onError }) {
           onError?.(message);
         }
       } finally {
+        // Error o aborto: no perder los tokens que quedaron en el buffer.
+        clearTimeout(flushTimer);
+        flushPending();
         if (metricsRef.current) setLiveMetrics(metricsRef.current);
         setToolActivity([]);
         setStreaming(false);

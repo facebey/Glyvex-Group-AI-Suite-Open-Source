@@ -185,6 +185,10 @@ class _FakePynvml:
     def __init__(self, fail_set: str | None = None):
         self.fail_set = fail_set
         self.last_set = None
+        self.shutdowns = 0
+
+    def nvmlShutdown(self):
+        self.shutdowns += 1
 
     def nvmlDeviceGetCount(self):
         return 1
@@ -284,3 +288,25 @@ async def test_power_limit_sin_nvidia(client, monkeypatch):
     assert data["available"] is False
     assert data["gpus"] is None
     assert data["error"] is not None
+
+
+# --------------------------------------------------------------------------
+# D6: NVML se cierra explícitamente (lifespan → manager.stop), no por __del__
+# --------------------------------------------------------------------------
+
+
+async def test_manager_stop_cierra_nvml(tmp_path, monkeypatch):
+    fake = _FakePynvml()
+    manager = metrics_module.MetricsManager()
+    manager.collector._nvml_ready = True
+    monkeypatch.setattr(metrics_module, "pynvml", fake)
+
+    await manager.start(tmp_path / "d6.db")
+    await manager.stop()
+
+    assert fake.shutdowns == 1
+    assert manager.collector._nvml_ready is False
+
+    # Idempotente: un segundo stop no vuelve a llamar a nvmlShutdown.
+    await manager.stop()
+    assert fake.shutdowns == 1

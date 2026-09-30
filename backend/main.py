@@ -104,7 +104,9 @@ async def lifespan(app: FastAPI):
     # ninguna conversación. Se acumulan sobre todo por borradores que nunca
     # se enviaron, que no quedan registrados en ningún lado.
     try:
-        removed = attachments.purge_orphans(await db_all_attachment_ids())
+        keep_ids = await db_all_attachment_ids()
+        # I/O de disco síncrono fuera del event loop (D7).
+        removed = await asyncio.to_thread(attachments.purge_orphans, keep_ids)
         if removed:
             logger.info("%d adjunto(s) huérfano(s) eliminados", removed)
     except Exception as exc:  # noqa: BLE001 — nunca debe impedir arrancar

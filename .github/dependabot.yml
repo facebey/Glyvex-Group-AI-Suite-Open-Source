@@ -1,13 +1,5 @@
+# Repo espejo (mirror robocopy via sync-oss.ps1): las actualizaciones llegan
+# solo vía sync desde el repo privado (decisión D2 del plan CI, 2026-09-25).
+# updates: [] deshabilita dependabot en el público en cada sync.
 version: 2
-updates:
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
-
-  - package-ecosystem: "npm"
-    directory: "/frontend"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+updates: []

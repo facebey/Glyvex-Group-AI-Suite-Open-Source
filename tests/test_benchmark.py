@@ -158,6 +158,34 @@ async def test_cancel_run(client, mock_llama_server, custom_prompt_set):
     assert await wait_until(is_cancelled, timeout=5.0)
 
 
+async def test_cancel_run_antes_del_primer_step(client, mock_llama_server, custom_prompt_set):
+    """D2: cancelar MUY temprano — el DELETE llega antes de que el task
+    ejecute su primer step. En Python >= 3.12 el CancelledError nunca se
+    entrega a la coroutine, así que el done-callback de start() debe dejar
+    el run en 'cancelled' (y no 'running' para siempre)."""
+    res = await client.post(
+        "/api/benchmark/run",
+        json={
+            "endpoint": mock_llama_server,
+            "model_name": "test-model",
+            "sets": [custom_prompt_set],
+        },
+    )
+    run_id = res.json()["run_id"]
+
+    # Sin margen artificial: el POST devolvió hace un instante, el task
+    # recién estaba programado en el event loop.
+    del_res = await client.delete(f"/api/benchmark/run/{run_id}")
+    assert del_res.status_code == 200
+    assert del_res.json().get("cancelled") is True
+
+    async def is_cancelled():
+        current = (await client.get(f"/api/benchmark/run/{run_id}")).json()
+        return current["status"] == "cancelled"
+
+    assert await wait_until(is_cancelled, timeout=5.0)
+
+
 # --------------------------------------------------------------------------
 # Persistencia en SQLite (módulo M7) — la DB de estos tests es in-memory,
 # aislada por el autouse _isolated_state de conftest.py.

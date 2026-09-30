@@ -167,12 +167,22 @@ class MetricsCollector:
             except Exception:
                 pass
 
+    def shutdown(self) -> None:
+        self.shutdown_nvml()
+
+    def shutdown_nvml(self) -> None:
+        # D6: cierre explícito desde el lifespan (no depender de __del__,
+        # que no corre ni a tiempo ni en orden garantizado).
+        if not self._nvml_ready:
+            return
+        self._nvml_ready = False
+        try:
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+
     def __del__(self) -> None:
-        if self._nvml_ready:
-            try:
-                pynvml.nvmlShutdown()
-            except Exception:
-                pass
+        self.shutdown_nvml()
 
     # -- GPU -------------------------------------------------------------
 
@@ -576,6 +586,8 @@ class MetricsManager:
 
     async def stop(self) -> None:
         self._running = False
+        # NVML se cierra antes de nada más: es el único recurso de proceso.
+        self.collector.shutdown_nvml()
         task = self._broadcast_task
         if task is not None and not task.done():
             task.cancel()
