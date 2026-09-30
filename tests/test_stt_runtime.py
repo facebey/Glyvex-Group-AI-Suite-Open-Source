@@ -152,6 +152,9 @@ def test_status_downloading_when_flag_set(monkeypatch):
 
 def test_status_ready_with_full_set(monkeypatch, tmp_path):
     _force_windows(monkeypatch)
+    # STT_BINARY_NAME se fija en el import: en CI no-Windows valía
+    # "whisper-cli" y el set mínimo escrito trae el .exe.
+    monkeypatch.setattr(stt, "STT_BINARY_NAME", "whisper-cli.exe")
     monkeypatch.setattr(stt, "DATA_DIR", tmp_path)
     d = stt.stt_runtime_dir()
     d.mkdir(parents=True)

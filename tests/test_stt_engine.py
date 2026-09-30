@@ -45,6 +45,12 @@ def _make_fake_cli(tmp_path, exit_code: int = 0, name: str = "fake_cli") -> Path
 _make_fake_cli.counter = 0
 
 
+def _force_windows(monkeypatch):
+    # stt_runtime lee platform.system() en runtime (no en import), así que
+    # parchear el módulo alcanza para que los estados asuman Windows en CI.
+    monkeypatch.setattr(stt_runtime.platform, "system", lambda: "Windows")
+
+
 def _write_result_json(prefix: Path, language: str = "es", segments=None) -> Path:
     if segments is None:
         segments = [
@@ -307,6 +313,7 @@ async def test_status_translate_flag_from_config(client, monkeypatch, tmp_path):
 async def test_status_reason_missing_vs_error_runtime(client, monkeypatch, tmp_path):
     # STT-2: sin directorio el estado es "missing" (hay que bajarlo); con el
     # directorio a medias es "error" con los archivos que faltan.
+    _force_windows(monkeypatch)
     monkeypatch.setattr(stt_runtime, "DATA_DIR", tmp_path)
 
     resp = await client.get("/api/stt/status")

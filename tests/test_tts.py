@@ -501,7 +501,10 @@ def _download_stub_kokoro_model() -> None:
     paths["bin"].write_bytes(b"voices")
 
 
-async def test_status_auto_con_kokoro_listo_activa_kokoro(client, stub_kokoro):
+async def test_status_auto_con_kokoro_listo_activa_kokoro(client, stub_kokoro, monkeypatch):
+    # platform_ok refleja _is_windows(): en CI (Linux) forzarlo a Windows,
+    # igual que el resto de tests de estado.
+    monkeypatch.setattr(tts_module, "_is_windows", lambda: True)
     _download_stub_kokoro_model()
     res = await client.get("/api/tts/status")
     assert res.status_code == 200
