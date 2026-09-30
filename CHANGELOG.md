@@ -5,6 +5,8 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.7.0-beta] — 2026-09-30
+
 ### Agregado
 - **TTS neuronal (Piper + Kokoro) empaquetado en el sidecar**: la cadena
   neural (piper, kokoro-onnx, onnxruntime, espeak-ng) ahora viaja dentro del
@@ -13,6 +15,16 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
   listo.
 - **Pantalla de provisión — paso TTS**: además del check de voces SAPI, un
   puntero directo para configurar el TTS neuronal en Ajustes.
+
+### Cambiado
+- **Bumps de dependencias**: uvicorn 0.54, sqlalchemy 2.1.1, nvidia-ml-py
+  13.615.71 (backend) y vite 8.3.1 (frontend).
+- **Piso de numpy 2.2** en `requirements.txt`: el 2.5 exigía Python >=3.12 y
+  rompía la install del job de CI 3.11.
+
+### Corregido
+- **CI en Linux**: 3 tests asumían Windows (status STT/TTS) y ahora fuerzan la
+  plataforma vía monkeypatch; la suite pasa en 3.11 y 3.12.
 
 ## [0.6.3-beta] — 2026-09-28
 
