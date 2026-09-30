@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.gzip import GZipMiddleware
@@ -242,13 +242,22 @@ api_router.include_router(runtime_api.router, prefix="/runtime", tags=["runtime"
 app.include_router(api_router)
 
 if FRONTEND_DIST.exists():
-    @app.get("/provision", include_in_schema=False)
-    async def provision_spa() -> FileResponse:
-        # T5.2: la ruta vive en react-router (SPA); el backend sirve
-        # index.html para que el deep-link de Tauri (--provision) resuelva.
-        return FileResponse(FRONTEND_DIST / "index.html")
+    # T5.2: las rutas de la SPA viven en react-router (/launcher, /monitor,
+    # ...). El fallback sirve index.html para CUALQUIER ruta GET que no sea
+    # API ni un archivo real; sin esto, refrescar el empaquetado (F5 o el
+    # "Actualizar" del menú de contexto de WebView2) en un módulo distinto
+    # del Chat caía en 404 {"detail":"Not Found"}. La API se registra antes
+    # y gana el matching; /assets pasa por StaticFiles (sanitiza el path).
+    if (FRONTEND_DIST / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
 
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        # /api/* que no matche ningún route sigue siendo 404 JSON (la
+        # fallback de SPA no tapa a la API; el frontend espera JSON).
+        if full_path == "api" or full_path.startswith("api/"):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        return FileResponse(FRONTEND_DIST / "index.html")
 
 
 def _bind_with_fallback(host: str, preferred: int) -> tuple[socket, int]:
