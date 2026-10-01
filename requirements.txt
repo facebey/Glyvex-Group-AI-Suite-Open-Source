@@ -51,6 +51,6 @@ onnxruntime>=1.29.0
 # Piso 2.2 (soporta Python 3.10+): la rama CI corre 3.11 y 3.12, y numpy>=2.5
 # exige Python >=3.12 (rompía la install del job 3.11).
 numpy>=2.2.0
-phonemizer-fork>=3.3.1
+phonemizer-fork>=3.3.2
 espeakng-loader>=0.2.4
 num2words>=0.5.14
