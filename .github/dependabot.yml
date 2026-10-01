@@ -1,10 +1,5 @@
-# TEMPORAL (2026-09-30): dependabot re-habilitado SOLO para la cadena cargo de
-# Tauri, para poder dismiss el alerta glib #1 (GHSA-wrw7-89jp-8q8g): con
-# updates: [] deshabilitado, el endpoint de dismissal responde 404.
-# Se restaura updates: [] inmediatamente después del dismiss.
+# Repo espejo (mirror robocopy via sync-oss.ps1): las actualizaciones llegan
+# solo vía sync desde el repo privado (decisión D2 del plan CI, 2026-09-25).
+# updates: [] deshabilita dependabot en el público en cada sync.
 version: 2
-updates:
-  - package-ecosystem: "cargo"
-    directory: "/src-tauri"
-    schedule:
-      interval: "weekly"
+updates: []
