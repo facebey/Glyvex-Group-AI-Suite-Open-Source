@@ -45,7 +45,7 @@ readability-lxml>=0.9
 #   - phonemizer-fork (import `phonemizer`) + espeakng-loader: G2P y datos
 #     espeak-ng que Piper necesita.
 #   - num2words: normalización de texto de Piper.
-piper-tts>=1.7.0
+piper-tts>=1.8.0
 kokoro-onnx>=0.4.7
 onnxruntime>=1.29.0
 # Piso 2.2 (soporta Python 3.10+): la rama CI corre 3.11 y 3.12, y numpy>=2.5
