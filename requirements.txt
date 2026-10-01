@@ -46,7 +46,7 @@ readability-lxml>=0.9
 #     espeak-ng que Piper necesita.
 #   - num2words: normalización de texto de Piper.
 piper-tts>=1.7.0
-kokoro-onnx>=0.4.7
+kokoro-onnx>=0.6.1
 onnxruntime>=1.29.0
 # Piso 2.2 (soporta Python 3.10+): la rama CI corre 3.11 y 3.12, y numpy>=2.5
 # exige Python >=3.12 (rompía la install del job 3.11).
