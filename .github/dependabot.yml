@@ -1,5 +1,30 @@
-# Repo espejo (mirror robocopy via sync-oss.ps1): las actualizaciones llegan
-# solo vía sync desde el repo privado (decisión D2 del plan CI, 2026-09-25).
-# updates: [] deshabilita dependabot en el público en cada sync.
+# Repo espejo (mirror robocopy via sync-oss.ps1): dependabot ACTIVO con la
+# misma config que el repo privado (revisión de D2, Fabian 2026-10-01):
+# estandar para el público + alertas. Regla: NUNCA merguear PRs de dependabot
+# en el espejo (el sync desde el privado manda); cerrarlos cuando el cambio
+# llegue por sync.
 version: 2
-updates: []
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
