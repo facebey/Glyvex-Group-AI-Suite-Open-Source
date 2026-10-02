@@ -56,7 +56,7 @@ pytest tests/ -v
 - pytest + pytest-asyncio + httpx. Los fixtures compartidos viven en
   `tests/conftest.py`: binarios fake que responden `--help`/`--version`,
   un LLM server mock en `:18080` y estado aislado por test.
-- Baseline: **358 tests**.
+- Baseline: **~600 tests** (588 pasando + 9 omitidos según plataforma, a v0.7.1-beta).
 
 ## Git
 

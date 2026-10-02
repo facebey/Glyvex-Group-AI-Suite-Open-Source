@@ -5,6 +5,8 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Node.js 20](https://img.shields.io/badge/Node.js-20%20LTS-green.svg)](https://nodejs.org/)
+[![CI](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/actions/workflows/ci.yml/badge.svg)](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/facebey/Glyvex-Group-AI-Suite-Open-Source?include_prereleases&label=release)](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest)
 
 **Glyvex-AI-Suite** is a local application — part of **Glyvex Group** — to
 manage, launch, chat with, and evaluate local LLM models (GGUF/GGML via
@@ -19,6 +21,17 @@ Without an NVIDIA GPU, the Monitor and the Launcher degrade gracefully
 (see the Modules section).
 
 **Product site:** [ai-suite.glyvexgroup.com](https://ai-suite.glyvexgroup.com/) — [Glyvex AI Division](https://ai.glyvexgroup.com/)
+
+## Download (Windows)
+
+The easiest way to try it: download the installer from
+[**Releases → latest**](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest) (file `Glyvex AI Suite_<version>_x64-setup.exe`),
+run it and follow the 6-step wizard shown below. It installs per-user (no
+admin rights needed) and adds a **Glyvex** shortcut to the Start menu. On first
+launch, a setup screen downloads the llama.cpp runtime and, optionally, the
+voice models.
+
+Want to run it from source, or on Linux/macOS? See [Installation](#installation).
 
 ## Screenshots
 
@@ -55,11 +68,14 @@ Since the NSIS installer is unsigned, Windows SmartScreen will show the
 - **Python 3.11+**
 - **Node.js 20 LTS+** (for the Vite/React frontend)
 - **NVIDIA drivers + CUDA** — *optional*. Without an NVIDIA GPU, the Monitor
-  (M5) shows "GPU NVIDIA no detectada" instead of crashing, and the rest of
+  (M5) shows "NVIDIA GPU not detected" instead of crashing, and the rest of
   the suite works the same (you can run models 100% on CPU).
-- `faster-whisper` — *optional*, for local voice transcription of the chat
-  microphone: `pip install -r requirements-optional.txt`
-  (see [`docs/voz-a-texto.md`](docs/voz-a-texto.md), in Spanish).
+- **Voice (optional)** — speech-to-text uses the native **whisper.cpp**
+  runtime, downloaded on demand from the app (nothing to install). When
+  running from source you can also use `faster-whisper`:
+  `pip install -r requirements-optional.txt`. Text-to-speech works out of the
+  box on Windows (SAPI); the neural voices (Piper, Kokoro) are downloaded from
+  Settings → TTS. See [`docs/voz-a-texto.md`](docs/voz-a-texto.md) (Spanish).
 - At least one of these inference backends, depending on what you'll use.
   **On Windows** there's also the [embedded runtime](#inference-runtime-embedded-llamacpp):
   the suite downloads its own tested build of llama.cpp, so you don't have to
@@ -71,7 +87,7 @@ Since the NSIS installer is unsigned, Windows SmartScreen will show the
 
 | Platform | Status | Notes |
 |---|---|---|
-| **Windows** | ✅ Primary platform | The current version is optimized for Windows: `start.cmd` (CMD) and `start.ps1` (PowerShell) scripts, embedded llama.cpp runtime and MSI installer. |
+| **Windows** | ✅ Primary platform | The current version is optimized for Windows: `start.cmd` (CMD) and `start.ps1` (PowerShell) scripts, embedded llama.cpp runtime and NSIS installer (`-setup.exe`). |
 | **Linux** | ⏳ After the stable release | `start.sh` already exists; formal support (full testing and CI) starts once there is a stable release. |
 | **macOS** | ⏳ In the future | Shares the `start.sh` path; it comes after Linux. |
 
@@ -196,7 +212,7 @@ screen with these same steps and live checkmarks.
 1. **Configure** — in `/config`, set the `binary_path` of `llama-server`
    (and/or Ollama/LM Studio) and add at least one directory with your
    `.gguf`/`.safetensors` models.
-2. **Scan** — on the same screen, click "Escanear ahora". The inventory is
+2. **Scan** — on the same screen, click "Scan now". The inventory is
    saved to `data/models.json` and becomes available in the Launcher.
 3. **Launch** — in `/launcher`, pick a model (Group view groups by folder
    with its MTP/mmproj variants, or switch to List view), tune the
@@ -248,12 +264,12 @@ outside the app yet.
 
 | Route | View | Content |
 |-------|------|---------|
-| `/` | Chat | Streaming, branches (regenerations), attachments, mic, reasoning, metrics, export, history |
+| `/` | Chat | Streaming, branches (regenerations), attachments, mic (speech-to-text), listen to replies (text-to-speech), reasoning, metrics, export, history |
 | `/launcher` | Launcher | Group/List views, hardware templates, sampling presets, launch/stop, live logs, process vitals strip (t/s, context, queue) |
 | `/benchmark` | Benchmark | Set selection (including your own), cancellable run, WS progress, results |
 | `/monitor` | Monitor | GPU card, core heatmap, 60 s sparklines, **LLM Server** section (live vitals + per-process history of t/s, context and queue), HW history chart with retention, WS connection indicator |
 | `/reports` | Reports | Benchmark history, Recharts charts (t/s per prompt, TTFT vs tokens), comparison, HTML reports |
-| `/config` | Config | Backend, model_dirs, scan, tools, STT, attachments, templates, monitor (history and retention) |
+| `/config` | Config | Backend, model_dirs, scan, tools, STT, TTS, attachments, templates, themes, monitor (history and retention) |
 
 ## Modules
 
@@ -262,7 +278,7 @@ outside the app yet.
 | **M0 — Skeleton** | Project base: FastAPI + React + persisted config. |
 | **M1 — Inventory** | Scans your `.gguf` files, extracts family/quantization, reads GGUF metadata, detects embedded modules (MTP/vision), groups by folder. |
 | **M2 — Launcher** | Launches `llama-server`/Ollama/LM Studio with hardware templates, live logs, MTP/draft and clean stop/restart. |
-| **M3 — Chat** | Streaming with separate reasoning, live metrics, branches, attachments, tool calling, voice to text. |
+| **M3 — Chat** | Streaming with separate reasoning, live metrics, branches, attachments, tool calling, speech-to-text (whisper.cpp / faster-whisper / browser) and text-to-speech (Kokoro / Piper / Windows SAPI). |
 | **M4 — Benchmark** | 58 prompts in 6 categories + your own sets, scoring, HTML reports, run comparison. |
 | **M5 — Monitor** | Real-time GPU (with power limit/TDP control)/CPU/RAM + persistent history with configurable retention. |
 | **M6 — Integration** | Status widget in the navbar, toasts, shortcuts, onboarding. |
@@ -272,6 +288,28 @@ outside the app yet.
 Per-module technical detail: [`docs/modulos.md`](docs/modulos.md) (Spanish) ·
 Launch parameters: [`docs/launcher-params.md`](docs/launcher-params.md)
 (Spanish)
+
+## Voice: speech-to-text and text-to-speech
+
+Everything runs locally; the models are downloaded only when you ask for them.
+
+- **Speech-to-text (chat microphone)** — engine `stt.engine`:
+  - `auto` (default): **whisper.cpp** if its runtime is ready, otherwise
+    `faster-whisper` if installed, otherwise the browser.
+  - `whispercpp`: native `whisper-cli` binary downloaded on first use (the
+    only option inside the packaged app). 100% local.
+  - `whisper`: `faster-whisper` (from source, `requirements-optional.txt`).
+  - `browser`: Web Speech API. **Not local** in Chrome (audio goes to Google)
+    and not available in the Tauri WebView or Firefox.
+- **Text-to-speech ("listen" button on replies)** — engine `tts.engine`:
+  - `auto` (default): **Kokoro** if ready, otherwise **Piper**, otherwise
+    **SAPI**.
+  - `kokoro` / `piper`: local neural voices (onnxruntime), downloaded from
+    Settings → TTS.
+  - `sapi`: the voices that come with Windows, zero downloads.
+  - Generated audio is cached (LRU), so replaying a reply is instant.
+
+Details: [`docs/voz-a-texto.md`](docs/voz-a-texto.md) (Spanish).
 
 ## Keyboard shortcuts (Chat)
 
@@ -358,7 +396,7 @@ The chat exposes two tools to the model, invoked natively via `tool_calls`
 
 ## Tests
 
-Automated test suite (pytest + pytest-asyncio + httpx, 358 tests, no
+Automated test suite (pytest + pytest-asyncio + httpx, ~600 tests, no
 unittest, no requests, no GPU/models/real network — everything mocked: mock
 LLM server uvicorn on `:18080`, fake binaries, in-memory SQLite):
 

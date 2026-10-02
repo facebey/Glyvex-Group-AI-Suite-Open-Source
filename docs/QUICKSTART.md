@@ -4,6 +4,13 @@ El camino más corto para tener Glyvex-AI-Suite corriendo en tu máquina. Acá v
 el mínimo; el [README](../README.md) trae el detalle completo (multi-instancia,
 variables de entorno, seguridad, release).
 
+> **¿Solo querés usarla en Windows?** No hace falta nada de esto: bajá el
+> instalador `Glyvex AI Suite_<versión>_x64-setup.exe` desde
+> [Releases → latest](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest),
+> ejecutalo y seguí el asistente. Si Windows SmartScreen avisa, es porque el
+> instalador no está firmado: **Más información → Ejecutar de todas formas**.
+> Esta guía es para correrla desde el código fuente.
+
 ## Prerrequisitos
 
 - **Python 3.11+**
@@ -17,15 +24,18 @@ variables de entorno, seguridad, release).
     [Ollama](https://ollama.com) o [LM Studio](https://lmstudio.ai) en modo servidor.
 - **NVIDIA drivers + CUDA** — *opcional*. Sin GPU NVIDIA todo corre en CPU; la
   GPU solo acelera los modelos grandes.
-- `faster-whisper` — *opcional*, solo para la transcripción local de voz:
-  `pip install -r requirements-optional.txt`.
+- **Voz** — *opcional*. El dictado local usa whisper.cpp (se descarga desde
+  la app, en Windows); en cualquier SO también podés instalar `faster-whisper`
+  con `pip install -r requirements-optional.txt`. Ver
+  [voz-a-texto.md](voz-a-texto.md).
 
 ## 1. Instalar
 
 Backend:
 
 ```bash
-cd glyvex-ai-suite
+git clone https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source.git
+cd Glyvex-Group-AI-Suite-Open-Source
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt

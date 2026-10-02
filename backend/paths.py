@@ -1,4 +1,4 @@
-"""
+r"""
 paths.py — Fuente única de las rutas del proyecto.
 
 Antes cada módulo recalculaba su propio `BASE_DIR = Path(__file__).parent.parent`

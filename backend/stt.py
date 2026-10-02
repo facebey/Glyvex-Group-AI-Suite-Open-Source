@@ -33,7 +33,7 @@ de Tauri de ~10 MB a varios cientos. Va en requirements-optional.txt y el
 import es lazy: si no está, /status lo informa y el frontend muestra el
 motivo en el tooltip del micrófono en vez de fallar al apretar.
 
-TTS (texto a voz) queda fuera de esta versión a propósito.
+El texto a voz (respuestas del chat) vive en tts.py.
 """
 
 from __future__ import annotations

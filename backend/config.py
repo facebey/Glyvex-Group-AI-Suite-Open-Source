@@ -108,9 +108,10 @@ class ToolsConfig(BaseModel):
 class STTConfig(BaseModel):
     """Voz a texto del chat (módulo M3, Bloque 3)."""
 
-    # "auto" | "browser" | "whisper". Con "auto" el frontend usa la Web Speech
-    # API si el navegador la tiene y cae a Whisper local si no — que es el
-    # caso del WebView de Tauri, donde la API del navegador no existe.
+    # "auto" | "whispercpp" | "whisper" | "browser". Con "auto": whisper.cpp
+    # nativo si su runtime está listo, si no faster-whisper si está
+    # instalado, si no la Web Speech API (que no existe en el WebView de
+    # Tauri). Ver stt.py y docs/voz-a-texto.md.
     # La variable de entorno STT_ENGINE tiene precedencia sobre esto.
     engine: str = "auto"
     # Idioma que se le pasa a la Web Speech API (formato BCP-47).

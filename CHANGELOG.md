@@ -5,6 +5,35 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+### Corregido
+- **Versión unificada en 0.7.1-beta**: `APP_VERSION` (`/api/health`,
+  `/api/info`), `frontend/package.json` y `src-tauri/Cargo.toml` seguían en
+  0.6.0 mientras el instalador ya era 0.7.1-beta.
+- **Pie de la app**: "Todos los derechos reservados" contradecía la licencia
+  Apache 2.0; ahora dice "© Glyvex Group · Apache 2.0".
+- **i18n**: el estado del encabezado ("Sin modelo activo"), los rótulos de
+  Backends en Config, Power/Clock del Monitor y 3 errores del Launcher
+  estaban fijos en un idioma; ahora pasan por los locales EN/ES.
+- **Config**: los ejemplos de ruta siguen al SO (rutas Windows en Windows) y
+  ya no muestran una ruta personal.
+- **Monitor**: el badge de alerta dice qué lo disparó (temperatura o VRAM) y
+  explica los umbrales en el tooltip; "GPU NVIDIA no detectada" respeta el
+  idioma de la UI.
+- **Chat**: el selector de modelo muestra el nombre del archivo en vez de la
+  ruta completa (que queda en el tooltip).
+- `SyntaxWarning` por una secuencia de escape en el docstring de `paths.py`.
+
+### Documentación
+- README EN/ES: sección **Descarga** con link al instalador, badges de CI y
+  release, sección de **voz** (STT whisper.cpp / faster-whisper / navegador y
+  TTS Kokoro / Piper / SAPI), instalador NSIS (no MSI), cantidad de tests.
+- `docs/voz-a-texto.md` reescrito: cubría solo faster-whisper y decía que no
+  había TTS.
+- QUICKSTART con `git clone` y atajo al instalador; SECURITY soporta 0.7.x.
+
+### CI
+- El job de frontend corre en Node 20 y 22 y ejecuta los tests de vitest.
+
 ## [0.7.1-beta] — 2026-09-30
 
 ### Corregido

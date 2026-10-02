@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Thermometer } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -16,6 +17,7 @@ function tempBadgeClasses(temp) {
  * nunca deja un setInterval corriendo después de desmontarse.
  */
 export default function StatusWidget() {
+  const { t } = useTranslation();
   const [state, setState] = useState(null);
 
   useEffect(() => {
@@ -46,8 +48,13 @@ export default function StatusWidget() {
     <div className="flex items-center gap-4 text-xs">
       <div className="flex items-center gap-1.5">
         <span className={`w-2 h-2 rounded-full ${runningProcess ? "bg-emerald-400" : "bg-glyvex-muted/50"}`} />
-        <span className={runningProcess ? "text-glyvex-bg-text" : "text-glyvex-bg-muted"}>
-          {runningProcess ? `${runningProcess.model_name} — :${runningProcess.port}` : "Sin modelo activo"}
+        {/* Solo cuenta procesos lanzados desde la suite: un llama-server
+            arrancado por fuera no aparece acá aunque el chat lo use. */}
+        <span
+          className={runningProcess ? "text-glyvex-bg-text" : "text-glyvex-bg-muted"}
+          title={runningProcess ? undefined : t("statusWidget.noModelHint")}
+        >
+          {runningProcess ? `${runningProcess.model_name} — :${runningProcess.port}` : t("statusWidget.noModel")}
         </span>
       </div>
 

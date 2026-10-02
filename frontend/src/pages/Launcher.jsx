@@ -1216,7 +1216,7 @@ export default function Launcher() {
         if (cancelled) return;
         if (!res.ok) {
           setCommandPreview(null);
-          setCommandError(data?.detail ? String(data.detail) : "No se pudo armar el comando.");
+          setCommandError(data?.detail ? String(data.detail) : t("launcher.errors.commandBuild"));
           return;
         }
         setCommandError(null);
@@ -1224,7 +1224,7 @@ export default function Launcher() {
       } catch {
         if (!cancelled) {
           setCommandPreview(null);
-          setCommandError("No se pudo consultar el comando al backend.");
+          setCommandError(t("launcher.errors.commandFetch"));
         }
       }
     }, 300);
@@ -1329,7 +1329,7 @@ export default function Launcher() {
         }
       })
       .catch(() => {
-        if (!cancelled) setModelMeta({ error: "No se pudo leer la metadata del modelo." });
+        if (!cancelled) setModelMeta({ error: t("launcher.errors.modelMeta") });
       });
     return () => { cancelled = true; };
   }, [selectedId]);
