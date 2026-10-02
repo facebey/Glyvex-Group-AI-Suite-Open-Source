@@ -5,6 +5,8 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Node.js 20](https://img.shields.io/badge/Node.js-20%20LTS-green.svg)](https://nodejs.org/)
+[![CI](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/actions/workflows/ci.yml/badge.svg)](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/actions/workflows/ci.yml)
+[![Última versión](https://img.shields.io/github/v/release/facebey/Glyvex-Group-AI-Suite-Open-Source?include_prereleases&label=release)](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest)
 
 **Glyvex-AI-Suite** es una aplicación local — parte de **Glyvex Group** — para
 gestionar, lanzar, chatear con, y evaluar modelos LLM locales (GGUF/GGML vía
@@ -19,6 +21,17 @@ que la máquina tiene. Sin GPU NVIDIA, el Monitor y el Launcher degradan
 de forma segura (ver sección de Módulos).
 
 **Sitio de producto:** [ai-suite.glyvexgroup.com](https://ai-suite.glyvexgroup.com/) — [División Glyvex AI](https://ai.glyvexgroup.com/)
+
+## Descarga (Windows)
+
+La forma más fácil de probarla: bajá el instalador desde
+[**Releases → latest**](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest) (archivo `Glyvex AI Suite_<versión>_x64-setup.exe`),
+ejecutalo y seguí el asistente de 6 pasos que se ve más abajo. Se instala por
+usuario (no pide permisos de administrador) y agrega el acceso **Glyvex** al
+menú Inicio. En el primer arranque, una pantalla de configuración descarga el
+runtime de llama.cpp y, si querés, los modelos de voz.
+
+¿Querés correrla desde el código fuente, o en Linux/macOS? Ver [Instalación](#instalación).
 
 ## Screenshots
 
@@ -57,9 +70,13 @@ Al no firmar el instalador NSIS, Windows SmartScreen mostrará el aviso
 - **NVIDIA drivers + CUDA** — *opcional*. Sin GPU NVIDIA, el Monitor (M5)
   muestra "GPU NVIDIA no detectada" en vez de crashear, y el resto de la
   suite funciona igual (podés correr modelos 100% en CPU).
-- `faster-whisper` — *opcional*, para la transcripción local de voz del
-  micrófono del chat: `pip install -r requirements-optional.txt`
-  (ver [`docs/voz-a-texto.md`](docs/voz-a-texto.md)).
+- **Voz (opcional)** — el dictado (voz a texto) usa el runtime nativo
+  **whisper.cpp**, que se descarga desde la app cuando lo pedís (no hay que
+  instalar nada). Corriendo desde el código fuente también podés usar
+  `faster-whisper`: `pip install -r requirements-optional.txt`. La lectura en
+  voz alta (texto a voz) funciona de entrada en Windows (SAPI); las voces
+  neuronales (Piper, Kokoro) se descargan en Ajustes → TTS. Ver
+  [`docs/voz-a-texto.md`](docs/voz-a-texto.md).
 - Al menos uno de estos backends de inferencia, según qué vayas a usar.
   **En Windows** también está el [runtime embebido](#runtime-de-inferencia-llamacpp-embebido):
   la suite descarga su propia build probada de llama.cpp, sin instalar nada
@@ -71,7 +88,7 @@ Al no firmar el instalador NSIS, Windows SmartScreen mostrará el aviso
 
 | Plataforma | Estado | Notas |
 |---|---|---|
-| **Windows** | ✅ Plataforma principal | La versión actual está optimizada para Windows: scripts `start.cmd` (CMD) y `start.ps1` (PowerShell), runtime embebido de llama.cpp e instalador MSI. |
+| **Windows** | ✅ Plataforma principal | La versión actual está optimizada para Windows: scripts `start.cmd` (CMD) y `start.ps1` (PowerShell), runtime embebido de llama.cpp e instalador NSIS (`-setup.exe`). |
 | **Linux** | ⏳ Después de la versión estable | `start.sh` ya existe; el soporte formal (pruebas completas y CI) arranca cuando haya una versión estable. |
 | **macOS** | ⏳ En el futuro | Comparte el camino de `start.sh`; llega después de Linux. |
 
@@ -248,12 +265,12 @@ servers que estén corriendo afuera de la app.
 
 | Ruta | Vista | Contenido |
 |------|-------|-----------|
-| `/` | Chat | Streaming, ramas (regeneraciones), adjuntos, mic, razonamiento, métricas, export, historial |
+| `/` | Chat | Streaming, ramas (regeneraciones), adjuntos, mic (voz a texto), escuchar respuestas (texto a voz), razonamiento, métricas, export, historial |
 | `/launcher` | Launcher | Vistas Group/List, templates de hardware, presets de sampling, launch/stop, logs en vivo, tira de vitales del proceso (t/s, contexto, cola) |
 | `/benchmark` | Benchmark | Selección de sets (incluidos propios), run cancelable, progreso por WS, resultados |
 | `/monitor` | Monitor | Card de GPU, heatmap de cores, sparklines 60 s, sección **LLM Server** (vitales en vivo + histórico de t/s, contexto y cola por proceso), gráfico histórico HW con retención, indicador de conexión WS |
 | `/reports` | Reports | Historial de benchmarks, gráficos Recharts (t/s por prompt, TTFT vs tokens), comparación, reportes HTML |
-| `/config` | Config | Backend, model_dirs, scan, tools, STT, adjuntos, templates, monitor (histórico y retenciones) |
+| `/config` | Config | Backend, model_dirs, scan, tools, STT, TTS, adjuntos, templates, temas, monitor (histórico y retenciones) |
 
 ## Módulos
 
@@ -262,12 +279,34 @@ servers que estén corriendo afuera de la app.
 | **M0 — Skeleton** | Base del proyecto: FastAPI + React + config persistida en `data/config.json` con dot-notation. |
 | **M1 — Inventario** | Escanea los `model_dirs` configurados (GGUF/GGML/safetensors), extrae familia/parámetros/cuantización del nombre de archivo y lee **metadata GGUF** (arch, vocab, context, chat template, BOS/EOS), cachea en `data/models.json`. **Detecta módulos embebidos** en el propio `.gguf` (cabeza MTP/NextN `*.nextn.*` y encoder de visión) leyendo el header una sola vez. Scan incremental por `path+mtime`, progreso vía SSE, **agrupación por carpeta** con variantes (base + MTP + mmproj), tags por modelo. Si cambia el esquema de campos derivados del header (`MODELS_CACHE_SCHEMA_VERSION`), el cache se invalida una sola vez y el próximo scan recalcula todo. |
 | **M2 — Launcher** | Lanza `llama-server`/Ollama/LM Studio con `asyncio.subprocess`, templates de hardware predefinidos, logs en vivo por WebSocket (colapsa las líneas "slots idle" repetidas para no enterrar la terminal), health check async, stop/restart limpios (SIGTERM→SIGKILL). **Speculative decoding MTP/NextN:** origen del draft embebido en el modelo, sidecar detectado o path manual (UI de origen), flags `--spec-type draft-mtp` / `--spec-draft-model` / `--spec-draft-n-max` y cache types propios del draft (`--spec-draft-type-k/-v`). Arranca `llama-server` con `--metrics` (endpoint Prometheus `/metrics`) para alimentar los vitales del proceso (M8). |
-| **M3 — Chat** | Interfaz de chat OpenAI-compatible con streaming (SSE), separación de bloques `think` (razonamiento) del contenido de respuesta, métricas en vivo de t/s, TTFT y tokens generados (MetricsBar, calculadas en `stream_metrics.py` desde los `timings` de llama-server: cuenta el razonamiento y las rondas de tools sin inflar ni cortar las tasas), cancelación de generación (Esc), export a JSON/Markdown. **Conversaciones en SQLite** con árbol de mensajes (regeneraciones = ramas), búsqueda e historial. **Adjuntos:** archivos e imágenes (PDF, DOCX, PPTX, XLSX) con límites configurables y estimación de tokens. **Tool calling nativo:** loop de `tool_calls` del modelo con rondas configurables (`tools.max_rounds`) y visualización de actividad (ToolActivity). **Voz a texto:** micrófono en el composer (Web Speech API en el browser, fallback a **faster-whisper** en el backend, idioma configurable, default es-AR). Ver [voz-a-texto.md](docs/voz-a-texto.md). |
+| **M3 — Chat** | Interfaz de chat OpenAI-compatible con streaming (SSE), separación de bloques `think` (razonamiento) del contenido de respuesta, métricas en vivo de t/s, TTFT y tokens generados (MetricsBar, calculadas en `stream_metrics.py` desde los `timings` de llama-server: cuenta el razonamiento y las rondas de tools sin inflar ni cortar las tasas), cancelación de generación (Esc), export a JSON/Markdown. **Conversaciones en SQLite** con árbol de mensajes (regeneraciones = ramas), búsqueda e historial. **Adjuntos:** archivos e imágenes (PDF, DOCX, PPTX, XLSX) con límites configurables y estimación de tokens. **Tool calling nativo:** loop de `tool_calls` del modelo con rondas configurables (`tools.max_rounds`) y visualización de actividad (ToolActivity). **Voz a texto:** micrófono en el composer — motor `auto` (default): **whisper.cpp** nativo si su runtime está listo, si no **faster-whisper**, si no la Web Speech API del navegador; idioma configurable, default es-AR. **Texto a voz:** botón "escuchar" en cada respuesta — motor `auto`: **Kokoro** → **Piper** → **SAPI** de Windows según qué esté listo, con caché del audio. Ver [voz-a-texto.md](docs/voz-a-texto.md). |
 | **M4 — Benchmark** | Suite de 58 prompts en 6 categorías (programación, matemática, ciencias, lógica, español, infraestructura de redes) — extensible con **sets propios** (CRUD) — corridos como `asyncio.Task` cancelable, con progreso por WebSocket, scoring por prompt (keywords automáticas, **judge LLM** opcional, score manual), reporte HTML autónomo, historial de runs en SQLite, comparación de runs y vista `/reports` con gráficos Recharts. |
 | **M5 — Monitor** | GPU (nvidia-ml-py, con control de límite de potencia/TDP)/CPU/RAM (psutil) en tiempo real vía WebSocket con buffer circular de 300 muestras, degrada a `null` sin crashear si no hay GPU NVIDIA o falta psutil. **Histórico persistente** (`metrics_store.py`): poller en segundo plano desde que arranca la app que guarda series en `data/metrics.db` (SQLite) en ventanas de 5 s, con rollup a 1 min y 1 h y retención configurable (`monitor.retention_raw_h/1m_d/1h_d`, default 48 h / 30 d / 365 d); `GET /api/metrics/series` y `/api/metrics/query` eligen la resolución según el rango pedido. |
 | **M6 — Integración final** | Widget de estado en la navbar (modelo activo + mini GPU), sistema de toasts (Context + `useReducer`), shortcuts de teclado en Chat, estado persistido en `localStorage`, onboarding para instalaciones nuevas, `/api/info` + `/api/state`. |
 | **M7 — Base de datos** | SQLAlchemy async + aiosqlite (WAL) en `data/glyvex.db`: conversaciones/mensajes (árbol), benchmark runs/results/summaries, templates de hardware, sets de prompts. Dual con JSON (`config.json`, `models.json`) para portabilidad de reportes. |
 | **M8 — Vitales del LLM server** | Poller que lee el endpoint Prometheus `/metrics` de cada `llama-server` en ejecución (`llm_metrics.py`): generación t/s, prompt processing, contexto ocupado — en builds actuales `kv_cache_tokens` fue removido y el uso sale de `GET /slots` (suma de la secuencia de los slots, con `slots_total`/`slots_busy`; en slot ocioso conserva la última conversación), con fallback a `kv_cache_tokens` en builds viejos —, **% de tokens de prompt reutilizados del caché** (`prompt_tokens_cached_total`), **% de aceptación de la decodificación especulativa MTP/draft** (`spec_decode_num_*`), pico de secuencia (`n_tokens_max` en builds actuales, `n_past_max` en anteriores) y cola de requests, con detección de reinicio (no genera picos falsos). Intervalo adaptativo: 1 s con clientes WS conectados, 5 s en segundo plano (se despierta enseguida al abrir el panel). REST `/api/llm-metrics` (procesos vivos + históricos, history por proceso, WS stream). Se muestra como **tira de vitales** en el Launcher (por proceso) y como **sección LLM Server** en el Monitor (tiles en vivo + gráficos históricos desde `metrics.db`, separados por proceso). Requiere que el launcher arranque `llama-server` con `--metrics` (Ollama/LM Studio no lo exponen). |
+
+## Voz: dictado y lectura en voz alta
+
+Todo corre local; los modelos se descargan solo cuando los pedís.
+
+- **Voz a texto (micrófono del chat)** — motor `stt.engine`:
+  - `auto` (default): **whisper.cpp** si su runtime está listo, si no
+    `faster-whisper` si está instalado, si no el navegador.
+  - `whispercpp`: binario nativo `whisper-cli` que se descarga en el primer
+    uso (la única opción dentro de la app empaquetada). 100% local.
+  - `whisper`: `faster-whisper` (desde el código fuente, `requirements-optional.txt`).
+  - `browser`: Web Speech API. **No es local** en Chrome (el audio va a
+    Google) y no está disponible en el WebView de Tauri ni en Firefox.
+- **Texto a voz (botón "escuchar" en las respuestas)** — motor `tts.engine`:
+  - `auto` (default): **Kokoro** si está listo, si no **Piper**, si no **SAPI**.
+  - `kokoro` / `piper`: voces neuronales locales (onnxruntime), se descargan
+    en Ajustes → TTS.
+  - `sapi`: las voces que trae Windows, sin descargas.
+  - El audio generado se cachea (LRU): volver a escuchar una respuesta es
+    instantáneo.
+
+Detalle: [`docs/voz-a-texto.md`](docs/voz-a-texto.md).
 
 ## Shortcuts de teclado (Chat)
 
@@ -353,7 +392,7 @@ El chat expone al modelo dos herramientas, invocadas de forma nativa vía
 
 ## Tests
 
-Suite de tests automatizados (pytest + pytest-asyncio + httpx, 358 tests,
+Suite de tests automatizados (pytest + pytest-asyncio + httpx, ~600 tests,
 sin unittest, sin requests, sin GPU/modelos/red real — todo mockeado: mock
 LLM server uvicorn en `:18080`, binarios fake, SQLite en memoria):
 
