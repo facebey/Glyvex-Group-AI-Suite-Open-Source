@@ -1,8 +1,10 @@
 # Security Policy
 
+> **Language:** [Español](SECURITY.es.md)
+
 ## Supported Versions
 
-Solo se dan actualizaciones de seguridad a la última versión publicada.
+Only the latest released version receives security updates.
 
 | Version | Supported          |
 | ------- | ------------------ |
@@ -11,19 +13,19 @@ Solo se dan actualizaciones de seguridad a la última versión publicada.
 
 ## Reporting a Vulnerability
 
-Si encontrás una vulnerabilidad de seguridad, **no abras un issue público**.
+If you find a security vulnerability, **do not open a public issue**.
 
-Reportala de forma privada por uno de estos medios:
-- **GitHub Security Advisories**: usá el botón "Report a vulnerability" en la pestaña **Security** de este repo (forma preferida — crea un draft privado).
-- **Email**: acebeyfabian@gmail.com
+Report it privately through one of these channels:
+- **GitHub Security Advisories**: use the "Report a vulnerability" button on this repo's **Security** tab (preferred — creates a private draft).
+- **Email**: info@glyvexgroup.com
 
-### Qué esperar
+### What to expect
 
-- Confirmación de recepción dentro de 72 horas.
-- Una primera evaluación (aceptada / rechazada / necesita más info) dentro de 7 días.
-- Si se acepta, te mantengo al tanto del progreso hasta que salga el fix. El crédito se da en el changelog/release notes, salvo que pidas lo contrario.
-- Si se rechaza, te explico el motivo.
+- Acknowledgement of receipt within 72 hours.
+- A first assessment (accepted / rejected / needs more info) within 7 days.
+- If accepted, you will be kept informed of the progress until the fix ships. Credit goes in the changelog/release notes unless you ask otherwise.
+- If rejected, we explain why.
 
-### Alcance
+### Scope
 
-Este proyecto orquesta y lanza binarios de terceros (por ejemplo, `llama-server` de llama.cpp). Vulnerabilidades en esos binarios en sí deben reportarse a sus proyectos correspondientes; acá se atienden vulnerabilidades en el código de Glyvex-AI-Suite (backend, frontend, configuración, manejo de procesos/datos).
+This project orchestrates and launches third-party binaries (for example, `llama-server` from llama.cpp). Vulnerabilities in those binaries themselves should be reported to their respective projects; here we handle vulnerabilities in the Glyvex-AI-Suite code (backend, frontend, configuration, process/data handling).

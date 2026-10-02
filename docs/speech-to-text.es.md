@@ -1,5 +1,7 @@
 # Voz: dictado y lectura en voz alta
 
+> **Idioma:** [English](speech-to-text.md)
+
 La suite tiene las dos direcciones de voz, las dos 100% locales salvo que
 elijas a propósito el motor del navegador:
 

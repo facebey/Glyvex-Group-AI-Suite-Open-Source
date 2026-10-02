@@ -1,5 +1,7 @@
 # Módulos — detalle técnico
 
+> **Idioma:** [English](modules.md)
+
 Detalle por módulo. El README trae la tabla resumen; acá está el cómo.
 
 ## M0 — Skeleton
@@ -59,7 +61,7 @@ JSON/Markdown.
   (ToolActivity).
 - **Voz a texto:** micrófono en el composer (Web Speech API en el browser,
   fallback a **faster-whisper** en el backend, idioma configurable, default
-  es-AR). Ver [voz-a-texto.md](voz-a-texto.md).
+  es-AR). Ver [speech-to-text.md](speech-to-text.md).
 
 ## M4 — Benchmark
 

@@ -1,39 +1,38 @@
-# Contribuyendo a Glyvex-AI-Suite
+# Contributing to Glyvex-AI-Suite
 
-Gracias por querer contribuir. Acá está cómo funciona el flujo.
+> **Language:** [Español](CONTRIBUTING.es.md)
 
-## Reglas básicas
+Thanks for wanting to contribute. Here is how the flow works.
 
-- **100% local**: nada de la app ni de sus tests puede depender de red,
-  nube, GPU o modelos reales. Un test que toque el mundo real no entra.
-- **Tests en verde**: la suite completa debe pasar antes de proponer cualquier
-  cambio.
-- **Un cambio por PR**: no mezclar feature + fixes + refactor.
-- **Idioma del código y los mensajes**: español (comentarios de intención,
-  commits, PRs).
+## Basic rules
 
-## Buenas primeras contribuciones (up-for-grabs)
+- **100% local**: neither the app nor its tests may depend on the network,
+  cloud, a GPU, or real models. A test that touches the real world does not
+  get in.
+- **Tests green**: the full suite must pass before proposing any change.
+- **One change per PR**: do not mix features + fixes + refactors.
+- **Language of code and messages**: English (intent comments, commits, PRs).
 
-Tareas acotadas, aptas para entrar al proyecto, que no rompen la regla de 100%
-local:
+## Good first contributions (up-for-grabs)
 
-- Traducir a inglés las docs nuevas: `QUICKSTART.md`, `ARQUITECTURA.md`,
-  `PRIVACIDAD.md` y `modulos.md` (hoy en español).
-- Ampliar `TROUBLESHOOTING.md` con casos reales que resuelvas.
-- Aumentar cobertura de tests en módulos con poca (ver `pytest --cov`).
-- Agregar un set de benchmark de ejemplo a `backend/prompts/` (con keywords de
-  scoring bien definidas).
-- Documentar el soporte formal de Linux/macOS (está en el roadmap del README).
+Bounded tasks, suitable for entering the project, that do not break the 100%
+local rule:
 
-Mirá el [Roadmap](README.md#roadmap) para el contexto mayor.
+- Extend `TROUBLESHOOTING.md` with real cases you solve.
+- Increase test coverage in low-coverage modules (see `pytest --cov`).
+- Add a sample benchmark set to `backend/prompts/` (with well-defined scoring
+  keywords).
+- Document formal Linux/macOS support (it is in the README roadmap).
+
+See the [Roadmap](README.md#roadmap) for broader context.
 
 ## Setup
 
 ```bash
-# Backend (Python 3.11+) — desde la raíz del repo
+# Backend (Python 3.11+) — from the repo root
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-# opcionales: GPU (nvidia-ml-py), voz a texto (faster-whisper), etc.
+# optional: GPU (nvidia-ml-py), speech-to-text (faster-whisper), etc.
 .venv/bin/pip install -r requirements-optional.txt
 
 # Frontend (Node.js 20 LTS+)
@@ -41,69 +40,72 @@ cd frontend
 npm install
 ```
 
-Arranque completo con `./start.sh` (Linux) o los scripts equivalentes en
-`scripts/`. En desarrollo: backend con `uvicorn main:app --reload --port
-7981` desde `backend/` y frontend con `npm run build && npm run preview`
-(desde `frontend/`).
+Full startup with `./start.sh` (Linux) or the equivalent scripts in
+`scripts/`. For development: backend with `uvicorn main:app --reload --port
+7981` from `backend/`, and frontend with `npm run build && npm run preview`
+(from `frontend/`).
 
 ## Tests
 
 ```bash
-# Desde la raíz del repo
+# From the repo root
 pytest tests/ -v
 ```
 
-- pytest + pytest-asyncio + httpx. Los fixtures compartidos viven en
-  `tests/conftest.py`: binarios fake que responden `--help`/`--version`,
-  un LLM server mock en `:18080` y estado aislado por test.
-- Baseline: **~600 tests** (588 pasando + 9 omitidos según plataforma, a v0.7.1-beta).
+- pytest + pytest-asyncio + httpx. Shared fixtures live in
+  `tests/conftest.py`: fake binaries answering `--help`/`--version`, a mock
+  LLM server on `:18080`, and per-test isolated state.
+- Baseline: **~600 tests** (588 passing + 9 skipped per platform, as of
+  v0.7.1-beta).
 
 ## Git
 
-- Ramas descriptivas desde `main`: `feature/<tema>`, `fix/<tema>`,
-  `docs/<tema>`.
-- Commits con prefijo conventional en español: `feat(llm): ...`,
+- Descriptive branches from `main`: `feature/<topic>`, `fix/<topic>`,
+  `docs/<topic>`.
+- Commits with conventional prefixes (in English): `feat(llm): ...`,
   `fix(backend): ...`, `test(llm): ...`, `docs: ...`.
-- No commitear estado runtime: `data/config.json`, `data/models.json`,
-  logs, `node_modules`. Ver `.gitignore`.
+- Never commit runtime state: `data/config.json`, `data/models.json`,
+  logs, `node_modules`. See `.gitignore`.
 
-## Convenciones de código
+## Code conventions
 
-- **Sin comentarios** salvo cuando el por-qué no es obvio. El repo usa
-  comentarios de intención (en español), no de narración de código.
-- **Pydantic v2** en backend; `model_validator` para validaciones cruzadas.
-- Frontend React: estado global por contextos propios (sin librerías de
-  estado externas), componentes en `frontend/src/pages/`.
+- **No comments** unless the why is not obvious. The repo uses intent
+  comments (in English), not code narration.
+- **Pydantic v2** in the backend; `model_validator` for cross-field
+  validation.
+- React frontend: global state via own contexts (no external state
+  libraries), components in `frontend/src/pages/`.
 
-### Si tocás `LaunchConfig` (launcher)
+### If you touch `LaunchConfig` (launcher)
 
-Agregar o cambiar un campo exige actualizar **los cuatro** lados:
+Adding or changing a field requires updating **all four** sides:
 
-1. La docstring/comentario del campo en `backend/launcher.py`.
-2. `build_llama_server_command` (el flag que emite).
-3. El test de `FRONTEND_LAUNCH_PAYLOAD` en `tests/test_launcher.py` (debe
-   espejar `DEFAULT_LAUNCH_CONFIG`).
-4. El frontend (`frontend/src/pages/Launcher.jsx`).
+1. The field's docstring/comment in `backend/launcher.py`.
+2. `build_llama_server_command` (the flag it emits).
+3. The `FRONTEND_LAUNCH_PAYLOAD` test in `tests/test_launcher.py` (must
+   mirror `DEFAULT_LAUNCH_CONFIG`).
+4. The frontend (`frontend/src/pages/Launcher.jsx`).
 
-Las features contra builds viejas de llama.cpp se protegen con el **probe de
-binario** (`probe_binary` + `filter_command`): los flags que el binario no
-conoce se descartan y se reportan, no se rompe el lanzamiento.
+Features against older llama.cpp builds are protected by the **binary probe**
+(`probe_binary` + `filter_command`): flags the binary does not know are
+dropped and reported, the launch is not broken.
 
-## Documentación
+## Documentation
 
-- `README.md` — detalle completo de módulos, seguridad y release; su sección
-  "Documentación" es el índice de todas las docs.
-- `docs/` — `QUICKSTART.md` (arranque rápido), `ARQUITECTURA.md` (mapa del
-  código), `modulos.md` (M0–M8), `launcher-params.md` (referencia de
-  parámetros), `PRIVACIDAD.md` (qué sale de la máquina), `TROUBLESHOOTING.md`,
-  `voz-a-texto.md`, `searxng/`.
-- Si tu cambio agrega comportamiento visible para el usuario, actualizá el
-  README (o el doc correspondiente) en la misma PR.
-- `CHANGELOG.md` — el maintainer lo actualiza en cada release.
+- `README.md` — full detail on modules, security and release; its
+  "Documentation" section is the index of all docs.
+- `docs/` — `QUICKSTART.md` (quick start), `ARCHITECTURE.md` (code map),
+  `modules.md` (M0–M8), `launcher-params.md` (parameter reference),
+  `PRIVACY.md` (what leaves the machine), `TROUBLESHOOTING.md`,
+  `speech-to-text.md`, `searxng/`.
+- If your change adds user-visible behavior, update the README (or the
+  corresponding doc) in the same PR.
+- `CHANGELOG.md` — the maintainer updates it on every release.
 
-## Versionado y releases
+## Versioning and releases
 
-Semántica `mayor.minor.patch` (ver sección "Versionado" del README). La
-versión vive en `APP_VERSION` (`backend/main.py`) y `package.json`
-(frontend) y debe mantenerse igual en ambos. El maintainer crea el tag `vX.Y.Z` y genera el
-zip distributable vía `distribution/` (ver `distribution/README.md`).
+Semver `major.minor.patch` (see the "Versioning" section of the README). The
+version lives in `APP_VERSION` (`backend/main.py`) and `package.json`
+(frontend) and must be kept identical in both. The maintainer creates the
+tag `vX.Y.Z` and generates the distributable zip via `distribution/` (see
+`distribution/README.md`).

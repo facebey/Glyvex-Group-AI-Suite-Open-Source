@@ -75,7 +75,7 @@ Since the NSIS installer is unsigned, Windows SmartScreen will show the
   running from source you can also use `faster-whisper`:
   `pip install -r requirements-optional.txt`. Text-to-speech works out of the
   box on Windows (SAPI); the neural voices (Piper, Kokoro) are downloaded from
-  Settings → TTS. See [`docs/voz-a-texto.md`](docs/voz-a-texto.md) (Spanish).
+  Settings → TTS. See [`docs/speech-to-text.md`](docs/speech-to-text.md) (Spanish).
 - At least one of these inference backends, depending on what you'll use.
   **On Windows** there's also the [embedded runtime](#inference-runtime-embedded-llamacpp):
   the suite downloads its own tested build of llama.cpp, so you don't have to
@@ -285,7 +285,7 @@ outside the app yet.
 | **M7 — Database** | Async SQLite: conversations (tree), benchmarks, templates, sets. |
 | **M8 — LLM server vitals** | t/s, prompt processing, cache, MTP acceptance % from `llama-server`'s `/metrics`. |
 
-Per-module technical detail: [`docs/modulos.md`](docs/modulos.md) (Spanish) ·
+Per-module technical detail: [`docs/modules.md`](docs/modules.md) (Spanish) ·
 Launch parameters: [`docs/launcher-params.md`](docs/launcher-params.md)
 (Spanish)
 
@@ -309,7 +309,7 @@ Everything runs locally; the models are downloaded only when you ask for them.
   - `sapi`: the voices that come with Windows, zero downloads.
   - Generated audio is cached (LRU), so replaying a reply is instant.
 
-Details: [`docs/voz-a-texto.md`](docs/voz-a-texto.md) (Spanish).
+Details: [`docs/speech-to-text.md`](docs/speech-to-text.md) (Spanish).
 
 ## Keyboard shortcuts (Chat)
 
@@ -344,12 +344,12 @@ The chat exposes two tools to the model, invoked natively via `tool_calls`
 |---|---|
 | [README](README.md) | Full overview: modules (M0–M8), install, usage, security and release. |
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | The shortest path to a running suite: prerequisites, install, startup and first run. |
-| [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Codebase map: processes, data flows and where state lives. |
-| [`docs/PRIVACIDAD.md`](docs/PRIVACIDAD.md) | What leaves your machine and what doesn't: 100% local, no outbound telemetry. |
-| [`docs/modulos.md`](docs/modulos.md) | Per-module technical detail (M0–M8). |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Codebase map: processes, data flows and where state lives. |
+| [`docs/PRIVACY.md`](docs/PRIVACY.md) | What leaves your machine and what doesn't: 100% local, no outbound telemetry. |
+| [`docs/modules.md`](docs/modules.md) | Per-module technical detail (M0–M8). |
 | [`docs/launcher-params.md`](docs/launcher-params.md) | Reference of the `llama-server` launch parameters the Launcher manages. |
 | [`docs/LAUNCH-FLAGS.md`](docs/LAUNCH-FLAGS.md) · [`docs/LAUNCH-FLAGS.es.md`](docs/LAUNCH-FLAGS.es.md) | Bilingual (EN/ES) guide for every flag: what it does, impact, default and when to change it. The Launcher shows the binary's official help under each control. |
-| [`docs/voz-a-texto.md`](docs/voz-a-texto.md) | Chat microphone: Web Speech API vs local Whisper, models, security and packaging. |
+| [`docs/speech-to-text.md`](docs/speech-to-text.md) | Chat microphone: Web Speech API vs local Whisper, models, security and packaging. |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Common problems and how to solve them. |
 | [`docs/searxng/README.md`](docs/searxng/README.md) | Web search providers (DuckDuckGo, SearXNG, Brave, Tavily) and `tools.*`. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute: branches, commits, tests and conventions. |
@@ -362,7 +362,7 @@ The chat exposes two tools to the model, invoked natively via `tool_calls`
 - **Embedded runtime** — the optional download of the llama.cpp runtime is
   the only exception to "everything is local": it's **explicit** (you start
   it), **sha256-verified** against a list of tested versions, and the app
-  never downloads anything on its own. See [PRIVACIDAD](docs/PRIVACIDAD.md).
+  never downloads anything on its own. See [PRIVACY](docs/PRIVACY.md).
 - CORS is restricted to whatever you list in `GLYVEX_CORS_ORIGINS` in the
   active environment (default `http://localhost:5173`). With
   `allow_credentials=True`, a `*` doesn't work: browsers reject that

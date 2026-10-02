@@ -1,425 +1,416 @@
 # Changelog
 
-Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
-Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
+> **Language:** [Español](CHANGELOG.es.md)
+
+Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
-### Corregido
-- **Versión unificada en 0.7.1-beta**: `APP_VERSION` (`/api/health`,
-  `/api/info`), `frontend/package.json` y `src-tauri/Cargo.toml` seguían en
-  0.6.0 mientras el instalador ya era 0.7.1-beta.
-- **Pie de la app**: "Todos los derechos reservados" contradecía la licencia
-  Apache 2.0; ahora dice "© Glyvex Group · Apache 2.0".
-- **i18n**: el estado del encabezado ("Sin modelo activo"), los rótulos de
-  Backends en Config, Power/Clock del Monitor y 3 errores del Launcher
-  estaban fijos en un idioma; ahora pasan por los locales EN/ES.
-- **Config**: los ejemplos de ruta siguen al SO (rutas Windows en Windows) y
-  ya no muestran una ruta personal.
-- **Monitor**: el badge de alerta dice qué lo disparó (temperatura o VRAM) y
-  explica los umbrales en el tooltip; "GPU NVIDIA no detectada" respeta el
-  idioma de la UI.
-- **Chat**: el selector de modelo muestra el nombre del archivo en vez de la
-  ruta completa (que queda en el tooltip).
-- `SyntaxWarning` por una secuencia de escape en el docstring de `paths.py`.
+### Fixed
+- **Unified version in 0.7.1-beta**: `APP_VERSION` (`/api/health`,
+  `/api/info`), `frontend/package.json` and `src-tauri/Cargo.toml` were
+  still on 0.6.0 while the installer was already 0.7.1-beta.
+- **App footer**: "All rights reserved" contradicted the Apache 2.0
+  license; it now says "© Glyvex Group · Apache 2.0".
+- **i18n**: the header state ("No active model"), the Backends labels in
+  Config, the Monitor's Power/Clock and 3 Launcher errors were fixed in one
+  language; they now go through the EN/ES locales.
+- **Config**: the path examples follow the OS (Windows paths on Windows) and
+  no longer show a personal path.
+- **Monitor**: the alert badge says what triggered it (temperature or VRAM)
+  and explains the thresholds in the tooltip; "NVIDIA GPU not detected"
+  respects the UI language.
+- **Chat**: the model selector shows the filename instead of the full path
+  (which stays in the tooltip).
+- `SyntaxWarning` for an escape sequence in the `paths.py` docstring.
 
-### Documentación
-- README EN/ES: sección **Descarga** con link al instalador, badges de CI y
-  release, sección de **voz** (STT whisper.cpp / faster-whisper / navegador y
-  TTS Kokoro / Piper / SAPI), instalador NSIS (no MSI), cantidad de tests.
-- `docs/voz-a-texto.md` reescrito: cubría solo faster-whisper y decía que no
-  había TTS.
-- QUICKSTART con `git clone` y atajo al instalador; SECURITY soporta 0.7.x.
+### Documentation
+- README EN/ES: **Download** section with link to the installer, CI and
+  release badges, **voice** section (STT whisper.cpp / faster-whisper /
+  browser and TTS Kokoro / Piper / SAPI), NSIS installer (not MSI), test
+  count.
+- `docs/speech-to-text.md` rewritten: it only covered faster-whisper and
+  said there was no TTS.
+- QUICKSTART with `git clone` and shortcut to the installer; SECURITY
+  supports 0.7.x.
 
 ### CI
-- El job de frontend corre en Node 20 y 22 y ejecuta los tests de vitest.
+- The frontend job runs on Node 20 and 22 and executes the vitest tests.
 
 ## [0.7.1-beta] — 2026-09-30
 
-### Corregido
-- **TTS**: la reproducción vuelve al elemento `<audio>` (el rewrite a WebAudio
-  dejaba el audio mudo en algunos entornos Chrome/Edge/WebView2). Un fallo de
-  reproducción o autoplay se muestra ahora en un aviso, en vez de silencio o
-  botón atascado.
-- **TTS**: cache de WAV en el backend (LRU 32): re-escuchar la misma respuesta
-  es instantáneo y no resintetiza.
-- **Config**: la detección de Web Search / STT / TTS en Opciones ya no tarda
-  30-45 s (caché TTL 60 s por firma de config; el botón "Comprobar" fuerza el
-  re-probe).
-- **Chat**: los últimos 5 endpoints personalizados se persisten (localStorage)
-  y aparecen en el selector para no volver a tipear la URL.
+### Fixed
+- **TTS**: playback goes back to the `<audio>` element (the rewrite to
+  WebAudio left the audio silent in some Chrome/Edge/WebView2
+  environments). A playback or autoplay failure is now shown in a notice,
+  instead of silence or a stuck button.
+- **TTS**: WAV cache in the backend (LRU 32): re-listening to the same
+  response is instant and does not re-synthesize.
+- **Config**: the Web Search / STT / TTS detection in Options no longer
+  takes 30-45 s (TTL cache 60 s per config signature; the "Check" button
+  forces the re-probe).
+- **Chat**: the last 5 custom endpoints are persisted (localStorage) and
+  appear in the selector so you do not have to type the URL again.
 
 ## [0.7.0-beta] — 2026-09-30
 
-### Agregado
-- **TTS neuronal (Piper + Kokoro) empaquetado en el sidecar**: la cadena
-  neural (piper, kokoro-onnx, onnxruntime, espeak-ng) ahora viaja dentro del
-  `glyvex-backend` (Fase 1b del empaquetado Tauri). Voces y modelo se descargan
-  en Ajustes → TTS; el motor `auto` elige Kokoro → Piper → SAPI según qué esté
-  listo.
-- **Pantalla de provisión — paso TTS**: además del check de voces SAPI, un
-  puntero directo para configurar el TTS neuronal en Ajustes.
+### Added
+- **Neural TTS (Piper + Kokoro) packaged in the sidecar**: the neural chain
+  (piper, kokoro-onnx, onnxruntime, espeak-ng) now travels inside
+  `glyvex-backend` (Phase 1b of the Tauri packaging). Voices and model are
+  downloaded in Settings → TTS; the `auto` engine picks Kokoro → Piper →
+  SAPI according to what is ready.
+- **Provisioning screen — TTS step**: in addition to the SAPI voices
+  check, a direct pointer to configure the neural TTS in Settings.
 
-### Cambiado
-- **Bumps de dependencias**: uvicorn 0.54, sqlalchemy 2.1.1, nvidia-ml-py
-  13.615.71 (backend) y vite 8.3.1 (frontend).
-- **Piso de numpy 2.2** en `requirements.txt`: el 2.5 exigía Python >=3.12 y
-  rompía la install del job de CI 3.11.
+### Changed
+- **Dependency bumps**: uvicorn 0.54, sqlalchemy 2.1.1, nvidia-ml-py
+  13.615.71 (backend) and vite 8.3.1 (frontend).
+- **numpy floor 2.2** in `requirements.txt`: 2.5 required Python >=3.12 and
+  broke the install of the CI job 3.11.
 
-### Corregido
-- **CI en Linux**: 3 tests asumían Windows (status STT/TTS) y ahora fuerzan la
-  plataforma vía monkeypatch; la suite pasa en 3.11 y 3.12.
+### Fixed
+- **CI on Linux**: 3 tests assumed Windows (STT/TTS status) and now force
+  the platform via monkeypatch; the suite passes on 3.11 and 3.12.
 
 ## [0.6.3-beta] — 2026-09-28
 
-### Agregado
-- **Empaquetado nativo Windows (Tauri 2 + NSIS)** per-user (sin UAC):
-  bootstrapper de WebView2 (auto-download en Win10 antiguos), branding del
-  wizard (header 150x57 + sidebar 164x314), shortcut en Inicio → "Glyvex".
-- **Ciclo de vida del sidecar**: la app arranca `glyvex-backend` (PyInstaller),
-  health-check con auto-reintento, kill al cerrar la ventana, y overlay
-  splash/error con botón Reintentar en la UI.
-- **Origen SPA estable (7981)**: el release arranca siempre en 7981 (con
-  fallback secuencial 7982…7990 solo si está ocupado); la SPA la sirve el
-  backend con rutas relativas `/api/...`.
-- **Arranque `--provision`**: la app abre directo en la pantalla de
-  provisión.
-- **Pantalla de provisión (T5.3)**: 3 pasos — runtime llama.cpp (obligatorio),
-  STT whisper.cpp + modelo base, TTS (check de voces SAPI) — con progreso
-  real de las descargas, reintentos y "Entrar a la app".
-- **STT whisper.cpp (nativo)**: runtime descargable (binario + modelo
-  ggml-base), dictado del micrófono a WAV 16 kHz y selector de motor
-  (auto / navegador / whisper.cpp / faster-whisper) en Opciones.
-- **TTS SAPI (local de Windows)**: botón "escuchar" en las respuestas del
-  chat y sección en Opciones con estado, activar/desactivar, voz y velocidad.
-- **Idioma de transcripción unificado**: un solo selector para todos los
-  motores (automático / es / en / pt / fr / de / it) en Opciones.
-- **Paneles colapsables** en Launcher (los 11, incluidos Opciones básicas y
-  Avanzadas) y Monitor (GPU, CPU, RAM, Historial, LLM Server, Procesos):
-  header clicable, estado por panel persistido (localStorage).
+### Added
+- **Native Windows packaging (Tauri 2 + NSIS)** per-user (no UAC):
+  WebView2 bootstrapper (auto-download on old Win10), wizard branding
+  (header 150x57 + sidebar 164x314), shortcut in Start → "Glyvex".
+- **Sidecar lifecycle**: the app starts `glyvex-backend` (PyInstaller),
+  health-check with auto-retry, kill when the window closes, and splash/error
+  overlay with a Retry button in the UI.
+- **Stable SPA origin (7981)**: the release always starts on 7981 (with
+  sequential fallback 7982…7990 only if it is busy); the SPA is served by
+  the backend with relative `/api/...` routes.
+- **`--provision` startup**: the app opens directly in the provisioning
+  screen.
+- **Provisioning screen (T5.3)**: 3 steps — llama.cpp runtime (required),
+  STT whisper.cpp + base model, TTS (SAPI voices check) — with real download
+  progress, retries and "Enter the app".
+- **STT whisper.cpp (native)**: downloadable runtime (binary + ggml-base
+  model), microphone dictation to WAV 16 kHz and engine selector (auto /
+  browser / whisper.cpp / faster-whisper) in Options.
+- **TTS SAPI (Windows local)**: "listen" button on chat responses and a
+  section in Options with state, enable/disable, voice and speed.
+- **Unified transcription language**: a single selector for all engines
+  (auto / es / en / pt / fr / de / it) in Options.
+- **Collapsible panels** in Launcher (the 11, including Basic and Advanced
+  Options) and Monitor (GPU, CPU, RAM, History, LLM Server, Processes):
+  clickable header, per-panel state persisted (localStorage).
 
-### Corregido
-- **Descarga de modelo STT en Opciones**: el crash `Cannot read properties
-  of null (reading 'aborted')` cortaba el progreso en la UI (la descarga
-  seguía en el backend y el reintento caía en "ya hay una descarga en
-  curso"); ahora el stream se lee con signal válido y la pantalla se
-  refresca sola hasta que el modelo queda listo.
-- **Mensaje de faster-whisper en la app empaquetada**: antes mandaba a
-  `pip install` (no aplica al bundle); ahora el estado STT reporta
-  `packaged` y la UI deja de mostrar la tarjeta de advertencia de ese motor
-  con motor `auto` (y lo ofrece deshabilitado en el selector), porque en el
-  bundle nunca se puede instalar.
-- **Idioma heredado en STT local**: whisper.cpp y faster-whisper ignoraban
-  `stt.language` y transcribían en inglés (el default de los motores); ahora
-  lo heredan salvo override explícito.
-- **host/port en templates**: el puerto configurado se perdía al
-  guardar/editar un template (faltaban esos campos en `TEMPLATE_FIELDS`).
-- **App empaquetada: tema/opciones no persistían** (PERS-1): el backend
-  release pedía un puerto libre aleatorio al SO, el `localStorage` era por
-  origen y cada arranque caía en uno distinto; ahora el release arranca
-  siempre en 7981 (con fallback secuencial 7982…7990 si está ocupado) y la
-  persistencia sobrevive al cierre/abrir de la app.
-- **App empaquetada: `ERR_CONNECTION_REFUSED` / pantalla de error al
-  abrir**: el shell Tauri redirigía a la SPA antes de que el backend
-  escuchara (race de bootstrap); ahora el shell emite el estado del sidecar
-  por eventos (con heartbeat de 5 s) y la UI redirige solo cuando el
-  health-check pasa, con fallback a recargar a los 180 s.
-- **Launcher: "build desconocida" con llama.cpp b11146**: el probe de
-  `--version` leía solo la primera línea (que en esa build es un log de
-  inicialización sin número); ahora recorre todas las líneas hasta
-  encontrar el build.
-- **Config → Runtime → Reinstalar: aviso falso "Windows-only"**: el
-  endpoint de reset no devolvía `platform` (solo lo devolvía el de status);
-  ahora el reset incluye la plataforma y la UI muestra la pantalla de
-  descarga correcta.
-- **STT: fallback automático a faster-whisper**: con el motor `auto` y el
-  runtime whisper.cpp no disponible, antes quedaba sin transcripción;
-  ahora cae a faster-whisper si está instalado (y la UI empaquetada no
-  ofrece ese motor, ya que en el bundle no se puede instalar).
-- **Ventanas CMD parpadeantes al abrir el Launcher y al lanzar modelos**:
-  los hijos de consola (probe de `--help`/`--version` del launcher y
-  whisper-cli, arranque de llama-server) se crean ahora sin ventana
-  (`CREATE_NO_WINDOW` en Windows).
+### Fixed
+- **STT model download in Options**: the crash `Cannot read properties of
+  null (reading 'aborted')` cut the progress in the UI (the download kept
+  going in the backend and the retry fell into "a download is already in
+  progress"); now the stream is read with a valid signal and the screen
+  refreshes on its own until the model is ready.
+- **faster-whisper message in the packaged app**: before it sent you to
+  `pip install` (does not apply to the bundle); now the STT state reports
+  `packaged` and the UI stops showing that engine's warning card with the
+  `auto` engine (and offers it disabled in the selector), because it can
+  never be installed in the bundle.
+- **Inherited language in local STT**: whisper.cpp and faster-whisper
+  ignored `stt.language` and transcribed in English (the engines' default);
+  now they inherit it unless there is an explicit override.
+- **host/port in templates**: the configured port was lost when saving/
+  editing a template (those fields were missing in `TEMPLATE_FIELDS`).
+- **Packaged app: theme/options did not persist** (PERS-1): the release
+  backend asked the OS for a random free port, `localStorage` was per origin
+  and each startup landed on a different one; now the release always starts
+  on 7981 (with sequential fallback 7982…7990 if it is busy) and the
+  persistence survives app close/open.
+- **Packaged app: `ERR_CONNECTION_REFUSED` / error screen on open**: the
+  Tauri shell redirected to the SPA before the backend was listening
+  (bootstrap race); now the shell emits the sidecar state via events (with a
+  5 s heartbeat) and the UI redirects only when the health-check passes,
+  with a reload fallback at 180 s.
+- **Launcher: "unknown build" with llama.cpp b11146**: the `--version` probe
+  only read the first line (which in that build is an initialization log
+  without a number); now it walks all lines until it finds the build.
+- **Config → Runtime → Reinstall: false "Windows-only" notice**: the reset
+  endpoint did not return `platform` (only the status one did); now the
+  reset includes the platform and the UI shows the correct download screen.
+- **STT: automatic fallback to faster-whisper**: with the `auto` engine and
+  the whisper.cpp runtime unavailable, before it stayed without
+  transcription; now it falls to faster-whisper if it is installed (and the
+  packaged UI does not offer that engine, since it cannot be installed in
+  the bundle).
+- **Flickering CMD windows when opening the Launcher and launching models**:
+  the console children (launcher `--help`/`--version` probes and whisper-cli,
+  llama-server startup) are now created without a window
+  (`CREATE_NO_WINDOW` on Windows).
 
-### Cambiado
-- **Layout responsive**: max-w de la app 1600 px (2100 en ruta Launcher),
-  sidebar 360 px en 2xl+ y drawer de historial 360 px (antes se cortaba en
-  pantallas de 1280 px).
+### Changed
+- **Responsive layout**: app max-w 1600 px (2100 on the Launcher route),
+  sidebar 360 px on 2xl+ and history drawer 360 px (before it was cut on
+  1280 px screens).
 
 ### Baseline
-- Suite completa: **471 tests en verde**; build de producción OK; instalador
-  NSIS verificado en máquina (install silencioso → sidecar → SPA → shortcut),
-  re-empaquetado 2026-09-28 con los fixes de arriba validado en el exe.
+- Full suite: **471 tests green**; production build OK; NSIS installer
+  verified on machine (silent install → sidecar → SPA → shortcut),
+  re-packaging 2026-09-28 with the fixes above validated in the exe.
 
 ## [0.6.2-beta] — 2026-09-26
 
-### Cambiado
-- **Migración mayor de dependencias del frontend** (una rama por
-  librería, build y tests en verde en cada paso):
-  | Dependencia | Antes | Después |
+### Changed
+- **Major frontend dependency migration** (one branch per library, build
+  and tests green at each step):
+  | Dependency | Before | After |
   |---|---|---|
   | `react` / `react-dom` | ^18.3.0 | ^19.3.0 |
   | `lucide-react` | ^0.400.0 | ^1.47.0 |
   | `react-markdown` | ^9.0.1 | ^10.1.0 |
   | `recharts` | ^2.12.0 | ^3.10.0 |
-- **lucide-react 1.x** eliminó los iconos de marca: el ícono `Github` del
-  footer pasó a `ExternalLink` (`frontend/src/App.jsx`).
+- **lucide-react 1.x** removed the brand icons: the `Github` icon in the
+  footer became `ExternalLink` (`frontend/src/App.jsx`).
 
 ### Baseline
-- Suite completa: **358 tests en verde**; build de producción OK; smoke
-  manual de las 6 vistas.
+- Full suite: **358 tests green**; production build OK; manual smoke of the
+  6 views.
 
 ## [0.6.1-beta1] — 2026-09-26
 
-### Agregado
-- **Branding del instalador MSI v3**: banner del wizard (sobrescribe el
-  default de WixUI), imagen personalizada en el ExitDialog e **ícono
-  molécula** en wizard, Panel de Control (`ProductIcon`) y
-  `ARPPRODUCTICON`.
-- Instalador **per-user** para Windows x64 (sin UAC): la data de la app
-  vive en `%LOCALAPPDATA%\Glyvex-AI-Suite\data`, independiente del
-  directorio de instalación.
+### Added
+- **MSI installer branding v3**: wizard banner (overrides the WixUI
+  default), custom image in the ExitDialog and **molecule icon** in the
+  wizard, Control Panel (`ProductIcon`) and `ARPPRODUCTICON`.
+- **Per-user installer** for Windows x64 (no UAC): the app's data lives in
+  `%LOCALAPPDATA%\Glyvex-AI-Suite\data`, independent of the installation
+  directory.
 
 ## [0.6.0] — 2026-09-25
 
-### Agregado
-- **Sistema de temas (5)**: carbon (textura fibra), metallic (por
-  superficie + textura metal) y matrix (lluvia digital en canvas), más el
-  modo claro rediseñado a **lavanda**. Ciclo desde el botón de paleta del
-  header o desde Config; texturas generadas por código (sin licencias de
-  terceros).
-- **Runtime embebido b11146 (llama.cpp v0.5.0)**: bump del pin b11009
-  (sha256 + feature-detect por probe).
-- **Packaging MSI WiX per-user** (`build.ps1 -MakeInstaller`): wizard,
-  atajos y upgrade; sidecar PyInstaller sin consola; bundle recortado
-  **143.6→88 MB** (excluye gguf/numpy y recorta babel locale-data).
-- **`GLYVEX_NO_BROWSER`**: el bundle FROZEN no abre el navegador solo.
-- **requires-python >= 3.11** declarado (pyproject + test de guarda).
+### Added
+- **Theme system (5)**: carbon (fiber texture), metallic (per surface +
+  metal texture) and matrix (digital rain on canvas), plus the light mode
+  redesigned as **lavender**. Cycle from the header's palette button or from
+  Config; textures generated by code (no third-party licenses).
+- **Embedded runtime b11146 (llama.cpp v0.5.0)**: pin bump from b11009
+  (sha256 + feature-detect by probe).
+- **Per-user WiX MSI packaging** (`build.ps1 -MakeInstaller`): wizard,
+  shortcuts and upgrade; console-less PyInstaller sidecar; trimmed bundle
+  **143.6→88 MB** (excludes gguf/numpy and trims babel locale-data).
+- **`GLYVEX_NO_BROWSER`**: the FROZEN bundle does not open the browser on
+  its own.
+- **requires-python >= 3.11** declared (pyproject + guard test).
 
-### Cambiado
-- **Floors de dependencias** (pip) a versiones probadas +
-  `react-router-dom` 7.18.4.
-- Empaquetado: Nuitka eliminado — la decisión fue PyInstaller (T-2).
-- Ícono Glyvex en el exe y el MSI (wxs Icon + WixUI_Banner).
-- Paleta light: tokens de contraste y fondo gris suave; temperatura en
-  recuadro de estado con tokens `-800` legibles en modo claro.
+### Changed
+- **Dependency floors** (pip) to tested versions + `react-router-dom`
+  7.18.4.
+- Packaging: Nuitka removed — the decision was PyInstaller (T-2).
+- Glyvex icon in the exe and the MSI (wxs Icon + WixUI_Banner).
+- Light palette: contrast tokens and soft gray background; temperature in
+  the status box with `-800` tokens readable in light mode.
 
-### Corregido
-- MSI: fila `WIXUI_INSTALLDIR` faltante (error 2819) y `WIXUI_INSTALLDIR`
-  apuntando a `APPDIR` (error 2343, ERROR_BAD_PATH).
-- **TDP toggle**: se restaura desde el estado real de la GPU al cargar.
-- **fit toggle**: ON ahora envía `fit=true` en el payload.
-- Selector de tema de Config aplica el tema al instante.
+### Fixed
+- MSI: missing `WIXUI_INSTALLDIR` row (error 2819) and `WIXUI_INSTALLDIR`
+  pointing to `APPDIR` (error 2343, ERROR_BAD_PATH).
+- **TDP toggle**: restored from the GPU's real state on load.
+- **fit toggle**: ON now sends `fit=true` in the payload.
+- Config's theme selector applies the theme instantly.
 
 ### Baseline
-- Suite completa: **356 tests en verde**.
+- Full suite: **356 tests green**.
 
 ## [0.5.0] — 2026-09-22
 
-### Agregado
-- **Runtime de inferencia embebido**: en Windows la suite descarga su propia
-  build probada de llama.cpp (pin **b11009**), verificada por **sha256**,
-  sin instalar nada aparte. Split en 2 niveles: **motor base** (~19 MB,
-  corre en cualquier hardware) + **aceleración NVIDIA** (~531 MB, CUDA
-  13.4), elegida por familia de GPU detectada (`nvidia|amd|intel|cpu`).
-  Download en 2 etapas con progreso por SSE; si la aceleración falla,
-  degrada a CPU (estado "degradado"), nunca es error. Fuentes con
-  preferencia: asset propio de la suite (release v0.5.0 del repo open
-  source) → build oficial de ggml-org/llama.cpp (fallback).
-- **Cascada de binario al lanzar**: `binary_path` (modo experto) gana
-  siempre → runtime gestionado si está `ready` → si no, el launch se
-  rechaza con `runtime_missing` y la UI ofrece descargarlo.
-- **API runtime**: `GET /api/runtime/status` (GPU + familia, estado,
-  versión), `POST /api/runtime/download` (SSE con progreso),
+### Added
+- **Embedded inference runtime**: on Windows the suite downloads its own
+  tested llama.cpp build (pin **b11009**), **sha256**-verified, without
+  installing anything else. Split in 2 levels: **base engine** (~19 MB,
+  runs on any hardware) + **NVIDIA acceleration** (~531 MB, CUDA 13.4),
+  chosen by the detected GPU family (`nvidia|amd|intel|cpu`). Download in 2
+  stages with progress over SSE; if the acceleration fails, it degrades to
+  CPU (state "degraded"), never an error. Sources with preference: the
+  suite's own asset (v0.5.0 release of the open source repo) → official
+  ggml-org/llama.cpp build (fallback).
+- **Binary cascade at launch**: `binary_path` (expert mode) always wins →
+  managed runtime if it is `ready` → otherwise the launch is rejected with
+  `runtime_missing` and the UI offers to download it.
+- **Runtime API**: `GET /api/runtime/status` (GPU + family, state,
+  version), `POST /api/runtime/download` (SSE with progress),
   `POST /api/runtime/reset`.
-- **UI runtime**: paso "Descargar runtime" en el onboarding (GPU
-  detectada, tamaño estimado por familia, progreso, estados), card
-  "Runtime" en Config (estado, reinstalar) y chip de runtime en el
-  Launcher. En Windows el motor base se ofrece a toda la GPU; AMD/Intel
-  corren en CPU con nota "la aceleración llega próximamente".
-- **M5 — Monitor: control TDP** (power limit) de la GPU en la tarjeta
-  GPU (nvidia-ml-py).
-- **Footer** con link al repo público de GitHub (OSS Apache 2.0).
-- i18n ES/EN completo para las vistas nuevas de runtime.
+- **Runtime UI**: "Download runtime" step in the onboarding (detected GPU,
+  estimated size by family, progress, states), "Runtime" card in Config
+  (state, reinstall) and runtime chip in the Launcher. On Windows the base
+  engine is offered to any GPU; AMD/Intel run on CPU with a note "the
+  acceleration is coming soon".
+- **M5 — Monitor: TDP control** (power limit) of the GPU in the GPU card
+  (nvidia-ml-py).
+- **Footer** with link to the public GitHub repo (OSS Apache 2.0).
+- Full ES/EN i18n for the new runtime views.
 
-### Cambiado
-- **Dependencias**: `pynvml` (deprecated) reemplazado por `nvidia-ml-py`
-  (lib oficial de NVIDIA).
-- Los archives del runtime se resuelven desde la release del repo open
-  source público (`Glyvex-Group-AI-Suite-Open-Source`).
+### Changed
+- **Dependencies**: `pynvml` (deprecated) replaced by `nvidia-ml-py`
+  (NVIDIA's official library).
+- The runtime archives are resolved from the release of the public open
+  source repo (`Glyvex-Group-AI-Suite-Open-Source`).
 
 ### Tests
-- Nuevo test suite del runtime: núcleo `runtime.py` (download verificado
-  contra server fake, extract, estados, cascada de fuentes), API
-  (status/download SSE/reset) y cascada del launcher. Suite completa:
-  **356 tests en verde**.
+- New runtime test suite: core `runtime.py` (download verified against a
+  fake server, extract, states, source cascade), API (status/download
+  SSE/reset) and the launcher cascade. Full suite: **356 tests green**.
 
 ## [0.4.3] — 2026-09-21
 
-### Agregado
-- **A3 — i18n ES/EN**: react-i18next con selector de idioma en la UI
-  (default español). Cubre Launcher, Chat, Monitor, Benchmark, Reports y
-  Config (706 keys por idioma); nombres y descripciones de sets de
-  benchmark bilingües (fallback al JSON); `frontend/package-lock.json`
-  versionado para installs reproducibles.
-- **P8 — Referencia de flags**: `docs/LAUNCH-FLAGS.md` (EN) +
-  `docs/LAUNCH-FLAGS.es.md` (ES) — ~45 flags en 14 grupos (qué hace,
-  impacto, default de la app, cuándo cambiarlo); etiquetas oficiales por
-  flag en la UI del Launcher vía el probe (`flag_help`).
-- **Docs (P7)**: índice central "Documentación" en README (EN/ES),
+### Added
+- **A3 — ES/EN i18n**: react-i18next with a language selector in the UI
+  (default Spanish). Covers Launcher, Chat, Monitor, Benchmark, Reports and
+  Config (706 keys per language); benchmark sets' names and descriptions
+  bilingual (fallback to JSON); `frontend/package-lock.json` versioned for
+  reproducible installs.
+- **P8 — Flags reference**: `docs/LAUNCH-FLAGS.md` (EN) +
+  `docs/LAUNCH-FLAGS.es.md` (ES) — ~45 flags in 14 groups (what it does,
+  impact, app default, when to change it); official labels per flag in the
+  Launcher UI via the probe (`flag_help`).
+- **Docs (P7)**: central "Documentation" index in the README (EN/ES),
   `docs/QUICKSTART.md`, `docs/ARQUITECTURA.md`, `docs/PRIVACIDAD.md`,
-  plantillas `.github` (issue bug/feature, config, PR template) y
-  `CONTRIBUTORS.md` + up-for-grabs en `CONTRIBUTING.md`.
-- **Dependabot**: `.github/dependabot.yml` (pip + npm, semanal, tope de 10
-  PRs abiertas por ecosistema).
+  `.github` templates (issue bug/feature, config, PR template) and
+  `CONTRIBUTORS.md` + up-for-grabs in `CONTRIBUTING.md`.
+- **Dependabot**: `.github/dependabot.yml` (pip + npm, weekly, cap of 10
+  open PRs per ecosystem).
 
-### Corregido
-- **K3**: race de persistencia del benchmark — el status final
-  (completed/error) se guarda en la DB antes de exponerlo en memoria.
-- **`--fit` toggle**: OFF ahora emite `--fit off` en vez de omitir el flag
-  (que dejaba el default `on` de la build).
+### Fixed
+- **K3**: benchmark persistence race — the final status (completed/error)
+  is saved in the DB before being exposed in memory.
+- **`--fit` toggle**: OFF now emits `--fit off` instead of omitting the
+  flag (which left the build's default `on`).
 
 ### Baseline
-- 297 tests en verde.
-
+- 297 tests green.
 
 ## [0.4.2] — 2026-09-20
 
-### Corregido
-- **Thinking/reasoning por flag nativo** (D8): `thinking_enabled` ahora se
-  cablea con `--reasoning on|off` en vez del kwarg `enable_thinking` en
-  `--chat-template-kwargs`, deprecado en llama.cpp (warning en el log del
-  server). `budget_tokens` pasa a `--reasoning-budget` nativo (solo con
-  thinking on y si `reasoning_budget` no está explícito, que tiene
-  prioridad); se eliminó el kwarg `thinking_budget` (no-op en templates
-  como Qwen3).
+### Fixed
+- **Native flag thinking/reasoning** (D8): `thinking_enabled` is now wired
+  with `--reasoning on|off` instead of the `enable_thinking` kwarg in
+  `--chat-template-kwargs`, deprecated in llama.cpp (warning in the server
+  log). `budget_tokens` moves to the native `--reasoning-budget` (only with
+  thinking on and if `reasoning_budget` is not explicit, which has
+  priority); the `thinking_budget` kwarg was removed (no-op in templates
+  like Qwen3).
 
-### Actualizado
-- `docs/TROUBLESHOOTING.md`: caso "contexto excedido" alineado al código
-  real (aviso previo de la UI, chequeo `prompt + max_tokens > n_ctx`,
-  default de `max_tokens` 4096 y fix "bajar max_tokens").
+### Updated
+- `docs/TROUBLESHOOTING.md`: "context exceeded" case aligned with the real
+  code (prior UI notice, `prompt + max_tokens > n_ctx` check, `max_tokens`
+  default 4096 and "lower max_tokens" fix).
 
 ### Baseline
-- 297 tests en verde.
-
+- 297 tests green.
 
 ## [0.4.1] — 2026-09-20
 
-### Agregado
-- **README público bilingue**: `README.md` en inglés (principal, el que
-  renderiza GitHub) + `README.es.md` en español, con línea de idiomas en
-  ambos.
-- **Docs nuevas**: `docs/modulos.md` (detalle técnico M0–M8),
-  `docs/launcher-params.md` (referencia de parámetros de lanzamiento),
-  `docs/TROUBLESHOOTING.md` (problemas frecuentes verificados contra el
-  source de llama.cpp), `CONTRIBUTING.md` y `screenshots/` (10 capturas en
-  el README).
-- Mejoras al README: requisitos (NVIDIA/CPU-only, faster-whisper), seguridad
-  (exposición de red opt-in), sección Docs, 296 tests.
+### Added
+- **Public bilingual README**: `README.md` in English (primary, the one
+  GitHub renders) + `README.es.md` in Spanish, with a language line in both.
+- **New docs**: `docs/modulos.md` (technical detail M0–M8),
+  `docs/launcher-params.md` (launch parameters reference),
+  `docs/TROUBLESHOOTING.md` (common problems verified against the llama.cpp
+  source), `CONTRIBUTING.md` and `screenshots/` (10 captures in the README).
+- README improvements: requirements (NVIDIA/CPU-only, faster-whisper),
+  security (network exposure opt-in), Docs section, 296 tests.
 
-### Corregido
-- Datos desactualizados del README (tests, versionado, hardware).
+### Fixed
+- Outdated README data (tests, versioning, hardware).
 
-
-### Agregado
-- **Licencia Apache 2.0** (Glyvex Group): LICENSE oficial + READMEs.
-- **P1.5 — Toggles por flag**: 17 toggles por grupo en el Launcher
-  (campo `None` = flag no se emite = default de la build), **modo
-  automático** (comando estricto: solo modelo + puerto), **ayuda oficial
-  por flag** (`_parse_flag_help` + `flag_help` en probe y `/backend-info`),
-  `n_ubatch` con toggle, snapshot de toggles y modo automático en
-  templates.
-- **Build 11009**: `--load-mode` (reemplaza a `--mlock`/`--no-mmap`),
-  jinja bidireccional, **Tier 1 VRAM** (`--fit`, `--fit-target`) y
+### Added
+- **Apache 2.0 license** (Glyvex Group): official LICENSE + READMEs.
+- **P1.5 — Toggles per flag**: 17 toggles per group in the Launcher
+  (`None` field = flag not emitted = build default), **automatic mode**
+  (strict command: only model + port), **official help per flag**
+  (`_parse_flag_help` + `flag_help` in probe and `/backend-info`), `n_ubatch`
+  with toggle, snapshot of toggles and automatic mode in templates.
+- **Build 11009**: `--load-mode` (replaces `--mlock`/`--no-mmap`),
+  bidirectional jinja, **Tier 1 VRAM** (`--fit`, `--fit-target`) and
   **Tier 2 reasoning** (`--reasoning-effort`, `--reasoning-budget`,
   `--no-reasoning-preserve`).
-- **Compat build 11003**: probe de capacidades del binario (lee `--help`
-  y descarta flags desconocidos con warning), filtrado de flags, preview
-  del comando de lanzamiento (`/preview-command` + `/backend-info`),
-  `--ctx-checkpoints`/`--checkpoint-min-step`, `--cache-ram`,
-  `--kv-unified` (+46 tests).
-- **Estimador de VRAM** (B6) + parser GGUF blob-based y metadata cacheada.
-- **Thinking-aware**: detección de `enable_thinking` por `chat_template`
-  del header GGUF y porte del kwarg en comando, preview y UI.
-- **Multiinstancia**: `GLYVEX_DATA_DIR` por instancia, CORS por env var,
-  scripts multi-puerto y aviso de puerto ocupado.
-- Limpieza de procesos muertos en Monitor: selector acotado, purga del
-  histórico de procesos cortos y buffers liberados de memoria.
+- **Build 11003 compat**: binary capabilities probe (reads `--help` and
+  discards unknown flags with a warning), flag filtering, launch command
+  preview (`/preview-command` + `/backend-info`), `--ctx-checkpoints`/
+  `--checkpoint-min-step`, `--cache-ram`, `--kv-unified` (+46 tests).
+- **VRAM estimator** (B6) + blob-based GGUF parser and cached metadata.
+- **Thinking-aware**: `enable_thinking` detection by the GGUF header's
+  `chat_template` and kwarg port in command, preview and UI.
+- **Multiinstance**: `GLYVEX_DATA_DIR` per instance, CORS by env var,
+  multi-port scripts and busy-port notice.
+- Dead process cleanup in Monitor: bounded selector, purge of short-lived
+  process history and freed memory buffers.
 
-### Corregido
-- **SSRF**: cada redirección de `fetch_url` se valida contra hosts
-  privados.
-- Benchmark: DELETE ya no cancela un run terminado — espera la
-  persistencia final.
-- Launcher: prellena el nombre al elegir template y bloquea la
-  sobrescritura de templates predefinidos.
-- `AGENTS.md` deja de versionarse (documentación local).
+### Fixed
+- **SSRF**: each `fetch_url` redirect is validated against private hosts.
+- Benchmark: DELETE no longer cancels a finished run — it waits for the
+  final persistence.
+- Launcher: pre-fills the name when choosing a template and blocks
+  overwriting predefined templates.
+- `AGENTS.md` stops being versioned (local documentation).
 
 ### Baseline
-- 296 tests en verde.
+- 296 tests green.
 
 ## [0.3.1] — 2026-09-17
 
-### Agregado
-- **Métricas visibles y exportación Prometheus/InfluxDB** (A1/T4b).
-- **Chat — convención de nombres de archivos**: parseo de
-  `lenguaje:nombre.ext` en fences de código + botón de descarga en
-  CodeBlock (transform `rehypeFilename` antes de `rehype-highlight`).
-- **Chat — adjuntos bidireccionales**: toggle de convención, preview con
-  object URLs, miniaturas de archivos no enviados, picker sin filtro.
-- **LLM**: última tg medida con antigüedad en la tira de vitales/Monitor
-  + aviso de fallos de `/slots` solo al cambiar.
+### Added
+- **Visible metrics and Prometheus/InfluxDB export** (A1/T4b).
+- **Chat — filename convention**: parsing of `language:name.ext` in code
+  fences + download button in CodeBlock (`rehypeFilename` transform before
+  `rehype-highlight`).
+- **Chat — bidirectional attachments**: convention toggle, preview with
+  object URLs, thumbnails of unsent files, picker without filter.
+- **LLM**: last measured tg with age in the vitals strip/Monitor +
+  `/slots` failure notice only on change.
 
-### Corregido
-- Chat: los bytes de imagen se guardan siempre (aunque el modelo no tenga
-  visión) + normalización HEIC/AVIF/TIFF a PNG.
+### Fixed
+- Chat: image bytes are always saved (even if the model has no vision) +
+  HEIC/AVIF/TIFF normalization to PNG.
 
 ## [0.3.0] — 2026-09-15
 
-### Agregado
-- **Contexto actual desde `/slots`**: en builds actuales
-  `kv_cache_tokens` fue removido del endpoint `/metrics`; el uso de
-  contexto ahora sale de la suma de secuencias de los slots
-  (`slots_total`/`slots_busy`, en slot ocioso conserva la última
-  conversación), con fallback a `kv_cache_tokens` en builds viejas.
+### Added
+- **Current context from `/slots`**: in current builds `kv_cache_tokens`
+  was removed from the `/metrics` endpoint; context usage now comes from
+  the sum of the slots' sequences (`slots_total`/`slots_busy`, an idle slot
+  keeps the last conversation), with fallback to `kv_cache_tokens` in old
+  builds.
 
-### Corregido
-- Topes por `process_id` en `llm_metrics` y rotación por tamaño de
+### Fixed
+- Caps by `process_id` in `llm_metrics` and size-based rotation of
   `data/logs`.
-- `useLlmStream` compartido con reconexión + selección estable en
-  Monitor.
+- `useLlmStream` shared with reconnection + stable selection in Monitor.
 
 ## [0.2.1] — 2026-09-15
 
-### Agregado
-- **Monitor**: datos en vivo del LLM por WebSocket + cola de los últimos
-  5 minutos.
+### Added
+- **Monitor**: live LLM data over WebSocket + queue of the last 5 minutes.
 
-### Corregido
-- Launcher: ya no pasa `--log-file` a llama-server (los logs los gestiona
-  la app).
-- `llm_metrics`: compatibilidad con builds actuales de llama-server.
-- Launcher: colapsa las líneas "slots idle" repetidas en el log.
+### Fixed
+- Launcher: no longer passes `--log-file` to llama-server (the app manages
+  the logs).
+- `llm_metrics`: compatibility with current llama-server builds.
+- Launcher: collapses repeated "slots idle" lines in the log.
 
 ## [0.2.0] — 2026-09-15
 
-Primer release versionado: suite completa M0–M8.
+First versioned release: complete suite M0–M8.
 
-- **M0** Skeleton FastAPI + React, config persistida con dot-notation.
-- **M1** Inventario: scan de `model_dirs`, metadata GGUF, módulos
-  embebidos (MTP/visión), agrupación por carpeta, tags.
-- **M2** Launcher: `llama-server`/Ollama/LM Studio, templates de
-  hardware, logs en vivo por WS, MTP/NextN, stop/restart limpios.
-- **M3** Chat: streaming SSE, razonamiento separado, métricas en vivo,
-  árbol de conversaciones en SQLite, adjuntos, tool calling, voz a texto.
-- **M4** Benchmark: 58 prompts en 6 categorías + sets propios, scoring,
-  reportes HTML, historial y comparación.
-- **M5** Monitor: GPU/CPU/RAM en vivo + histórico persistente con
-  retención configurable.
-- **M6** Integración: widget de estado en navbar, toasts, shortcuts,
+- **M0** FastAPI + React skeleton, config persisted with dot-notation.
+- **M1** Inventory: `model_dirs` scan, GGUF metadata, embedded modules
+  (MTP/vision), grouping by folder, tags.
+- **M2** Launcher: `llama-server`/Ollama/LM Studio, hardware templates,
+  live logs over WS, MTP/NextN, clean stop/restart.
+- **M3** Chat: SSE streaming, separated reasoning, live metrics,
+  conversation tree in SQLite, attachments, tool calling, speech to text.
+- **M4** Benchmark: 58 prompts in 6 categories + custom sets, scoring,
+  HTML reports, history and comparison.
+- **M5** Monitor: live GPU/CPU/RAM + persistent history with configurable
+  retention.
+- **M6** Integration: status widget in navbar, toasts, shortcuts,
   onboarding.
-- **M7** Base de datos: SQLite async (WAL), conversaciones, benchmarks,
+- **M7** Database: async SQLite (WAL), conversations, benchmarks,
   templates, sets.
-- **M8** Vitales del LLM server desde `/metrics` (t/s, contexto, caché,
-  % de aceptación MTP), en la tira del Launcher y sección LLM Server del
-  Monitor.
+- **M8** LLM server vitals from `/metrics` (t/s, context, cache, MTP
+  acceptance %), in the Launcher strip and the Monitor's LLM Server
+  section.

@@ -1,16 +1,19 @@
-# Contribuyentes
+# Contributors
 
-Glyvex-AI-Suite es desarrollado y mantenido por **Glyvex Group** como parte de
-la [División Glyvex AI](https://ai.glyvexgroup.com/).
+> **Language:** [Español](CONTRIBUTORS.es.md)
+
+Glyvex-AI-Suite is developed and maintained by **Glyvex Group** as part of
+the [Glyvex AI Division](https://ai.glyvexgroup.com/).
 
 ## Maintainers
 
-- **Glyvex Group** — diseño, desarrollo y mantenimiento de la suite.
+- **Glyvex Group** — design, development and maintenance of the suite.
 
-## ¿Cómo aparecer acá?
+## How to appear here
 
-Abrí una PR y, al merguearse, el maintainer agrega tu nombre a esta lista con un
-enlace a tu perfil. Preferimos créditos claros: usá el nombre que quieras que se
-publique en el mensaje de la PR.
+Open a PR and, once it merges, the maintainer adds your name to this list
+with a link to your profile. We prefer clear credits: use the name you want
+published in the PR message.
 
-> Si preferís no aparecer públicamente, avisá en la PR y lo respetamos.
+> If you prefer not to appear publicly, let us know in the PR and we will
+> respect that.

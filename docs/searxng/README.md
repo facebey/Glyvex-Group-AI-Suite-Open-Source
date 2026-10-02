@@ -1,103 +1,108 @@
-# Búsqueda web
+# Web search
 
-La tool `web_search` del chat soporta cuatro proveedores. El que se usa se
-elige en `tools.search_provider` de `data/config.json`.
+> **Language:** [Español](README.es.md)
 
-| Proveedor | Necesita | Cuándo conviene |
+The `web_search` tool in the chat supports four providers. The one to use is
+chosen in `tools.search_provider` in `data/config.json`.
+
+| Provider | Needs | When it makes sense |
 |---|---|---|
-| `ddgs` (default) | nada | Funciona apenas instalás la app |
-| `searxng` | instancia propia | Sin límites de tasa, sin exponer tu identidad |
-| `brave` | API key | Volumen y calidad consistente |
-| `tavily` | API key | Snippets largos, pensada para agentes |
+| `ddgs` (default) | nothing | Works as soon as you install the app |
+| `searxng` | your own instance | No rate limits, no exposing your identity |
+| `brave` | API key | Consistent volume and quality |
+| `tavily` | API key | Long snippets, built for agents |
 
-No hay fallback automático entre proveedores. Si elegiste SearXNG por
-privacidad, caer en silencio a DuckDuckGo sería lo contrario de lo que
-pediste — cuando el proveedor falla, el error dice qué pasó y cómo cambiarlo.
+There is no automatic fallback between providers. If you chose SearXNG for
+privacy, silently falling back to DuckDuckGo would be the opposite of what
+you asked — when the provider fails, the error says what happened and how
+to change it.
 
-El diagnóstico está en `GET /api/chat/tools/status`, que hace una búsqueda
-real y descartable. Es lo que usa la UI para decidir si el toggle del globo
-está disponible y qué explicar en el tooltip cuando no lo está.
+The diagnostic is at `GET /api/chat/tools/status`, which performs a real,
+disposable search. That is what the UI uses to decide whether the globe
+toggle is available and what to explain in the tooltip when it is not.
 
 ## DuckDuckGo (default)
 
-Nada que configurar. Viene con `pip install -r requirements.txt`.
+Nothing to configure. Comes with `pip install -r requirements.txt`.
 
-Scrapea, así que con uso intensivo puede recibir límites de tasa temporales.
-Si te pasa seguido, pasate a SearXNG o a un proveedor con API key.
+It scrapes, so with intensive use it may receive temporary rate limits.
+If it happens to you often, switch to SearXNG or to a provider with an API
+key.
 
-Para acotar los resultados a una región, `tools.region`: `wt-wt` es global,
-`ar-es` Argentina, `es-es` España.
+To restrict results to a region, `tools.region`: `wt-wt` is global,
+`ar-es` Argentina, `es-es` Spain.
 
-## Brave o Tavily
+## Brave or Tavily
 
-Conseguí una key en el proveedor y ponela en una variable de entorno:
+Get a key from the provider and put it in an environment variable:
 
 ```
-setx BRAVE_API_KEY "tu-key"     # Windows
-export BRAVE_API_KEY="tu-key"   # Linux
+setx BRAVE_API_KEY "your-key"     # Windows
+export BRAVE_API_KEY="your-key"   # Linux
 ```
 
-También se puede dejar en `tools.brave_api_key` / `tools.tavily_api_key`,
-pero eso la escribe en `config.json`. La variable de entorno tiene
-precedencia.
+You can also leave it in `tools.brave_api_key` / `tools.tavily_api_key`,
+but that writes it to `config.json`. The environment variable takes
+precedence.
 
-Después, `tools.search_provider` a `brave` o `tavily`.
+After that, set `tools.search_provider` to `brave` or `tavily`.
 
-## SearXNG (opcional)
+## SearXNG (optional)
 
-Requiere Docker, así que es una dependencia externa a la app: **no viene
-incluida en el paquete de Glyvex**. Es la mejor opción si ya tenés una
-instancia corriendo o si te importa que las búsquedas no salgan con tu
-identidad.
+Requires Docker, so it is an external dependency of the app: **it does not
+come included in the Glyvex package**. It is the best option if you already
+have an instance running or if you care that searches do not go out with
+your identity.
 
-1. Generá un secret y ponelo en `settings.yml`:
+1. Generate a secret and put it in `settings.yml`:
 
    ```
    openssl rand -hex 32
    ```
 
-2. Levantá el contenedor:
+2. Start the container:
 
    ```
    cd docs/searxng
    docker compose up -d
    ```
 
-3. Verificá que el formato JSON quedó habilitado:
+3. Verify that the JSON format is enabled:
 
    ```
    curl "http://127.0.0.1:8888/search?q=test&format=json"
    ```
 
-   Si devuelve JSON, está listo. Si devuelve **403 Forbidden** o HTML, falta
-   `json` en `search.formats` de `settings.yml` — reiniciá el contenedor
-   después de agregarlo.
+   If it returns JSON, it is ready. If it returns **403 Forbidden** or HTML,
+   `json` is missing from `search.formats` in `settings.yml` — restart the
+   container after adding it.
 
-4. En `data/config.json`, poné `tools.search_provider` en `searxng`.
+4. In `data/config.json`, set `tools.search_provider` to `searxng`.
 
-En Windows, Docker Desktop necesita WSL2. Si no lo tenés y no querés
-instalarlo, quedate con el proveedor por defecto.
+On Windows, Docker Desktop requires WSL2. If you do not have it and do not
+want to install it, stay with the default provider.
 
-## Resto de la configuración
+## Rest of the configuration
 
-| Clave | Default | Qué hace |
+| Key | Default | What it does |
 |---|---|---|
-| `search_provider` | `ddgs` | Cuál de los cuatro se usa |
-| `region` | `wt-wt` | Región de DuckDuckGo |
-| `searxng_url` | `http://127.0.0.1:8888` | Dónde escucha SearXNG |
-| `max_results` | `5` | Resultados por búsqueda |
-| `fetch_max_chars` | `8000` | Tope de texto por página leída |
-| `max_rounds` | `5` | Idas y vueltas modelo↔tool por turno |
-| `allow_private_hosts` | `false` | Permite que `fetch_url` lea direcciones de red interna |
+| `search_provider` | `ddgs` | Which of the four is used |
+| `region` | `wt-wt` | DuckDuckGo region |
+| `searxng_url` | `http://127.0.0.1:8888` | Where SearXNG listens |
+| `max_results` | `5` | Results per search |
+| `fetch_max_chars` | `8000` | Text cap per page read |
+| `max_rounds` | `5` | Model↔tool round trips per turn |
+| `allow_private_hosts` | `false` | Allows `fetch_url` to read internal network addresses |
 
-`allow_private_hosts` está apagado a propósito. La URL de `fetch_url` la
-elige el modelo, no el usuario, y un resultado de búsqueda manipulado podría
-intentar dirigirlo a un servicio de tu red. Activalo solo si querés que el
-modelo pueda leer documentación interna.
+`allow_private_hosts` is off on purpose. The `fetch_url` URL is chosen by
+the model, not the user, and a manipulated search result could try to
+steer it to a service on your network. Enable it only if you want the model
+to be able to read internal documentation.
 
-## Requisitos del modelo
+## Model requirements
 
-El tool-calling necesita que el chat template del modelo lo soporte. Con
-llama-server hay que levantarlo con `--jinja`; sin eso el endpoint rechaza
-los requests que traen `tools`. La app detecta el soporte leyendo
-`chat_template_caps` de `/props` y deshabilita el toggle cuando no está.
+Tool-calling needs the model's chat template to support it. With
+llama-server it must be started with `--jinja`; without that the endpoint
+rejects requests that carry `tools`. The app detects support by reading
+`chat_template_caps` from `/props` and disables the toggle when it is not
+there.

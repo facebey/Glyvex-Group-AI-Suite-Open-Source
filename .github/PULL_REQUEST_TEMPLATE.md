@@ -1,24 +1,24 @@
-## Resumen
+## Summary
 
-<!-- Qué cambia y por qué. Enlazá el issue si hay. -->
+<!-- What changes and why. Link the issue if there is one. -->
 
-## Tipo de cambio
+## Type of change
 
-- [ ] Feature nueva
-- [ ] Fix de bug
+- [ ] New feature
+- [ ] Bug fix
 - [ ] Refactor
 - [ ] Docs
 - [ ] Tests
-- [ ] Otro: ...
+- [ ] Other: ...
 
 ## Checklist
 
-- [ ] La suite de tests pasa en verde (`pytest tests/ -q`, baseline 297).
-- [ ] No introduce dependencia de red, nube, GPU o modelos reales.
-- [ ] Un cambio por PR (no mezclé feature + fixes + refactor).
-- [ ] Actualicé README / docs si cambió comportamiento visible.
-- [ ] Si toqué `LaunchConfig`, actualicé los 4 lados (ver CONTRIBUTING).
+- [ ] The test suite passes green (`pytest tests/ -q`, baseline 297).
+- [ ] It does not introduce a dependency on network, cloud, GPU or real models.
+- [ ] One change per PR (I did not mix feature + fixes + refactor).
+- [ ] I updated README / docs if visible behavior changed.
+- [ ] If I touched `LaunchConfig`, I updated the 4 sides (see CONTRIBUTING).
 
-## Cómo probar
+## How to test
 
-<!-- Pasos para verificar el cambio. -->
+<!-- Steps to verify the change. -->

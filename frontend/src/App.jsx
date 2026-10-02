@@ -13,6 +13,8 @@ import { consumeSSE } from "./lib/sse.js";
 import StatusWidget from "./components/StatusWidget.jsx";
 import LanguageSelector from "./components/LanguageSelector.jsx";
 import SidecarOverlay from "./components/SidecarOverlay.jsx";
+import AboutModal from "./components/AboutModal.jsx";
+import GlyvexAiIcon from "./components/GlyvexAiIcon.jsx";
 // Las páginas son chunk propios (React.lazy): el bundle inicial deja de cargar
 // recharts/markdown/highlight.js hasta que se visita cada módulo.
 const Chat = lazy(() => import("./pages/Chat.jsx"));
@@ -55,35 +57,7 @@ function allBackendPathsEmpty(cfg) {
   return Object.values(backends).every((b) => !b.binary_path && !b.python_env);
 }
 
-/** Ícono de red neuronal Glyvex AI — logo del navbar (gradiente violet→sky). */
-function GlyvexAiIcon({ size = 28 }) {
-  return (
-    <svg viewBox="0 0 80 80" width={size} height={size} xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="navAiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#7c3aed" />
-          <stop offset="100%" stopColor="#0ea5e9" />
-        </linearGradient>
-      </defs>
-      <circle cx="40" cy="40" r="28" fill="none" stroke="url(#navAiGrad)" strokeWidth="2" />
-      <circle cx="40" cy="40" r="8" fill="#7c3aed" />
-      <circle cx="40" cy="12" r="4.5" fill="#0ea5e9" />
-      <circle cx="64" cy="26" r="4.5" fill="#06b6d4" />
-      <circle cx="64" cy="54" r="4.5" fill="#7c3aed" opacity="0.75" />
-      <circle cx="40" cy="68" r="4.5" fill="#0ea5e9" opacity="0.75" />
-      <circle cx="16" cy="54" r="4.5" fill="#06b6d4" />
-      <circle cx="16" cy="26" r="4.5" fill="#7c3aed" opacity="0.55" />
-      <line x1="40" y1="32" x2="40" y2="16" stroke="#0ea5e9" strokeWidth="1.5" />
-      <line x1="47" y1="35" x2="60" y2="29" stroke="#06b6d4" strokeWidth="1.5" />
-      <line x1="47" y1="45" x2="60" y2="51" stroke="#7c3aed" strokeWidth="1.5" />
-      <line x1="40" y1="48" x2="40" y2="64" stroke="#0ea5e9" strokeWidth="1.5" />
-      <line x1="33" y1="45" x2="20" y2="51" stroke="#06b6d4" strokeWidth="1.5" />
-      <line x1="33" y1="35" x2="20" y2="29" stroke="#7c3aed" strokeWidth="1.5" />
-    </svg>
-  );
-}
-
-/** Misma silueta que GlyvexAiIcon pero en currentColor plano, para la marca de agua. */
+/** Misma silueta que GlyvexAiIcon (components/GlyvexAiIcon.jsx) pero en currentColor plano, para la marca de agua. */
 function GlyvexAiWatermark({ size = 400 }) {
   return (
     <svg viewBox="0 0 80 80" width={size} height={size} xmlns="http://www.w3.org/2000/svg">
@@ -336,6 +310,7 @@ function Layout() {
   const [shouldShowOnboarding, setShouldShowOnboarding] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [theme, setTheme] = useState(getStoredTheme());
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   useEffect(() => {
     const onThemeChanged = (e) => setTheme(e.detail);
@@ -464,7 +439,14 @@ function Layout() {
               </span>
             </a>
           </span>
-          <span>{t("footer.rights", { year: new Date().getFullYear() })}</span>
+          <button
+            type="button"
+            onClick={() => setAboutOpen(true)}
+            title={t("about.title")}
+            className="hover:text-glyvex-text transition-colors"
+          >
+            {t("footer.rights", { year: new Date().getFullYear() })}
+          </button>
         </div>
       </footer>
 
@@ -472,6 +454,7 @@ function Layout() {
       {shouldShowOnboarding && !dismissed && (
         <OnboardingScreen onDismiss={() => setDismissed(true)} />
       )}
+      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
     </div>
   );
 }

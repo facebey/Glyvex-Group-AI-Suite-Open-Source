@@ -1,32 +1,32 @@
-name: Solicitud de feature
-description: Proponé una mejora o funcionalidad nueva.
+name: Feature request
+description: Suggest an improvement or new functionality.
 title: "[FEAT] "
 labels: ["enhancement"]
 body:
   - type: textarea
     id: problema
     attributes:
-      label: Problema que resuelve
-      description: ¿Qué querés lograr o qué te frena hoy?
+      label: Problem it solves
+      description: What do you want to achieve or what is holding you back today?
     validations:
       required: true
   - type: textarea
     id: propuesta
     attributes:
-      label: Propuesta
-      description: Cómo lo imaginás.
+      label: Proposal
+      description: How you imagine it.
   - type: textarea
     id: alternativas
     attributes:
-      label: Alternativas consideradas
-      description: Otras formas de resolverlo que pensaste.
+      label: Alternatives considered
+      description: Other ways of solving it that you thought of.
   - type: dropdown
     id: local
     attributes:
-      label: ¿Mantiene 100% local?
-      description: La suite no puede depender de nube, red, GPU o modelos reales.
+      label: Keeps 100% local?
+      description: The suite cannot depend on cloud, network, GPU or real models.
       options:
-        - Sí
-        - No / no estoy seguro
+        - Yes
+        - No / not sure
     validations:
       required: true

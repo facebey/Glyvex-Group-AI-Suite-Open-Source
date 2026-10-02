@@ -1,5 +1,7 @@
 # Privacidad y telemetría
 
+> **Idioma:** [English](PRIVACY.md)
+
 Glyvex-AI-Suite está **100% local por diseño**. Esta página dice, sin
 eufemismos, qué sale de tu máquina y qué no.
 

@@ -1,35 +1,37 @@
 # Quickstart
 
-El camino más corto para tener Glyvex-AI-Suite corriendo en tu máquina. Acá va
-el mínimo; el [README](../README.md) trae el detalle completo (multi-instancia,
-variables de entorno, seguridad, release).
+> **Language:** [Español](QUICKSTART.es.md)
 
-> **¿Solo querés usarla en Windows?** No hace falta nada de esto: bajá el
-> instalador `Glyvex AI Suite_<versión>_x64-setup.exe` desde
+The shortest way to get Glyvex-AI-Suite running on your machine. This is the
+minimum; the [README](../README.md) has the full detail (multi-instance,
+environment variables, security, release).
+
+> **Just want to use it on Windows?** None of this is needed: download the
+> installer `Glyvex AI Suite_<version>_x64-setup.exe` from
 > [Releases → latest](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest),
-> ejecutalo y seguí el asistente. Si Windows SmartScreen avisa, es porque el
-> instalador no está firmado: **Más información → Ejecutar de todas formas**.
-> Esta guía es para correrla desde el código fuente.
+> run it and follow the wizard. If Windows SmartScreen warns you, it is
+> because the installer is not signed: **More info → Run anyway**.
+> This guide is for running it from source.
 
-## Prerrequisitos
+## Prerequisites
 
 - **Python 3.11+**
-- **Node.js 20 LTS+** (frontend Vite/React)
-- Un backend de inferencia, según qué uses:
-  - **Windows:** el [runtime embebido](../README.md) — la suite descarga su
-     propia build probada de llama.cpp (pin b11146, CUDA), sin instalar nada —
-    **o** [`llama-server`](https://github.com/ggml-org/llama.cpp),
-    [Ollama](https://ollama.com) o [LM Studio](https://lmstudio.ai) en modo servidor.
-  - **Otras plataformas:** [`llama-server`](https://github.com/ggml-org/llama.cpp),
-    [Ollama](https://ollama.com) o [LM Studio](https://lmstudio.ai) en modo servidor.
-- **NVIDIA drivers + CUDA** — *opcional*. Sin GPU NVIDIA todo corre en CPU; la
-  GPU solo acelera los modelos grandes.
-- **Voz** — *opcional*. El dictado local usa whisper.cpp (se descarga desde
-  la app, en Windows); en cualquier SO también podés instalar `faster-whisper`
-  con `pip install -r requirements-optional.txt`. Ver
-  [voz-a-texto.md](voz-a-texto.md).
+- **Node.js 20 LTS+** (Vite/React frontend)
+- An inference backend, depending on what you use:
+  - **Windows:** the [embedded runtime](../README.md) — the suite downloads
+     its own tested build of llama.cpp (pin b11146, CUDA) without installing
+     anything — **or** [`llama-server`](https://github.com/ggml-org/llama.cpp),
+     [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) in server mode.
+  - **Other platforms:** [`llama-server`](https://github.com/ggml-org/llama.cpp),
+     [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) in server mode.
+- **NVIDIA drivers + CUDA** — *optional*. Without an NVIDIA GPU everything runs
+  on CPU; the GPU only accelerates the large models.
+- **Voice** — *optional*. Local dictation uses whisper.cpp (downloaded from
+  the app, on Windows); on any OS you can also install `faster-whisper` with
+  `pip install -r requirements-optional.txt`. See
+  [speech-to-text.md](speech-to-text.md).
 
-## 1. Instalar
+## 1. Install
 
 Backend:
 
@@ -48,21 +50,21 @@ cd frontend
 npm install
 ```
 
-## 2. Arrancar
+## 2. Start
 
-**Opción A — todo-en-uno (producción local):**
+**Option A — all-in-one (local production):**
 
 ```bat
-start.cmd      # Windows (CMD o PowerShell: .\start.ps1)
+start.cmd      # Windows (CMD or PowerShell: .\start.ps1)
 ```
 ```bash
 ./start.sh     # Linux/macOS
 ```
 
-Compila el frontend a `frontend/dist` (si no existe) y levanta todo en
-`127.0.0.1:7981`. Abrí `http://127.0.0.1:7981`.
+Compiles the frontend to `frontend/dist` (if it does not exist) and brings
+everything up on `127.0.0.1:7981`. Open `http://127.0.0.1:7981`.
 
-**Opción B — desarrollo (2 procesos, con hot-reload):**
+**Option B — development (2 processes, with hot reload):**
 
 ```bash
 # Terminal 1 — backend
@@ -75,30 +77,30 @@ cd frontend
 npm run dev
 ```
 
-Abrí `http://localhost:5173`.
+Open `http://localhost:5173`.
 
-## 3. Primera vez (4 pasos)
+## 3. First time (4 steps)
 
-Con `config.json` vacío aparece la pantalla de onboarding con estos mismos
-pasos y checkmarks en vivo:
+With an empty `config.json`, the onboarding screen appears with these same
+steps and live checkmarks:
 
-1. **Configurar** — agregá al menos un directorio con modelos `.gguf` y elegí
-   el backend de inferencia:
-   - **Windows:** en el onboarding (o en `/config` → **Runtime**) tocá
-     **Descargar runtime** y la suite instala su propia build probada de
-      llama.cpp (pin b11146). No tocás `binary_path`.
-   - **Otras plataformas / modo experto:** en `/config`, indicá el
-     `binary_path` de `llama-server` (y/o Ollama/LM Studio).
-2. **Escanear** — tocá "Escanear ahora"; el inventario queda en el Launcher.
-3. **Lanzar** — en `/launcher`, elegí un modelo y tocá **LAUNCH**.
-4. **Chatear** — en `/` el endpoint del modelo lanzado aparece en el selector;
-   escribí y la respuesta llega en streaming.
+1. **Configure** — add at least one directory with `.gguf` models and choose
+   the inference backend:
+   - **Windows:** in the onboarding (or in `/config` → **Runtime**) click
+     **Download runtime** and the suite installs its own tested build of
+     llama.cpp (pin b11146). You never touch `binary_path`.
+   - **Other platforms / expert mode:** in `/config`, point `binary_path` to
+     `llama-server` (and/or Ollama/LM Studio).
+2. **Scan** — click "Scan now"; the inventory shows up in the Launcher.
+3. **Launch** — in `/launcher`, pick a model and click **LAUNCH**.
+4. **Chat** — in `/` the launched model's endpoint appears in the selector;
+   type and the response arrives in streaming.
 
-## Siguiente
+## Next
 
-- [`docs/ARQUITECTURA.md`](ARQUITECTURA.md) — cómo se conectan backend y
-  frontend, flujos de datos y dónde vive el estado.
-- [`docs/modulos.md`](modulos.md) — detalle técnico por módulo (M0–M8).
-- [`docs/launcher-params.md`](launcher-params.md) — parámetros de lanzamiento
-  de `llama-server` que maneja el Launcher.
-- [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — si algo no arranca.
+- [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — how backend and frontend
+  connect, data flows and where state lives.
+- [`docs/modules.md`](modules.md) — technical detail per module (M0–M8).
+- [`docs/launcher-params.md`](launcher-params.md) — `llama-server` launch
+  parameters the Launcher handles.
+- [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — if something does not start.

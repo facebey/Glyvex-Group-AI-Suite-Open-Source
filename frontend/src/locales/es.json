@@ -67,6 +67,16 @@
     "rights": "© {{year}} Glyvex Group · Apache 2.0",
     "openSource": "Código abierto — Apache 2.0"
   },
+  "about": {
+    "title": "Acerca de Glyvex AI Suite",
+    "tagline": "IA local, sin nube",
+    "webSite": "Sitio web",
+    "group": "Glyvex Group",
+    "github": "GitHub",
+    "star": "Dar una estrella en GitHub",
+    "license": "Código abierto — Apache 2.0",
+    "close": "Cerrar"
+  },
   "language": {
     "label": "Idioma"
   },

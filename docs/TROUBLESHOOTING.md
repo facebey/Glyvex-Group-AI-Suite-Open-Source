@@ -1,153 +1,155 @@
-# Troubleshooting — problemas frecuentes
+# Troubleshooting — common problems
 
-Casos reales con el diagnóstico detrás (verificado contra el código del
-launcher y contra el source de llama.cpp).
+> **Language:** [Español](TROUBLESHOOTING.es.md)
 
-## Warning "enable_thinking via --chat-template-kwargs is deprecated" en el log
+Real cases with the diagnosis behind them (verified against the launcher code
+and the llama.cpp source).
 
-**Síntoma.** El log de `llama-server` muestra:
+## Warning "enable_thinking via --chat-template-kwargs is deprecated" in the log
+
+**Symptom.** The `llama-server` log shows:
 `Setting 'enable_thinking' via --chat-template-kwargs is deprecated. Use --reasoning on / --reasoning off instead.`
 
-**Qué pasa.** El Launcher pasa `thinking_enabled` por
-`--chat-template-kwargs '{"enable_thinking": ...}'` (solo cuando el chat
-template del modelo lo lee, detectado del header GGUF, y con `--jinja`
-encendido). En builds recientes de llama.cpp ese camino quedó deprecado a
-favor de flags nativos (`--reasoning on/off`), pero **sigue funcionando**:
-es un warning, no un error.
+**What happens.** The Launcher passes `thinking_enabled` via
+`--chat-template-kwargs '{"enable_thinking": ...}'` (only when the model's chat
+template reads it, detected from the GGUF header, and with `--jinja`
+on). In recent llama.cpp builds that path has been deprecated in favor of the
+native flags (`--reasoning on/off`), but **it still works**:
+it is a warning, not an error.
 
-**Qué hacer.** Nada urgente: el thinking sigue operando. La app ya usa los
-flags nativos donde existen (`--reasoning-effort`, `--reasoning-budget`,
-`--no-reasoning-preserve`); migrar `thinking_enabled` a `--reasoning on/off`
-es una mejora pendiente del launcher.
+**What to do.** Nothing urgent: thinking keeps working. The app already uses the
+native flags where they exist (`--reasoning-effort`, `--reasoning-budget`,
+`--no-reasoning-preserve`); migrating `thinking_enabled` to `--reasoning on/off`
+is a pending improvement on the launcher.
 
-**Variante — "el thinking no hace nada":**
-- El modelo no soporta `enable_thinking` (el toggle no se habilita si el
-  scanner del header no lo detecta).
-- `--jinja` está apagado: en ese caso el backend no envía los kwargs y lo
-  avisa en su propio log (`thinking_enabled/budget_tokens requieren --jinja`).
-- El template no lee ese kwarg en particular: llama.cpp lo ignora
-  silenciosamente (es best-effort por diseño).
+**Variant — "thinking does nothing":**
+- The model does not support `enable_thinking` (the toggle is not enabled if
+  the header scanner does not detect it).
+- `--jinja` is off: in that case the backend does not send the kwargs and
+  reports it in its own log (`thinking_enabled/budget_tokens requieren --jinja`).
+- The template does not read that particular kwarg: llama.cpp ignores it
+  silently (best-effort by design).
 
-## `--cache-idle-slots` se desactiva solo (requiere `--cache-ram`)
+## `--cache-idle-slots` disables itself (requires `--cache-ram`)
 
-**Síntoma.** Con `--cache-ram` en 0, el log de llama-server muestra:
-`--cache-idle-slots requires --cache-ram, disabling` — y el guardado de slots
-ociosos no funciona.
+**Symptom.** With `--cache-ram` at 0, the llama-server log shows:
+`--cache-idle-slots requires --cache-ram, disabling` — and idle slot
+persistence does not work.
 
-**Qué pasa.** `cache_idle_slots` viene **encendido por defecto** en
-llama-server, pero depende del prompt cache en RAM: al arrancar una tarea
-nueva, los slots ociosos se guardan en el prompt cache (y se limpian si hay
-`--kv-unified`; sin él, el KV se queda en VRAM y solo se publica la copia en
-RAM cache). Sin `--cache-ram`, no hay RAM cache a dónde guardarlos, así que
-el server se desactiva el flag con warning.
+**What happens.** `cache_idle_slots` is **on by default** in
+llama-server, but it depends on the in-RAM prompt cache: when a new task
+starts, idle slots are saved into the prompt cache (and are cleaned if there
+is `--kv-unified`; without it, the KV stays in VRAM and only the RAM cache
+copy is published). Without `--cache-ram` there is no RAM cache to save them
+to, so the server disables the flag with a warning.
 
-**Qué hacer.** Dejá `--cache-ram > 0` (el default de la app es 8192 MiB). Si
-en un template o config pusiste `cache_ram_mib = 0`, sabé que perdiste la
-reutilización de prompts: cada switch de conversación reprocesa el prompt
-completo (TTFT más alto).
+**What to do.** Keep `--cache-ram > 0` (the app default is 8192 MiB). If
+you set `cache_ram_mib = 0` in a template or config, know that you lost prompt
+re-use: every conversation switch reprocesses the full prompt
+(higher TTFT).
 
-## MTP / speculative decoding consume más VRAM de la esperada
+## MTP / speculative decoding consumes more VRAM than expected
 
-**Síntoma.** Con MTP activado el modelo que antes cabía deja de caber, o la
-VRAM se dispara.
+**Symptom.** With MTP enabled a model that used to fit no longer fits, or
+VRAM spikes.
 
-**Qué pasa.** MTP suma dos cosas sobre el modelo principal:
-1. Los **pesos del draft** (sidecar `mtp-*.gguf`, o los tensores embebidos
+**What happens.** MTP adds two things on top of the main model:
+1. The **draft weights** (sidecar `mtp-*.gguf`, or the embedded tensors
    `blk.N.nextn.*`).
-2. Su **propio KV cache** — y llama-server lo pone en **f16 por defecto**,
-   aunque el modelo principal esté en q4_0.
+2. Its **own KV cache** — and llama-server puts it in **f16 by default**,
+   even if the main model is q4_0.
 
-**Qué hacer.**
-- La app ya usa **q8_0** por defecto para el KV del draft
-  (`--spec-draft-type-k/-v`): mitad de VRAM que f16 con aceptación
-  prácticamente idéntica. Verificá que no lo hayas subido a f16 en el
+**What to do.**
+- The app already uses **q8_0** by default for the draft KV
+  (`--spec-draft-type-k/-v`): half the VRAM of f16 with practically
+  identical acceptance. Check you have not raised it to f16 in the
   template.
-- Bajá `n_draft` (`--spec-draft-n-max`, default 5) si usás poco la
-  especulación.
-- Mirá el estimado de VRAM antes de lanzar (endpoint de estimación de la
-  app) o el Monitor post-lanzamiento.
-- Si usás una build anterior a b11007: actualizar el binario trae el fix de
-  recaptura de CUDA graph con MTP (~4–5% extra en decode), sin cambiar
-  flags.
+- Lower `n_draft` (`--spec-draft-n-max`, default 5) if you use
+  speculation little.
+- Check the VRAM estimate before launching (the app's estimate
+  endpoint) or the Monitor after launch.
+- If you are on a build earlier than b11007: updating the binary brings the
+  CUDA graph recapture fix with MTP (~4–5% extra in decode), without
+  changing flags.
 
-## La conversación excede el contexto (context overflow)
+## The conversation exceeds the context (context overflow)
 
-**Síntoma.** La UI avisa **antes de enviar**: el composer muestra "Este
-envío supera el contexto del modelo por unos N tokens" (y la barra de
-métricas muestra el uso del contexto y el margen tras la respuesta). Si se
-envía igual, llama-server responde 400 y el chat muestra
+**Symptom.** The UI warns **before sending**: the composer shows "This send
+exceeds the model context by about N tokens" (and the metrics bar shows the
+context usage and the margin after the response). If you send it anyway,
+llama-server responds 400 and the chat shows
 `Upstream 400: ... exceeds n_ctx ...`.
 
-**Qué pasa.** Cada mensaje suma al prompt completo que se reenvía (system +
-historial + adjuntos + tool calls). El chequeo de llama.cpp no es
-`prompt > n_ctx` sino **`prompt + max_tokens > n_ctx`**: el default de
-`max_tokens` del chat es 4096, así que una conversación "casi llena" ya se
-rechaza. Un adjunto grande o muchas herramientas pueden comer decenas de k
-tokens de golpe.
+**What happens.** Every message is added to the full prompt that gets resent
+(system + history + attachments + tool calls). The llama.cpp check is not
+`prompt > n_ctx` but **`prompt + max_tokens > n_ctx`**: the chat's
+`max_tokens` default is 4096, so a "nearly full" conversation is already
+rejected. A large attachment or many tools can eat tens of k
+tokens at once.
 
-**Qué hacer.**
-- **Iniciá una conversación nueva** para la tarea nueva: es la salida más
-  barata.
-- **Bajá `max_tokens`** en los ajustes del chat (default 4096): libera el
-  margen que el server reserva para la respuesta.
-- Subí `n_ctx` si la VRAM lo permite (ver `--fit-target`: llama.cpp reserva
-  un margen y auto-reduce el ctx para que el modelo siga cabiendo).
-- Revisá adjuntos: un PDF de 100 páginas no entra en ningún contexto
-  razonable; resumilo o mandá solo la sección.
-- En arquitecturas híbridas (SSM), los checkpoints de contexto también
-  cuestan VRAM (~150 MiB cada uno): si subís ctx, considerá bajar
-  `ctx_checkpoints` o subir `checkpoint_min_step`.
+**What to do.**
+- **Start a new conversation** for the new task: it is the cheapest
+  way out.
+- **Lower `max_tokens`** in the chat settings (default 4096): it frees the
+  margin the server reserves for the response.
+- Raise `n_ctx` if VRAM allows (see `--fit-target`: llama.cpp reserves
+  a margin and auto-reduces the ctx so the model keeps fitting).
+- Review attachments: a 100-page PDF does not fit in any reasonable
+  context; summarize it or send only the section.
+- In hybrid architectures (SSM), context checkpoints also
+  cost VRAM (~150 MiB each): if you raise ctx, consider lowering
+  `ctx_checkpoints` or raising `checkpoint_min_step`.
 
-## El launcher descarta flags en builds distintas
+## The launcher drops flags on different builds
 
-**Síntoma.** Warnings en el log tipo "el binario no conoce este flag; se
-descarta" al lanzar.
+**Symptom.** Warnings in the log like "the binary does not know this flag;
+dropping it" when launching.
 
-**Qué pasa.** El launcher hace un **probe de capacidades**: lee `--help` una
-vez por build de `llama-server` y descarta los flags que esa build no
-conoce, en vez de romper el lanzamiento. Es el mecanismo que permite correr
-la app contra builds viejas o nuevas sin cambios.
+**What happens.** The launcher does a **capability probe**: it reads `--help`
+once per `llama-server` build and drops the flags that build does not
+know, instead of breaking the launch. It is the mechanism that allows running
+the app against old or new builds without changes.
 
-**Qué hacer.** No es un error: la feature que dependía de ese flag queda en
-el default de la build. Si la necesitás (checkpoints de contexto,
-`--fit-target`, reasoning native, etc.), actualizá el binario de
-llama-server. Los flags deprecados tipo group attention se descartan así en
-builds que los removieron.
+**What to do.** It is not an error: the feature that depended on that flag
+falls back to the build's default. If you need it (context checkpoints,
+`--fit-target`, native reasoning, etc.), update the
+llama-server binary. Deprecated flags like group attention are dropped this
+way on builds that removed them.
 
-## Crash o fallback silencioso con Flash Attention y KV cache
+## Crash or silent fallback with Flash Attention and the KV cache
 
-**Síntoma.** Crash al arrancar, mensaje `FA_QUANTS` en el log, o el server
-cae a f16 sin avisar.
+**Symptom.** Crash at startup, `FA_QUANTS` message in the log, or the server
+falls back to f16 without warning.
 
-**Qué pasa.** Con `--flash-attn on`, llama.cpp solo acepta **pares
-simétricos** de KV cache: `q4_0-q4_0`, `q8_0-q8_0`, `f16-f16`,
-`bf16-bf16`. Cualquier otra combinación es inválida con FA.
+**What happens.** With `--flash-attn on`, llama.cpp only accepts **symmetric
+pairs** of KV cache: `q4_0-q4_0`, `q8_0-q8_0`, `f16-f16`,
+`bf16-bf16`. Any other combination is invalid with FA.
 
-**Qué hacer.** La app valida esto antes de lanzar (rechaza con un 422 que
-dice qué par recibiste y cómo corregirlo). Si agregaste flags custom, igualá
-los tipos de K y V o desactivá `--flash-attn`.
+**What to do.** The app validates this before launching (rejects with a 422
+that says which pair you got and how to fix it). If you added custom flags,
+make the K and V types equal or disable `--flash-attn`.
 
-## Slots paralelos: cada uno reserva su contexto completo
+## Parallel slots: each one reserves its full context
 
-**Síntoma.** Con `n_parallel > 1` la VRAM se va por las nubes aunque no haya
-varios usuarios.
+**Symptom.** With `n_parallel > 1` VRAM goes through the roof even though there
+are not several users.
 
-**Qué pasa.** Sin `--kv-unified`, **cada slot reserva su propio `n_ctx`
-completo**: N slots = N × la VRAM de KV de un contexto.
+**What happens.** Without `--kv-unified`, **each slot reserves its own full
+`n_ctx`**: N slots = N × the KV VRAM of one context.
 
-**Qué hacer.** Activá `--kv-unified` (unifica el KV entre slots) y usá
-`--kv-unified-per-slot` para acotar el contexto por slot si no necesitás el
-global completo en cada uno.
+**What to do.** Enable `--kv-unified` (unifies the KV across slots) and use
+`--kv-unified-per-slot` to cap the context per slot if you do not need the
+full global one in each.
 
-## El modelo no cabe en la VRAM
+## The model does not fit in VRAM
 
-**Qué hacer, en orden de costo:**
-1. `--fit-target <MiB>`: le pedís a llama.cpp que reserve ese margen y
-   auto-reduce lo que haga falta (ctx incluido). Es el control diseñado para
-   cargar modelos arbitrarios sin conocer su tamaño.
-2. `--fit on` (default de la app desde b11009): ajusta solo los argumentos
-   que **no** fijaste.
-3. KV cache en q4_0 (default de la app) en vez de f16.
-4. Bajá `n_ctx` / `ctx_checkpoints` / subí `checkpoint_min_step`.
-5. Cambiá de cuantización: un Q4_K_XL que no cabe, un IQ3/IQ2 sí (con la
-   pérdida de calidad de cada uno).
+**What to do, in order of cost:**
+1. `--fit-target <MiB>`: you ask llama.cpp to reserve that margin and
+   auto-reduce whatever is needed (ctx included). It is the control designed
+   to load arbitrary models without knowing their size.
+2. `--fit on` (the app default since b11009): it only adjusts the
+   arguments you did **not** set.
+3. KV cache in q4_0 (the app default) instead of f16.
+4. Lower `n_ctx` / `ctx_checkpoints` / raise `checkpoint_min_step`.
+5. Change quantization: a Q4_K_XL that does not fit, an IQ3/IQ2 will (with
+   the quality loss of each).

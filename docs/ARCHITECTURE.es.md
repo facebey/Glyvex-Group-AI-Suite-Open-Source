@@ -1,8 +1,10 @@
 # Arquitectura — mapa del código
 
+> **Idioma:** [English](ARCHITECTURE.md)
+
 Esta página es el mapa: qué proceso es qué, cómo se hablan, dónde vive cada
 cosa y cómo fluye los datos. El *por qué* funcional de cada módulo está en
-[modulos.md](modulos.md); acá está el *dónde*.
+[modules.md](modules.md); acá está el *dónde*.
 
 ## Visión general
 
@@ -149,6 +151,6 @@ el dev server y el proxy.
 
 ## Enlaces
 
-- [`modulos.md`](modulos.md) — detalle técnico por módulo (M0–M8).
+- [`modules.md`](modules.md) — detalle técnico por módulo (M0–M8).
 - [`launcher-params.md`](launcher-params.md) — parámetros de `llama-server`.
 - [`CONTRIBUTING.md`](../CONTRIBUTING.md) — cómo contribuir.
