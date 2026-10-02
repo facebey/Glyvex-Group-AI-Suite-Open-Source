@@ -24,11 +24,31 @@ de forma segura (ver sección de Módulos).
 
 | | |
 |---|---|
-| ![Chat — conversación con streaming y métricas en vivo](screenshots/chat.png)<br><sub>Chat: streaming, razonamiento y métricas en vivo (t/s, TTFT)</sub> | ![Launcher — modelos detectados](screenshots/launcher-modelos-detectados.png)<br><sub>Launcher: inventario de modelos agrupado por carpeta</sub> |
-| ![Launcher — opciones de lanzamiento](screenshots/launcher-opciones.png)<br><sub>Launcher: opciones de lanzamiento</sub> | ![Launcher — opciones avanzadas](screenshots/launcher-opciones-avanzadas.png)<br><sub>Launcher: opciones avanzadas</sub> |
-| ![Launcher — opciones avanzadas (2)](screenshots/launcher-opciones-avanzadas-2.png)<br><sub>Launcher: opciones avanzadas (MTP, contexto)</sub> | ![Launcher — backends en línea](screenshots/launcher-online.png)<br><sub>Launcher: backends en línea</sub> |
+| ![Chat — streaming y métricas en vivo](screenshots/chat.png)<br><sub>Chat: streaming, razonamiento y métricas en vivo (t/s, TTFT)</sub> | ![Launcher — inventario de modelos](screenshots/launcher.png)<br><sub>Launcher: inventario de modelos, runtime b11146 listo</sub> |
+| ![Launcher — modo avanzado, todos los paneles](screenshots/launcher-avanzado-general.png)<br><sub>Modo Avanzado: todos los paneles de control del lanzamiento</sub> | ![Launcher — contexto y aceleración](screenshots/launcher-avanzado-contexto.png)<br><sub>Contexto hasta 64K, aceleración GPU y VRAM estimada</sub> |
+| ![Launcher — MTP, visión y LoRA](screenshots/launcher-avanzado-modulos.png)<br><sub>MTP especulativo, mmproj, LoRA y razonamiento</sub> | ![Launcher — modelo en ejecución](screenshots/launcher-online.png)<br><sub>En ejecución: t/s, MTP 70.5%, cache 86.6% y log en vivo</sub> |
 | ![Benchmark — resultados](screenshots/benchmark.png)<br><sub>Benchmark: resultados del run</sub> | ![Monitor — GPU y vitales](screenshots/monitor.png)<br><sub>Monitor: GPU, CPU y vitales del LLM server</sub> |
-| ![Reports — historial](screenshots/reports.png)<br><sub>Reports: historial de benchmarks</sub> | ![Config — configuración](screenshots/config.png)<br><sub>Config: configuración general</sub> |
+| ![Reports — historial](screenshots/reports.png)<br><sub>Reports: historial de benchmarks</sub> | ![Config — configuración](screenshots/config.png)<br><sub>Config: backends, runtime embebido y carpetas de modelos</sub> |
+
+### Instalador (6 pasos)
+
+Un instalador clásico de Windows: elegís la carpeta y listo.
+
+| | |
+|---|---|
+| ![Instalador — bienvenida](screenshots/instalador-1.png)<br><sub>Paso 1: asistente de instalación</sub> | ![Instalador — carpeta de destino](screenshots/instalador-2.png)<br><sub>Paso 2: elegís la carpeta de destino</sub> |
+| ![Instalador — confirmar instalación](screenshots/instalador-3.png)<br><sub>Paso 3: confirmar instalación</sub> | ![Instalador — instalando](screenshots/instalador-4.png)<br><sub>Paso 4: instalando componentes</sub> |
+| ![Instalador — finalizando](screenshots/instalador-5.png)<br><sub>Paso 5: finalizando</sub> | ![Instalador — completado](screenshots/instalador-6.png)<br><sub>Paso 6: instalado, listo para ejecutar</sub> |
+
+### Aviso de Windows SmartScreen
+
+Al no firmar el instalador NSIS, Windows SmartScreen mostrará el aviso
+*"Windows protegió tu PC"*. Es esperado y seguro: hacé clic en
+**Más información** → **Ejecutar de todas formas**.
+
+| | |
+|---|---|
+| ![SmartScreen — aviso de Windows](screenshots/smartscreen-1.png)<br><sub>Windows muestra el aviso de SmartScreen</sub> | ![SmartScreen — ejecutar de todas formas](screenshots/smartscreen-2.png)<br><sub>Más información → Ejecutar de todas formas</sub> |
 
 ## Requisitos
 

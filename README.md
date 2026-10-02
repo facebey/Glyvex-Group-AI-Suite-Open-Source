@@ -24,11 +24,31 @@ Without an NVIDIA GPU, the Monitor and the Launcher degrade gracefully
 
 | | |
 |---|---|
-| ![Chat — conversation with streaming and live metrics](screenshots/chat.png)<br><sub>Chat: streaming, reasoning and live metrics (t/s, TTFT)</sub> | ![Launcher — detected models](screenshots/launcher-modelos-detectados.png)<br><sub>Launcher: model inventory grouped by folder</sub> |
-| ![Launcher — launch options](screenshots/launcher-opciones.png)<br><sub>Launcher: launch options</sub> | ![Launcher — advanced options](screenshots/launcher-opciones-avanzadas.png)<br><sub>Launcher: advanced options</sub> |
-| ![Launcher — advanced options (2)](screenshots/launcher-opciones-avanzadas-2.png)<br><sub>Launcher: advanced options (MTP, context)</sub> | ![Launcher — online backends](screenshots/launcher-online.png)<br><sub>Launcher: online backends</sub> |
+| ![Chat — streaming and live metrics](screenshots/chat.png)<br><sub>Chat: streaming, reasoning and live metrics (t/s, TTFT)</sub> | ![Launcher — model inventory](screenshots/launcher.png)<br><sub>Launcher: model inventory, b11146 runtime ready</sub> |
+| ![Launcher — advanced mode, all panels](screenshots/launcher-avanzado-general.png)<br><sub>Advanced mode: all launch control panels</sub> | ![Launcher — context and acceleration](screenshots/launcher-avanzado-contexto.png)<br><sub>Context up to 64K, GPU acceleration and estimated VRAM</sub> |
+| ![Launcher — MTP, vision and LoRA](screenshots/launcher-avanzado-modulos.png)<br><sub>Speculative MTP, mmproj, LoRA and reasoning</sub> | ![Launcher — model running](screenshots/launcher-online.png)<br><sub>Running: t/s, MTP 70.5%, cache 86.6% and live log</sub> |
 | ![Benchmark — results](screenshots/benchmark.png)<br><sub>Benchmark: run results</sub> | ![Monitor — GPU and vitals](screenshots/monitor.png)<br><sub>Monitor: GPU, CPU and LLM server vitals</sub> |
-| ![Reports — history](screenshots/reports.png)<br><sub>Reports: benchmark history</sub> | ![Config — settings](screenshots/config.png)<br><sub>Config: general settings</sub> |
+| ![Reports — history](screenshots/reports.png)<br><sub>Reports: benchmark history</sub> | ![Config — settings](screenshots/config.png)<br><sub>Config: backends, embedded runtime and model folders</sub> |
+
+### Installer (6 steps)
+
+A classic Windows installer: pick the folder and you're done.
+
+| | |
+|---|---|
+| ![Installer — welcome](screenshots/instalador-1.png)<br><sub>Step 1: installation wizard</sub> | ![Installer — destination folder](screenshots/instalador-2.png)<br><sub>Step 2: pick the destination folder</sub> |
+| ![Installer — confirm installation](screenshots/instalador-3.png)<br><sub>Step 3: confirm installation</sub> | ![Installer — installing](screenshots/instalador-4.png)<br><sub>Step 4: installing components</sub> |
+| ![Installer — finishing](screenshots/instalador-5.png)<br><sub>Step 5: finishing</sub> | ![Installer — completed](screenshots/instalador-6.png)<br><sub>Step 6: installed, ready to run</sub> |
+
+### Windows SmartScreen notice
+
+Since the NSIS installer is unsigned, Windows SmartScreen will show the
+*"Windows protected your PC"* warning. This is expected and safe: click
+**More info** → **Run anyway**.
+
+| | |
+|---|---|
+| ![SmartScreen — Windows warning](screenshots/smartscreen-1.png)<br><sub>Windows shows the SmartScreen warning</sub> | ![SmartScreen — run anyway](screenshots/smartscreen-2.png)<br><sub>More info → Run anyway</sub> |
 
 ## Requirements
 
