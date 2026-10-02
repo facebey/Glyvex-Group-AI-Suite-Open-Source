@@ -457,7 +457,7 @@ function Layout() {
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-glyvex-bg-muted transition-colors"
-              title="Código abierto — Apache 2.0"
+              title={t("footer.openSource")}
             >
               <span className="inline-flex items-center gap-1">
                 <ExternalLink size={12} /> GitHub

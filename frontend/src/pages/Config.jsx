@@ -11,6 +11,24 @@ import { useTranslation } from "react-i18next";
 import { formInputClasses as inputClasses } from "../lib/styles.js";
 import { applyTheme, getStoredTheme, THEME_CHANGED_EVENT } from "../lib/theme.js";
 
+// Los ejemplos de ruta siguen al SO: la app es Windows-first y ver rutas de
+// Linux en Windows (o al revés) confunde a quien configura por primera vez.
+const IS_WINDOWS =
+  typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent || "");
+const PATH_EXAMPLES = IS_WINDOWS
+  ? {
+      llama_server: "C:\\llama.cpp\\llama-server.exe",
+      ollama: "C:\\Users\\<user>\\AppData\\Local\\Programs\\Ollama\\ollama.exe",
+      lm_studio: "C:\\Users\\<user>\\AppData\\Local\\Programs\\LM Studio\\LM Studio.exe",
+      model_dir: "C:\\LLM\\models",
+    }
+  : {
+      llama_server: "/opt/llama.cpp/build/bin/llama-server",
+      ollama: "/usr/local/bin/ollama",
+      lm_studio: "/opt/lmstudio/lm-studio",
+      model_dir: "~/models",
+    };
+
 const EMPTY_CONFIG = {
   app: { port: 7981, theme: "dark", language: "es" },
   hardware: { gpu_model: "", vram_gb: 0, ram_gb: 0, cpu_model: "", cpu_cores: 0 },
@@ -252,7 +270,7 @@ export default function Config() {
   return (
     <div className="space-y-6 max-w-3xl">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Config</h1>
+        <h1 className="text-xl font-semibold">{t("config.title")}</h1>
         <div className="flex gap-2">
           <button
             type="button"
@@ -287,29 +305,29 @@ export default function Config() {
         </p>
       )}
 
-      <Section title="Backends">
-        <Field label="llama-server — binary path">
+      <Section title={t("config.backends.section")}>
+        <Field label={t("config.backends.binaryPath", { name: "llama-server" })}>
           <input
             className={inputClasses}
             value={config.backends.llama_server.binary_path}
             onChange={(e) => updateBackend("llama_server", { binary_path: e.target.value })}
-            placeholder="/opt/llama.cpp/build/bin/llama-server"
+            placeholder={PATH_EXAMPLES.llama_server}
           />
         </Field>
-        <Field label="Ollama — binary path">
+        <Field label={t("config.backends.binaryPath", { name: "Ollama" })}>
           <input
             className={inputClasses}
             value={config.backends.ollama.binary_path}
             onChange={(e) => updateBackend("ollama", { binary_path: e.target.value })}
-            placeholder="/usr/bin/ollama"
+            placeholder={PATH_EXAMPLES.ollama}
           />
         </Field>
-        <Field label="LM Studio — binary path">
+        <Field label={t("config.backends.binaryPath", { name: "LM Studio" })}>
           <input
             className={inputClasses}
             value={config.backends.lm_studio.binary_path}
             onChange={(e) => updateBackend("lm_studio", { binary_path: e.target.value })}
-            placeholder="/opt/lmstudio/lm-studio"
+            placeholder={PATH_EXAMPLES.lm_studio}
           />
         </Field>
       </Section>
@@ -323,7 +341,7 @@ export default function Config() {
             value={newDir}
             onChange={(e) => setNewDir(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addModelDir()}
-            placeholder="/home/fabian/models"
+            placeholder={PATH_EXAMPLES.model_dir}
           />
           <button
             type="button"

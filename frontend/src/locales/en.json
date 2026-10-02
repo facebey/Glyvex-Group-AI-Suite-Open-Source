@@ -64,7 +64,8 @@
   },
   "footer": {
     "developedBy": "Developed by",
-    "rights": "© {{year}} Glyvex Group · All rights reserved"
+    "rights": "© {{year}} Glyvex Group · Apache 2.0",
+    "openSource": "Open source — Apache 2.0"
   },
   "language": {
     "label": "Language"
@@ -620,7 +621,12 @@
     "processState": "Process state",
     "noActiveProcess": "No active process for this model.",
     "serverReady": "✓ Server ready",
-    "commandExecuted": "Executed command"
+    "commandExecuted": "Executed command",
+    "errors": {
+      "commandBuild": "Could not build the launch command.",
+      "commandFetch": "Could not get the launch command from the backend.",
+      "modelMeta": "Could not read the model metadata."
+    }
   },
   "monitor": {
     "header": {
@@ -630,7 +636,10 @@
     "alerts": {
       "gpuTemp": "GPU temp:",
       "freeVram": "Free VRAM:",
-      "alert": "ALERT"
+      "alert": "ALERT",
+      "reasonTemp": "GPU {{temp}}°C",
+      "reasonVram": "VRAM {{pct}}%",
+      "thresholds": "Triggered when GPU temperature goes above 85°C or VRAM usage goes above 95%."
     },
     "gpu": {
       "notDetected": "NVIDIA GPU not detected",
@@ -652,7 +661,10 @@
         "resetSuccess": "Power limit reset to factory default",
         "applyError": "Could not apply the power limit: {{error}}",
         "loadError": "Could not reach the backend."
-      }
+      },
+      "power": "Power",
+      "clockGraphics": "Graphics clock",
+      "clockMemory": "Memory clock"
     },
     "cpu": {
       "psutilUnavailable": "psutil not available",
@@ -886,6 +898,11 @@
       "cpuNote": "GPU acceleration is coming soon; it runs on CPU for now",
       "degraded": "GPU acceleration not installed — running on CPU.",
       "unsupported": "The embedded runtime is Windows-only in v1. Configure your own binary in Backends (expert mode)."
+    },
+    "title": "Config",
+    "backends": {
+      "section": "Backends",
+      "binaryPath": "{{name}} — binary path"
     }
   },
   "reports": {
@@ -934,5 +951,9 @@
     "errorTitle": "The backend could not be started",
     "hint": "Make sure port 7981 is free and check the logs. You can retry.",
     "retry": "Retry"
+  },
+  "statusWidget": {
+    "noModel": "No model launched",
+    "noModelHint": "No model launched from the suite. Servers started outside the app are not tracked here, even if the chat is connected to them."
   }
 }

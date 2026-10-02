@@ -5,6 +5,15 @@ import CollapsibleSection from "./ui/CollapsibleSection.jsx";
 import Slider from "./ui/Slider.jsx";
 import { inputClasses } from "../lib/styles.js";
 
+// llama-server reporta como id del modelo la ruta completa del .gguf
+// (C:\LLM\gguf\Qwen…\modelo.gguf), que se corta en el selector. Se muestra
+// solo el nombre del archivo; la ruta completa queda en el tooltip.
+function modelLabel(id) {
+  if (!id) return id;
+  const base = String(id).split(/[\\/]/).pop();
+  return base || id;
+}
+
 /** Switch chico y sin dependencias extra, mismo patrón que el del Launcher. */
 function MiniToggle({ checked, onChange, disabled = false }) {
   function handleClick() {
@@ -140,11 +149,12 @@ export default function ChatSidebar({
             className={inputClasses}
             value={selectedModel}
             onChange={(e) => onModelChange(e.target.value)}
+            title={selectedModel || undefined}
           >
             {models.length === 0 && <option value="">{t("chatSidebar.noModel")}</option>}
             {models.map((m) => (
-              <option key={m} value={m}>
-                {m}
+              <option key={m} value={m} title={m}>
+                {modelLabel(m)}
               </option>
             ))}
           </select>

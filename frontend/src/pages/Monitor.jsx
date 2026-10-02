@@ -659,6 +659,12 @@ export default function Monitor() {
   const gpuTempAlert = gpu && gpu.temperature_c != null && gpu.temperature_c > 85;
   const vramAlert = gpu && gpu.vram_percent != null && gpu.vram_percent > 95;
   const anyAlert = gpuTempAlert || vramAlert;
+  // El badge dice qué lo disparó: un "ALERTA" a secas no le dice al usuario
+  // si tiene que mirar la temperatura o la VRAM.
+  const alertReasons = [
+    gpuTempAlert && t("monitor.alerts.reasonTemp", { temp: gpu.temperature_c }),
+    vramAlert && t("monitor.alerts.reasonVram", { pct: Math.round(gpu.vram_percent) }),
+  ].filter(Boolean);
 
   // -- Control de límite de potencia (TDP) ---------------------------------
   // El rango lo pone NVML (mín/máx reales de la GPU); si el proceso no va en
@@ -745,8 +751,11 @@ export default function Monitor() {
           {t("monitor.alerts.freeVram")} {gpu ? `${(gpu.vram_free_mb / 1024).toFixed(1)} GB` : "—"}
         </span>
         {anyAlert && (
-          <span className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-red-500/15 text-glyvex-crit border border-red-500/30 font-medium">
-            <AlertTriangle size={12} /> {t("monitor.alerts.alert")}
+          <span
+            className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-red-500/15 text-glyvex-crit border border-red-500/30 font-medium"
+            title={t("monitor.alerts.thresholds")}
+          >
+            <AlertTriangle size={12} /> {t("monitor.alerts.alert")}: {alertReasons.join(" · ")}
           </span>
         )}
       </div>
@@ -756,8 +765,10 @@ export default function Monitor() {
       {anyVisible(GPU_KEYS) && (
       <CollapsiblePanel icon={Gauge} title="GPU" storageKey="monitor_panel_gpu">
         {!gpu ? (
-          <p className="text-sm text-glyvex-muted">
-            {snapshot?.gpu_error || t("monitor.gpu.notDetected")}
+          // El backend manda el motivo en español; se muestra el texto
+          // traducido y el detalle técnico queda en el tooltip.
+          <p className="text-sm text-glyvex-muted" title={snapshot?.gpu_error || undefined}>
+            {t("monitor.gpu.notDetected")}
           </p>
         ) : (
           <div className="space-y-4">
@@ -792,9 +803,9 @@ export default function Monitor() {
 
             {show("monitor.gpu.power_clocks") && (
             <div className="flex flex-wrap gap-4 text-xs text-glyvex-muted">
-              <span>Power: {gpu.power_draw_w ?? "—"}W / {gpu.power_limit_w ?? "—"}W</span>
-              <span>Clock graphics: {gpu.clock_graphics_mhz ?? "—"} MHz</span>
-              <span>Clock memory: {gpu.clock_memory_mhz ?? "—"} MHz</span>
+              <span>{t("monitor.gpu.power")}: {gpu.power_draw_w ?? "—"}W / {gpu.power_limit_w ?? "—"}W</span>
+              <span>{t("monitor.gpu.clockGraphics")}: {gpu.clock_graphics_mhz ?? "—"} MHz</span>
+              <span>{t("monitor.gpu.clockMemory")}: {gpu.clock_memory_mhz ?? "—"} MHz</span>
             </div>
             )}
 

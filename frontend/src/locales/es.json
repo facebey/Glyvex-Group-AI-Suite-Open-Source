@@ -64,7 +64,8 @@
   },
   "footer": {
     "developedBy": "Desarrollado por",
-    "rights": "© {{year}} Glyvex Group · Todos los derechos reservados"
+    "rights": "© {{year}} Glyvex Group · Apache 2.0",
+    "openSource": "Código abierto — Apache 2.0"
   },
   "language": {
     "label": "Idioma"
@@ -620,7 +621,12 @@
     "processState": "Estado del proceso",
     "noActiveProcess": "Sin proceso activo para este modelo.",
     "serverReady": "✓ Servidor listo",
-    "commandExecuted": "Comando ejecutado"
+    "commandExecuted": "Comando ejecutado",
+    "errors": {
+      "commandBuild": "No se pudo armar el comando.",
+      "commandFetch": "No se pudo consultar el comando al backend.",
+      "modelMeta": "No se pudo leer la metadata del modelo."
+    }
   },
   "monitor": {
     "header": {
@@ -630,7 +636,10 @@
     "alerts": {
       "gpuTemp": "Temp GPU:",
       "freeVram": "VRAM libre:",
-      "alert": "ALERTA"
+      "alert": "ALERTA",
+      "reasonTemp": "GPU {{temp}}°C",
+      "reasonVram": "VRAM {{pct}}%",
+      "thresholds": "Se activa cuando la temperatura de la GPU supera 85°C o el uso de VRAM supera 95%."
     },
     "gpu": {
       "notDetected": "GPU NVIDIA no detectada",
@@ -652,7 +661,10 @@
         "resetSuccess": "Límite de potencia restaurado al valor de fábrica",
         "applyError": "No se pudo aplicar el límite: {{error}}",
         "loadError": "No se pudo comunicarse con el backend."
-      }
+      },
+      "power": "Consumo",
+      "clockGraphics": "Reloj gráfico",
+      "clockMemory": "Reloj de memoria"
     },
     "cpu": {
       "psutilUnavailable": "psutil no disponible",
@@ -886,6 +898,11 @@
       "cpuNote": "la aceleración GPU llega próximamente; por ahora corre en CPU",
       "degraded": "Aceleración GPU no instalada — corriendo en CPU.",
       "unsupported": "El runtime embebido es Windows-only en v1. Configurá un binario propio en Backends (modo experto)."
+    },
+    "title": "Config",
+    "backends": {
+      "section": "Backends",
+      "binaryPath": "{{name}} — ruta del binario"
     }
   },
   "reports": {
@@ -934,5 +951,9 @@
     "errorTitle": "No se pudo arrancar el backend",
     "hint": "Verificá que el puerto 7981 esté libre y revisá los logs. Podés reintentar.",
     "retry": "Reintentar"
+  },
+  "statusWidget": {
+    "noModel": "Sin modelo lanzado",
+    "noModelHint": "Ningún modelo lanzado desde la suite. Los servidores arrancados por fuera de la app no se muestran acá, aunque el chat esté conectado a ellos."
   }
 }
