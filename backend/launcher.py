@@ -25,7 +25,12 @@ Responsabilidades:
     - detección de caída inesperada del proceso -> estado "error".
 
 Notas de compatibilidad verificadas contra las builds b11003-b11009 (2026) y
-re-probadas contra b11146 (v0.5.0, 2026-09-24, PLAN-LLAMA-BUMP-V0-5-0.md T2.1):
+re-probadas contra b11146 (v0.5.0, 2026-09-24, PLAN-LLAMA-BUMP-V0-5-0.md T2.1)
+y contra b11349 (bump de mantenimiento, 2026-10-02):
+- b11349: superficie de flags idéntica a b11146 — 329 long-flags en --help,
+  0 agregados / 0 removidos entre ambos binarios. El re-probe con
+  probe_binary + filter_command (config full) descarta únicamente
+  --grp-attn-n/-w, el mismo comportamiento que en producción con b11146.
 - b11146: los 53 flags que emite el launcher siguen presentes, EXCEPTO:
   - --lora-scale REMOVIDO → --lora-scaled PATH:SCALE (feature-detect por
     probe; ver build_llama_server_command).

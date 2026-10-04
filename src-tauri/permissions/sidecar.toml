@@ -1,0 +1,10 @@
+[[permission]]
+identifier = "sidecar-control"
+description = "Control del sidecar (backend) desde la webview remota: puerto, salud, reinicio, provisión y parada (auto-update)."
+commands.allow = [
+  "get_backend_port",
+  "sidecar_healthy",
+  "sidecar_restart",
+  "provision_requested",
+  "stop_sidecar"
+]

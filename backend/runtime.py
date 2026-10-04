@@ -56,28 +56,29 @@ try:
 except ImportError:
     winreg = None
 
-RUNTIME_PIN = "b11146"
+RUNTIME_PIN = "b11349"
 META_FILENAME = ".runtime-meta.json"
 BINARY_NAME = "llama-server.exe" if platform.system() == "Windows" else "llama-server"
 
 # Split de RT-10 en 2 niveles: motor base (CPU) siempre, y aceleración de la
-# familia detectada encima cuando existe paquete verificable. Con el bump a
-# b11146 los archives propios "glyvex" (empaquetados sobre b11009) dejan de
-# aplicar al pin: la fuente pasa a ser la build oficial de la release
-# ggml-org/llama.cpp b11146 (= tag v0.5.0), descargada y verificada en la
-# máquina de desarrollo (PLAN-LLAMA-BUMP-V0-5-0.md, T0.1-T0.2).
+# familia detectada encima cuando existe paquete verificable. La fuente es la
+# build oficial de la release ggml-org/llama.cpp del pin (b11349, familia
+# v0.5.0), descargada y verificada en la máquina de desarrollo. El bump
+# b11146 -> b11349 no cambió la superficie de flags: 329 long-flags idénticos
+# en ambos (0 agregados / 0 removidos, verificado contra --help real de los
+# dos binarios).
 
 # Nivel 1: motor base (CPU). Corre en cualquier hardware Windows x64; la
 # aceleración, cuando existe para la familia, se extrae encima.
 BASE_SOURCES: list[dict] = [
     {
         "id": "official",
-        "description": "Build oficial ggml-org/llama.cpp b11146 (CPU)",
+        "description": "Build oficial ggml-org/llama.cpp b11349 (CPU)",
         "files": [
             {
                 "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                       "b11146/llama-b11146-bin-win-cpu-x64.zip",
-                "sha256": "14cf1303ca9ac3abd94816850532f9f9a69ac66fbaca3776fc6f9061c2fac1d1",
+                       "b11349/llama-b11349-bin-win-cpu-x64.zip",
+                "sha256": "3f387c5877b66d078b89b52a2a59cf0f5aa10e69513f3956163edabacffa1c6e",
             },
         ],
     },
@@ -91,16 +92,16 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
     "nvidia": [
         {
             "id": "official",
-            "description": "Build oficial ggml-org/llama.cpp b11146 (CUDA 13.4 + cuDART)",
+            "description": "Build oficial ggml-org/llama.cpp b11349 (CUDA 13.4 + cuDART)",
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11146/llama-b11146-bin-win-cuda-13.4-x64.zip",
-                    "sha256": "b1866c0ce76bc7bfb0c24b33e9a37e9669f1be18539b12c74ce361f81c41f047",
+                           "b11349/llama-b11349-bin-win-cuda-13.4-x64.zip",
+                    "sha256": "06f2efb5f54d845002972928fa879448491799a556741c185a1974b491d8b4f0",
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11146/cudart-llama-bin-win-cuda-13.4-x64.zip",
+                           "b11349/cudart-llama-bin-win-cuda-13.4-x64.zip",
                     "sha256": "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668",
                 },
             ],
@@ -115,6 +116,21 @@ _downloading = False
 
 def runtime_dir() -> Path:
     return DATA_DIR / "runtime" / f"llama.cpp-{RUNTIME_PIN}"
+
+
+def _orphaned_runtime_dirs() -> list[Path]:
+    """Builds gestionadas anteriores bajo runtime/ (llama.cpp-*) que NO son la
+    del pin activo. Un bump de pin deja la dir vieja huérfana y duplica el disco
+    (~700 MB); el download las borra por defecto (reemplazo). No toca stt/tts ni
+    los temporales de descarga (.download-*)."""
+    root = DATA_DIR / "runtime"
+    if not root.exists():
+        return []
+    current = runtime_dir().name
+    return [
+        p for p in root.iterdir()
+        if p.is_dir() and p.name.startswith("llama.cpp-") and p.name != current
+    ]
 
 
 def _select_base_source() -> dict | None:
@@ -151,6 +167,16 @@ def _dir_size_mb(path: Path) -> float | None:
     return round(total / (1024 * 1024), 1)
 
 
+def _previous_builds() -> list[dict]:
+    """Builds gestionadas anteriores (llama.cpp-*) con su pin y tamaño: la base
+    del estado "outdated" (RT-12) — el pin actual no está descargado pero queda
+    una build vieja en disco que se puede conservar (rollback) o reemplazar."""
+    return [
+        {"pin": p.name.removeprefix("llama.cpp-"), "size_mb": _dir_size_mb(p)}
+        for p in _orphaned_runtime_dirs()
+    ]
+
+
 def runtime_status() -> dict:
     """Estado del runtime gestionado (para GET /api/runtime/status y UI)."""
     status = {
@@ -163,6 +189,7 @@ def runtime_status() -> dict:
         "accel": None,
         "accel_error": None,
         "error": None,
+        "previous_builds": [],
     }
     if platform.system() != "Windows":
         status["state"] = "unsupported"
@@ -184,6 +211,13 @@ def runtime_status() -> dict:
     elif meta and meta.get("state") == "error":
         status["state"] = "error"
         status["error"] = meta.get("error")
+    else:
+        # El pin actual no está descargado: si queda una build gestionada
+        # anterior en disco, el estado pasa de "missing" genérico a "outdated"
+        # (RT-12) y la UI ofrece Actualizar / Reinstalar / Desinstalar.
+        status["previous_builds"] = _previous_builds()
+        if status["previous_builds"]:
+            status["state"] = "outdated"
     return status
 
 
@@ -381,8 +415,13 @@ def can_download() -> bool:
     return platform.system() == "Windows" and _select_base_source() is not None
 
 
-async def download_runtime(on_progress=None) -> dict:
+async def download_runtime(on_progress=None, keep_previous: bool = False) -> dict:
     """Descarga y verifica el runtime del pin activo en 2 etapas (acto explícito).
+
+    keep_previous=False (default) borra las builds gestionadas anteriores
+    (llama.cpp-*) al terminar: un bump de pin no deja la dir vieja huérfana
+    (~700 MB duplicados). keep_previous=True las conserva (base del rollback,
+    feature empresarial — ver PENDIENTES).
 
     1. Motor BASE (0-50 %): siempre. Un fallo aquí ES error.
     2. Aceleración de la familia detectada (50-100 %): solo si existe
@@ -454,6 +493,13 @@ async def download_runtime(on_progress=None) -> dict:
                      + ([Path(s["url"]).name for s in accel["files"]] if accel else []),
         })
         shutil.rmtree(work, ignore_errors=True)
+        if not keep_previous:
+            for orphan in _orphaned_runtime_dirs():
+                logger.info(
+                    "build anterior %s reemplazada por %s (cleanup de huérfanos)",
+                    orphan.name, RUNTIME_PIN,
+                )
+                shutil.rmtree(orphan, ignore_errors=True)
         logger.info(
             "runtime %s listo desde %s (accel: %s)",
             RUNTIME_PIN, base["id"], accel_id or "none",

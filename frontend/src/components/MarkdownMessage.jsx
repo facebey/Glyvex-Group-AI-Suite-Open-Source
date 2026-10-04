@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import CodeBlock from "./CodeBlock.jsx";
+import ExternalLink from "./ExternalLink.jsx";
 import "highlight.js/styles/github-dark.css";
 
 /** Texto plano de un nodo del AST, para poder copiarlo. */
@@ -91,14 +92,9 @@ const components = {
 
   a({ children, href }) {
     return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        className="text-glyvex-accent hover:underline"
-      >
+      <ExternalLink href={href} className="text-glyvex-accent hover:underline">
         {children}
-      </a>
+      </ExternalLink>
     );
   },
 

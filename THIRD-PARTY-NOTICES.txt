@@ -47,7 +47,7 @@ COMPLEMENTO EXHAUSTIVO DE COMPONENTES DE TERCEROS
 
 A. RUNTIMES DE INFERENCIA (descargados/provisionados por la aplicacion)
 --------------------------------------------------------------------------------
-llama.cpp (llama-server, build b11146)
+llama.cpp (llama-server, build b11349)
    Source: https://github.com/ggml-org/llama.cpp
    License: MIT
    Copyright (c) 2024-2025 ggml-org

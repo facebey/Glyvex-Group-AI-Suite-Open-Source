@@ -6,6 +6,7 @@ import {
   Download,
   Loader2,
   RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import Section from "./ui/Section.jsx";
@@ -25,6 +26,7 @@ export default function RuntimeSettings({ expertBinary }) {
   const [runtime, setRuntime] = useState(null);
   const [dl, setDl] = useState(null);
   const [resetting, setResetting] = useState(false);
+  const [keepPrevious, setKeepPrevious] = useState(false);
   const abortRef = useRef(null);
 
   async function fetchStatus() {
@@ -49,12 +51,15 @@ export default function RuntimeSettings({ expertBinary }) {
     return () => clearInterval(id);
   }, [runtime?.state]);
 
-  async function handleDownload() {
+  async function handleDownload(keep = false) {
     const controller = new AbortController();
     abortRef.current = controller;
     setDl({ phase: "downloading", pct: 0, detail: "" });
     try {
-      const res = await fetch("/api/runtime/download", { method: "POST" });
+      const url = keep
+        ? "/api/runtime/download?keep_previous=true"
+        : "/api/runtime/download";
+      const res = await fetch(url, { method: "POST" });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail || t("config.runtime.downloadError"));
@@ -80,6 +85,21 @@ export default function RuntimeSettings({ expertBinary }) {
         t("config.runtime.reinstallConfirm", { pin: runtime?.pin, size: runtime?.size_mb ?? SIZE_MB })
       )
     ) return;
+    setDl(null);
+    try {
+      const res = await fetch("/api/runtime/reset", { method: "POST" });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setRuntime(data.status);
+    } catch {
+      setDl({ phase: "error", error: t("config.runtime.resetError") });
+      return;
+    }
+    await handleDownload(false);
+  }
+
+  async function handleUninstall() {
+    if (!window.confirm(t("config.runtime.uninstallConfirm", { pin: runtime?.pin }))) return;
     setResetting(true);
     setDl(null);
     try {
@@ -87,6 +107,7 @@ export default function RuntimeSettings({ expertBinary }) {
       if (!res.ok) throw new Error();
       const data = await res.json();
       setRuntime(data.status);
+      setKeepPrevious(false);
     } catch {
       setDl({ phase: "error", error: t("config.runtime.resetError") });
     } finally {
@@ -112,6 +133,7 @@ export default function RuntimeSettings({ expertBinary }) {
   else if (dl?.phase === "downloading" || runtime.state === "downloading") view = "downloading";
   else if (dl?.phase === "error" || runtime.state === "error") view = "error";
   else if (runtime.state === "ready") view = "ready";
+  else if (runtime.state === "outdated") view = "outdated";
   else if (!isWindows) view = "skipped";
   else view = "action";
 
@@ -133,15 +155,25 @@ export default function RuntimeSettings({ expertBinary }) {
           {isNvidia && !runtime.accel && (
             <p className="text-xs text-amber-400">{t("config.runtime.degraded")}</p>
           )}
-          <button
-            type="button"
-            onClick={handleReinstall}
-            disabled={resetting}
-            className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-50"
-          >
-            <RotateCcw size={16} className={resetting ? "animate-spin" : ""} />
-            {t("config.runtime.reinstall")}
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleReinstall}
+              className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
+            >
+              <RotateCcw size={16} />
+              {t("config.runtime.reinstall")}
+            </button>
+            <button
+              type="button"
+              onClick={handleUninstall}
+              disabled={resetting}
+              className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-muted hover:text-red-400 hover:bg-glyvex-card disabled:opacity-50"
+            >
+              <Trash2 size={16} />
+              {t("config.runtime.uninstall")}
+            </button>
+          </div>
         </div>
       )}
 
@@ -187,6 +219,59 @@ export default function RuntimeSettings({ expertBinary }) {
           >
             {t("config.runtime.retry")}
           </button>
+        </div>
+      )}
+
+      {view === "outdated" && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Cpu size={18} className="text-amber-400 shrink-0" />
+            {t("config.runtime.outdated", { pin: runtime.pin })}
+          </div>
+          {runtime.previous_builds?.length > 0 && (
+            <p className="text-xs text-glyvex-muted">
+              {t("config.runtime.outdatedSub", {
+                prev: runtime.previous_builds[0].pin,
+                prevSize: runtime.previous_builds[0].size_mb ?? "—",
+                size: sizeMb,
+              })}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => handleDownload(keepPrevious)}
+            className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-500"
+          >
+            <Download size={16} />
+            {t("config.runtime.update")}
+          </button>
+          <label className="flex items-center gap-2 text-xs text-glyvex-muted cursor-pointer">
+            <input
+              type="checkbox"
+              checked={keepPrevious}
+              onChange={(e) => setKeepPrevious(e.target.checked)}
+            />
+            {t("config.runtime.keepPrevious")}
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleReinstall}
+              className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card"
+            >
+              <RotateCcw size={16} />
+              {t("config.runtime.reinstall")}
+            </button>
+            <button
+              type="button"
+              onClick={handleUninstall}
+              disabled={resetting}
+              className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-muted hover:text-red-400 hover:bg-glyvex-card disabled:opacity-50"
+            >
+              <Trash2 size={16} />
+              {t("config.runtime.uninstall")}
+            </button>
+          </div>
         </div>
       )}
 

@@ -154,23 +154,23 @@ def test_extract_zip_rejects_entry_outside_target(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_select_base_source_official_b11146_verifiable():
-    # Bump b11146: la fuente es la build oficial de la release (los archives
+def test_select_base_source_official_b11349_verifiable():
+    # Bump b11349: la fuente es la build oficial de la release (los archives
     # propios "glyvex" eran específicos de b11009).
     source = runtime_module._select_base_source()
     assert source is not None
     assert source["id"] == "official"
     assert all(len(f["sha256"]) == 64 for f in source["files"])
-    assert all("b11146" in f["url"] for f in source["files"])
+    assert all("b11349" in f["url"] for f in source["files"])
 
 
-def test_select_accel_source_nvidia_official_b11146_verifiable():
+def test_select_accel_source_nvidia_official_b11349_verifiable():
     source = runtime_module._select_accel_source("nvidia")
     assert source is not None
     assert source["id"] == "official"
     assert all(len(f["sha256"]) == 64 for f in source["files"])
     assert len(source["files"]) == 2
-    assert all("b11146" in f["url"] for f in source["files"])
+    assert all("b11349" in f["url"] for f in source["files"])
 
 
 def test_select_accel_source_none_for_family_without_package():
@@ -267,7 +267,7 @@ def test_status_ready_with_meta(monkeypatch):
     d.mkdir(parents=True)
     (d / runtime_module.BINARY_NAME).write_bytes(b"FAKE-EXE")
     (d / runtime_module.META_FILENAME).write_text(
-        json.dumps({"state": "ready", "build": "b11146", "source": "official"}),
+        json.dumps({"state": "ready", "build": "b11349", "source": "official"}),
         encoding="utf-8",
     )
 
@@ -275,7 +275,7 @@ def test_status_ready_with_meta(monkeypatch):
 
     assert st["state"] == "ready"
     assert st["binary_path"] == str(d / runtime_module.BINARY_NAME)
-    assert st["build"] == "b11146"
+    assert st["build"] == "b11349"
     assert st["source"] == "official"
     assert st["size_mb"] is not None
 
@@ -301,6 +301,52 @@ def test_status_broken_meta_falls_to_missing(monkeypatch):
     d.mkdir(parents=True)
     (d / runtime_module.META_FILENAME).write_text("{no-json", encoding="utf-8")
     assert runtime_module.runtime_status()["state"] == "missing"
+
+
+def test_status_outdated_with_previous_build(monkeypatch):
+    # RT-12: el pin actual no está descargado pero queda una build anterior
+    # gestionada en disco → estado "outdated" (no el "missing" genérico).
+    _force_windows(monkeypatch)
+    old = runtime_module.runtime_dir().parent / "llama.cpp-b11146"
+    old.mkdir(parents=True)
+    (old / "llama-server.exe").write_bytes(b"OLD")
+
+    st = runtime_module.runtime_status()
+
+    assert st["state"] == "outdated"
+    assert st["previous_builds"] == [{"pin": "b11146", "size_mb": 0.0}]
+    assert st["binary_path"] is None
+
+
+def test_status_missing_without_previous_build(monkeypatch):
+    # RT-12: sin build anterior el estado sigue siendo "missing" y
+    # previous_builds queda vacío.
+    _force_windows(monkeypatch)
+    st = runtime_module.runtime_status()
+
+    assert st["state"] == "missing"
+    assert st["previous_builds"] == []
+
+
+def test_status_ready_not_outdated_even_with_previous_build(monkeypatch):
+    # RT-12: con el runtime del pin actual listo el estado es "ready" aunque
+    # queden builds anteriores (keep_previous): no se confunde con outdated.
+    _force_windows(monkeypatch)
+    old = runtime_module.runtime_dir().parent / "llama.cpp-b11146"
+    old.mkdir(parents=True)
+    (old / "llama-server.exe").write_bytes(b"OLD")
+    d = runtime_module.runtime_dir()
+    d.mkdir(parents=True)
+    (d / runtime_module.BINARY_NAME).write_bytes(b"EXE")
+    (d / runtime_module.META_FILENAME).write_text(
+        json.dumps({"state": "ready", "build": "b11349", "source": "official"}),
+        encoding="utf-8",
+    )
+
+    st = runtime_module.runtime_status()
+
+    assert st["state"] == "ready"
+    assert st["previous_builds"] == []
 
 
 # --------------------------------------------------------------------------
@@ -501,3 +547,52 @@ async def test_download_base_failure_is_error(monkeypatch, tmp_path):
 
     assert runtime_module.runtime_status()["state"] == "error"
     assert not (tmp_path / "runtime" / f".download-{runtime_module.RUNTIME_PIN}").exists()
+
+
+# --------------------------------------------------------------------------
+# download_runtime — cleanup de huérfanos (un bump de pin no deja la vieja)
+# --------------------------------------------------------------------------
+
+
+async def test_download_cleanup_removes_orphaned_previous_build(monkeypatch, tmp_path):
+    # Un bump de pin deja la dir vieja (llama.cpp-<old>) huérfana y duplica el
+    # disco (~700 MB). Por defecto (keep_previous=False) el download la borra.
+    _setup_download(monkeypatch, tmp_path, "cpu")
+    old = tmp_path / "runtime" / "llama.cpp-b11146"
+    old.mkdir(parents=True)
+    (old / "llama-server.exe").write_bytes(b"OLD")
+    (old / runtime_module.META_FILENAME).write_text(
+        json.dumps({"state": "ready", "build": "b11146", "source": "official"}),
+        encoding="utf-8",
+    )
+    bodies = _stub_sources(
+        monkeypatch, _zip_bytes({"llama-server.exe": b"EXE", "llama.dll": b"LIB"}),
+        None, "cpu",
+    )
+    _patch_transport(monkeypatch, lambda req: httpx.Response(200, content=bodies[req.url]))
+
+    st = await runtime_module.download_runtime()
+
+    assert st["state"] == "ready"
+    assert runtime_module.runtime_dir().exists()
+    assert not old.exists()  # huérfano eliminado (reemplazo por defecto)
+
+
+async def test_download_keep_previous_preserves_orphan(monkeypatch, tmp_path):
+    # keep_previous=True conserva la build anterior (base del rollback futuro,
+    # feature empresarial): se paga el doble de disco a cambio de poder volver.
+    _setup_download(monkeypatch, tmp_path, "cpu")
+    old = tmp_path / "runtime" / "llama.cpp-b11146"
+    old.mkdir(parents=True)
+    (old / "llama-server.exe").write_bytes(b"OLD")
+    bodies = _stub_sources(
+        monkeypatch, _zip_bytes({"llama-server.exe": b"EXE", "llama.dll": b"LIB"}),
+        None, "cpu",
+    )
+    _patch_transport(monkeypatch, lambda req: httpx.Response(200, content=bodies[req.url]))
+
+    st = await runtime_module.download_runtime(keep_previous=True)
+
+    assert st["state"] == "ready"
+    assert old.exists()  # conservada para rollback
+    assert (old / "llama-server.exe").read_bytes() == b"OLD"

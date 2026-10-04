@@ -3,5 +3,19 @@
   "identifier": "default",
   "description": "Capacidades por defecto de la ventana principal",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:7981",
+      "http://127.0.0.1:7982",
+      "http://127.0.0.1:7983",
+      "http://127.0.0.1:7984",
+      "http://127.0.0.1:7985",
+      "http://127.0.0.1:7986",
+      "http://127.0.0.1:7987",
+      "http://127.0.0.1:7988",
+      "http://127.0.0.1:7989",
+      "http://127.0.0.1:7990"
+    ]
+  },
+  "permissions": ["core:default", "updater:default", "process:allow-restart", "shell:allow-open", "sidecar-control"]
 }

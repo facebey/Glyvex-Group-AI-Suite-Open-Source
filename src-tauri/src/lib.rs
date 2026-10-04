@@ -366,9 +366,23 @@ fn sidecar_restart(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// T6.1: detiene el sidecar (backend) ANTES del auto-update. Con
+/// glyvex-backend.exe vivo, los .dll/.pyd de `_internal/` quedan con lock y
+/// el instalador NSIS falla en "Error abriendo archivo para escritura". En
+/// estado "running" el ciclo de vida ya terminó (active=false), así que
+/// kill_sidecar NO dispara re-spawn (solo se rompe el heartbeat).
+#[tauri::command]
+fn stop_sidecar(app: AppHandle) {
+    let state = app.state::<SidecarState>();
+    kill_sidecar(&state);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             app.manage(SidecarState::default());
             start_sidecar(app.handle().clone());
@@ -377,6 +391,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_backend_port,
             sidecar_restart,
+            stop_sidecar,
             provision_requested,
             sidecar_healthy
         ])

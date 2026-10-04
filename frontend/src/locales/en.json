@@ -75,7 +75,14 @@
     "github": "GitHub",
     "star": "Star us on GitHub",
     "license": "Open source — Apache 2.0",
-    "close": "Close"
+    "close": "Close",
+    "updateCheck": "Check for updates",
+    "updateChecking": "Checking…",
+    "updateUpToDate": "You're up to date",
+    "updateAvailable": "New version {{v}} available",
+    "updateInstall": "Download and install",
+    "updateDownloading": "Downloading… {{pct}}%",
+    "updateError": "Couldn't check for updates"
   },
   "language": {
     "label": "Language"
@@ -907,6 +914,12 @@
       "expertSub": "You have your own binary configured (binary_path in Backends) and it always wins.",
       "cpuNote": "GPU acceleration is coming soon; it runs on CPU for now",
       "degraded": "GPU acceleration not installed — running on CPU.",
+      "outdated": "Runtime outdated — {{pin}} not installed yet",
+      "outdatedSub": "Previous build {{prev}} ({{prevSize}} MB) is on disk. Estimated download: ~{{size}} MB.",
+      "update": "Update runtime",
+      "keepPrevious": "Keep previous build (rollback)",
+      "uninstall": "Uninstall",
+      "uninstallConfirm": "Uninstall the managed runtime? The local copy will be deleted. Use expert mode (binary_path in Backends) to point to your own binary.",
       "unsupported": "The embedded runtime is Windows-only in v1. Configure your own binary in Backends (expert mode)."
     },
     "title": "Config",

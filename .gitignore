@@ -20,6 +20,14 @@ backend/dist/
 # sin ella el resource se instala bajo _up_/backend/dist/ y el sidecar no resuelve
 src-tauri/resources/glyvex-backend/
 
+# Tauri updater (T6): clave ed25519 de firma. La PRIVADA (glyvex.key) NUNCA
+# se commitea ni sube; la pública (su contenido) vive en tauri.conf.json.
+.tauri/
+
+# Variante local de build (endpoint 127.0.0.1:9735 + bump de versión): solo en disco.
+# El override versionado es tauri.update-local.conf.json (no versionar duplicados del config completo)
+src-tauri/tauri.update-local-full.conf.json
+
 # Documentacion local puntual (solo en disco)
 REVIEW_PLAN.md
 

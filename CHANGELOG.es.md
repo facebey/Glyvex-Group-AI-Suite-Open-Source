@@ -7,6 +7,10 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+### Cambiado
+- **Runtime embebido: pin llama.cpp b11146 → b11349**: superficie de flags idéntica (329 long-flags, 0 agregados / 0 removidos, verificado contra el `--help` de ambos binarios); trae mejoras de CPU para k-quants, carga de modelo más rápida y correcciones de seguridad (BoringSSL, cpp-httplib, overflow GGUF).
+- **Runtime: el update de pin ya no deja la build anterior huérfana**: al descargar el pin nuevo se eliminan las builds gestionadas previas (`llama.cpp-*`) para no duplicar el disco (~700 MB); `keep_previous=True` las conserva (base del rollback, feature empresarial — ver PENDIENTES).
+
 ### Corregido
 - **Versión unificada en 0.7.1-beta**: `APP_VERSION` (`/api/health`,
   `/api/info`), `frontend/package.json` y `src-tauri/Cargo.toml` seguían en

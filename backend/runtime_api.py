@@ -6,8 +6,10 @@ GET  /api/runtime/status   — estado del runtime + GPU detectada y su familia
                               (base + aceleración por familia) y mostrar la
                               estimación de tamaño (RT-4).
 POST /api/runtime/download — descarga con progreso por SSE (mismo patrón que
-                             chat/benchmark). La lógica real vive en runtime.py;
-                             acá solo se puentea on_progress al stream.
+                              chat/benchmark). La lógica real vive en runtime.py;
+                              acá solo se puentea on_progress al stream.
+                              ?keep_previous=true conserva la build anterior
+                              (rollback, RT-12).
 POST /api/runtime/reset    — borra el runtime gestionado (reinstalar =
                              reset + download).
 """
@@ -44,7 +46,7 @@ async def status() -> dict:
 
 
 @router.post("/download")
-async def download() -> StreamingResponse:
+async def download(keep_previous: bool = False) -> StreamingResponse:
     if platform.system() != "Windows":
         raise HTTPException(
             status_code=400, detail="El runtime gestionado es Windows-only en v1"
@@ -65,7 +67,7 @@ async def download() -> StreamingResponse:
 
     async def runner() -> None:
         try:
-            result = await runtime.download_runtime(on_progress)
+            result = await runtime.download_runtime(on_progress, keep_previous=keep_previous)
             queue.put_nowait({"type": "done", "status": result})
         except Exception as exc:
             # El error se serializa al cliente por SSE; la meta queda con

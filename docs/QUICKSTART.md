@@ -19,7 +19,7 @@ environment variables, security, release).
 - **Node.js 20 LTS+** (Vite/React frontend)
 - An inference backend, depending on what you use:
   - **Windows:** the [embedded runtime](../README.md) — the suite downloads
-     its own tested build of llama.cpp (pin b11146, CUDA) without installing
+     its own tested build of llama.cpp (pin b11349, CUDA) without installing
      anything — **or** [`llama-server`](https://github.com/ggml-org/llama.cpp),
      [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) in server mode.
   - **Other platforms:** [`llama-server`](https://github.com/ggml-org/llama.cpp),
@@ -88,7 +88,7 @@ steps and live checkmarks:
    the inference backend:
    - **Windows:** in the onboarding (or in `/config` → **Runtime**) click
      **Download runtime** and the suite installs its own tested build of
-     llama.cpp (pin b11146). You never touch `binary_path`.
+     llama.cpp (pin b11349). You never touch `binary_path`.
    - **Other platforms / expert mode:** in `/config`, point `binary_path` to
      `llama-server` (and/or Ollama/LM Studio).
 2. **Scan** — click "Scan now"; the inventory shows up in the Launcher.

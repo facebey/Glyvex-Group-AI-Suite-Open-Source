@@ -1,0 +1,17 @@
+{
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "startMenuFolder": "Glyvex-AI-Suite"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "http://127.0.0.1:9735/latest.json"
+      ],
+      "dangerousInsecureTransportProtocol": true
+    }
+  }
+}

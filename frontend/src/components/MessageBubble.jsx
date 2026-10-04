@@ -8,6 +8,7 @@ import ThinkingPanel from "./ThinkingPanel.jsx";
 import ToolSummary, { ToolActivityLive } from "./ToolActivity.jsx";
 import StreamStatus from "./StreamStatus.jsx";
 import MarkdownMessage from "./MarkdownMessage.jsx";
+import ExternalLink from "./ExternalLink.jsx";
 import { CopyButton } from "./CodeBlock.jsx";
 import SpeakButton from "./SpeakButton.jsx";
 import ReasoningControl from "./ReasoningControl.jsx";
@@ -53,11 +54,9 @@ function MessageAttachments({ attachments }) {
           {images.map((a) => {
             const skipped = a.status === "vision_unsupported";
             return (
-              <a
+              <ExternalLink
                 key={a.id}
                 href={a.url}
-                target="_blank"
-                rel="noreferrer"
                 title={skipped ? t("message.notSent", { filename: a.filename }) : a.filename}
                 className="relative block"
               >
@@ -78,7 +77,7 @@ function MessageAttachments({ attachments }) {
                     <EyeOff size={12} />
                   </span>
                 )}
-              </a>
+              </ExternalLink>
             );
           })}
         </div>

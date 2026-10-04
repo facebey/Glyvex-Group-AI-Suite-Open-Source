@@ -842,8 +842,8 @@ async def test_probe_binary_parses_help_and_version(probeable_binary):
     info = await launcher_module.probe_binary(probeable_binary)
     assert info.probed is True
     assert info.path == probeable_binary
-    assert info.build == "b11146"
-    assert "b11146" in info.version_line
+    assert info.build == "b11349"
+    assert "b11349" in info.version_line
     # Los flags salen ordenados y sin repetidos.
     assert info.flags == sorted(set(info.flags))
     assert "--model" in info.flags
@@ -1357,7 +1357,7 @@ async def test_backend_info_returns_probe(client, probeable_binary):
     assert res.status_code == 200
     data = res.json()
     assert data["probed"] is True
-    assert data["build"] == "b11146"
+    assert data["build"] == "b11349"
     assert "--model" in data["flags"]
     assert "--ctx-checkpoints" not in data["flags"]
     # P1.5: el mapa de ayuda oficial viaja en la respuesta para los tooltips.
@@ -1431,7 +1431,7 @@ async def test_preview_command_masks_key_and_reports_dropped(client, sample_mode
     assert res.status_code == 200
     data = res.json()
     assert data["probed"] is True
-    assert data["build"] == "b11146"
+    assert data["build"] == "b11349"
     cmd = data["command"]
     # La api-key nunca sale en claro por la API.
     assert "--api-key" in cmd

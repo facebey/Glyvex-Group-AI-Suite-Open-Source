@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Search, Globe, ChevronRight, Check, AlertTriangle, Loader2 } from "lucide-react";
+import ExternalLink from "./ExternalLink.jsx";
 
 function hostOf(url) {
   try {
@@ -120,15 +121,13 @@ export default function ToolSummary({ activity }) {
                   <ul className="pl-5 mt-1 space-y-0.5">
                     {entry.sources.map((source) => (
                       <li key={source.url} className="truncate">
-                        <a
+                        <ExternalLink
                           href={source.url}
-                          target="_blank"
-                          rel="noreferrer"
                           className="text-glyvex-accent hover:underline"
                           title={source.url}
                         >
                           {source.title || hostOf(source.url)}
-                        </a>
+                        </ExternalLink>
                       </li>
                     ))}
                   </ul>

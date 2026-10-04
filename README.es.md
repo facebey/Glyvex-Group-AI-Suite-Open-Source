@@ -37,7 +37,7 @@ runtime de llama.cpp y, si querés, los modelos de voz.
 
 | | |
 |---|---|
-| ![Chat — streaming y métricas en vivo](screenshots/chat.png)<br><sub>Chat: streaming, razonamiento y métricas en vivo (t/s, TTFT)</sub> | ![Launcher — inventario de modelos](screenshots/launcher.png)<br><sub>Launcher: inventario de modelos, runtime b11146 listo</sub> |
+| ![Chat — streaming y métricas en vivo](screenshots/chat.png)<br><sub>Chat: streaming, razonamiento y métricas en vivo (t/s, TTFT)</sub> | ![Launcher — inventario de modelos](screenshots/launcher.png)<br><sub>Launcher: inventario de modelos, runtime b11349 listo</sub> |
 | ![Launcher — modo avanzado, todos los paneles](screenshots/launcher-avanzado-general.png)<br><sub>Modo Avanzado: todos los paneles de control del lanzamiento</sub> | ![Launcher — contexto y aceleración](screenshots/launcher-avanzado-contexto.png)<br><sub>Contexto hasta 64K, aceleración GPU y VRAM estimada</sub> |
 | ![Launcher — MTP, visión y LoRA](screenshots/launcher-avanzado-modulos.png)<br><sub>MTP especulativo, mmproj, LoRA y razonamiento</sub> | ![Launcher — modelo en ejecución](screenshots/launcher-online.png)<br><sub>En ejecución: t/s, MTP 70.5%, cache 86.6% y log en vivo</sub> |
 | ![Benchmark — resultados](screenshots/benchmark.png)<br><sub>Benchmark: resultados del run</sub> | ![Monitor — GPU y vitales](screenshots/monitor.png)<br><sub>Monitor: GPU, CPU y vitales del LLM server</sub> |
@@ -228,13 +228,13 @@ el modelo activo, o ver su consumo de HW en vivo (`/monitor`).
 
 En **Windows** la suite puede traer su propia build probada de
 [llama.cpp](https://github.com/ggml-org/llama.cpp) para que no tengas que
-instalar nada de inferencia: pin **b11146** (v0.5.0), en layout plano, en dos niveles:
+instalar nada de inferencia: pin **b11349**, en layout plano, en dos niveles:
 
 - **motor base** (~19 MB): corre en cualquier GPU/CPU.
 - **aceleración** (~531 MB para NVIDIA + CUDA 13.4; la de AMD/Intel llega
   en la fase B). Se elige según la familia de GPU detectada.
 
-- **Dónde vive:** `<DATA_DIR>/runtime/llama.cpp-b11146/` (exe + DLLs en la
+- **Dónde vive:** `<DATA_DIR>/runtime/llama.cpp-b11349/` (exe + DLLs en la
   misma carpeta, porque `llama-server.exe` busca sus DLLs en su propio
   directorio). No es parte del repo: se descarga bajo demanda y se verifica
   con **sha256**.
@@ -423,12 +423,18 @@ se mantiene en sync con tags anotadas de git `vX.Y.Z`:
 Para armar un release:
 
 ```bash
-# 1. Subir APP_VERSION en backend/main.py y commitear
+# 1. Subir la versión en backend/main.py (APP_VERSION) y en
+#    src-tauri/tauri.conf.json (version), y commitear
 # 2. Suite completa en verde
 pytest tests/ -q
-# 3. Tag anotada + push
+# 3. Compilar el instalador NSIS para Windows (también genera el .sig
+#    del auto-update; TAURI_SIGNING_PRIVATE_KEY viene de .tauri/glyvex.key)
+# 4. Tag anotada + push
 git tag -a vX.Y.Z -m "<resumen del release>"
 git push origin main vX.Y.Z
+# 5. Sincronizar la distribución open source y publicar el release de
+#    GitHub (instalador + .sig + latest.json, tabla SHA-256 en las notas)
+distribution/sync-oss.ps1
 ```
 
 ## Licencia

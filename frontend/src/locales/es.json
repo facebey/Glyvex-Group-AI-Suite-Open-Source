@@ -75,7 +75,14 @@
     "github": "GitHub",
     "star": "Dar una estrella en GitHub",
     "license": "Código abierto — Apache 2.0",
-    "close": "Cerrar"
+    "close": "Cerrar",
+    "updateCheck": "Comprobar actualizaciones",
+    "updateChecking": "Comprobando…",
+    "updateUpToDate": "Estás en la última versión",
+    "updateAvailable": "Nueva versión {{v}} disponible",
+    "updateInstall": "Descargar e instalar",
+    "updateDownloading": "Descargando… {{pct}}%",
+    "updateError": "No se pudo comprobar actualizaciones"
   },
   "language": {
     "label": "Idioma"
@@ -907,6 +914,12 @@
       "expertSub": "Tenés un binario propio configurado (binary_path en Backends) y ese gana siempre.",
       "cpuNote": "la aceleración GPU llega próximamente; por ahora corre en CPU",
       "degraded": "Aceleración GPU no instalada — corriendo en CPU.",
+      "outdated": "Runtime desactualizado — {{pin}} aún no instalado",
+      "outdatedSub": "Hay una build anterior ({{prev}}, {{prevSize}} MB) en disco. Descarga estimada: ~{{size}} MB.",
+      "update": "Actualizar runtime",
+      "keepPrevious": "Conservar build anterior (rollback)",
+      "uninstall": "Desinstalar",
+      "uninstallConfirm": "¿Desinstalar el runtime gestionado? Se borra la copia local. Usá modo experto (binary_path en Backends) para apuntar a tu binario.",
       "unsupported": "El runtime embebido es Windows-only en v1. Configurá un binario propio en Backends (modo experto)."
     },
     "title": "Config",

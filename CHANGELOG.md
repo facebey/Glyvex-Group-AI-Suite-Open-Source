@@ -7,6 +7,10 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+### Changed
+- **Embedded runtime: llama.cpp pin b11146 → b11349**: identical flag surface (329 long-flags, 0 added / 0 removed, verified against the `--help` of both binaries); brings CPU improvements for k-quants, faster model loading and security fixes (BoringSSL, cpp-httplib, GGUF overflow).
+- **Runtime: a pin update no longer leaves the previous build orphaned**: when the new pin is downloaded, the previous managed builds (`llama.cpp-*`) are removed so disk is not duplicated (~700 MB); `keep_previous=True` keeps them (base for rollback, enterprise feature — see PENDIENTES).
+
 ### Fixed
 - **Unified version in 0.7.1-beta**: `APP_VERSION` (`/api/health`,
   `/api/info`), `frontend/package.json` and `src-tauri/Cargo.toml` were

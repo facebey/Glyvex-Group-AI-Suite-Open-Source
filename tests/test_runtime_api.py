@@ -70,7 +70,7 @@ async def test_status_missing_on_windows(client, monkeypatch):
     res = await client.get("/api/runtime/status")
     assert res.status_code == 200
     data = res.json()
-    assert data["pin"] == "b11146"
+    assert data["pin"] == runtime_module.RUNTIME_PIN
     assert data["state"] == "missing"
     assert data["build"] is None
     assert data["gpu"] == "cpu"
@@ -93,16 +93,33 @@ async def test_status_ready_when_binary_present(client, monkeypatch):
     d.mkdir(parents=True, exist_ok=True)
     (d / runtime_module.BINARY_NAME).touch()
     (d / runtime_module.META_FILENAME).write_text(
-        json.dumps({"pin": "b11146", "state": "ready", "build": "b11146", "source": "official"}),
+        json.dumps({"pin": "b11349", "state": "ready", "build": "b11349", "source": "official"}),
         encoding="utf-8",
     )
 
     res = await client.get("/api/runtime/status")
     data = res.json()
     assert data["state"] == "ready"
-    assert data["build"] == "b11146"
+    assert data["build"] == "b11349"
     assert data["source"] == "official"
     assert data["size_mb"] == 0.0
+
+
+async def test_status_outdated_exposes_previous_builds(client, monkeypatch):
+    # RT-12: con una build anterior en disco y el pin actual ausente, /status
+    # reporta "outdated" y expone previous_builds para el UI de rollback.
+    _force_windows(monkeypatch)
+    monkeypatch.setattr(runtime_module, "_gpu_via_pynvml", lambda: None)
+    monkeypatch.setattr(runtime_module, "_gpu_via_video_controller", lambda: None)
+    old = runtime_module.runtime_dir().parent / "llama.cpp-b11146"
+    old.mkdir(parents=True, exist_ok=True)
+    (old / runtime_module.BINARY_NAME).write_bytes(b"OLD")
+
+    res = await client.get("/api/runtime/status")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["state"] == "outdated"
+    assert data["previous_builds"] == [{"pin": "b11146", "size_mb": 0.0}]
 
 
 # --------------------------------------------------------------------------
@@ -200,6 +217,32 @@ async def test_download_sse_error_leaves_error_status(client, monkeypatch):
     assert parsed[-1]["type"] == "error"
     assert "red caída" in parsed[-1]["message"]
     assert runtime_module.runtime_status()["state"] == "error"
+
+
+async def test_download_keep_previous_query_param(client, monkeypatch):
+    # RT-12: POST /download?keep_previous=true conserva la build anterior en
+    # disco (rollback); el binario del build viejo queda intacto.
+    _force_windows(monkeypatch)
+    monkeypatch.setattr(runtime_module, "BASE_SOURCES", _fake_base_source())
+    monkeypatch.setattr(runtime_module, "detect_gpu", lambda: "cpu")
+    old = runtime_module.runtime_dir().parent / "llama.cpp-b11146"
+    old.mkdir(parents=True, exist_ok=True)
+    (old / runtime_module.BINARY_NAME).write_bytes(b"OLD")
+
+    async def fake_download(spec, dest, on_progress, index, total):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(_zip_bytes())
+        on_progress(100.0, f"Verificado {dest.name}")
+
+    monkeypatch.setattr(runtime_module, "_download_file", fake_download)
+
+    async with client.stream("POST", "/api/runtime/download?keep_previous=true") as res:
+        assert res.status_code == 200
+        await drain_sse(res)
+
+    assert runtime_module.runtime_status()["state"] == "ready"
+    assert old.exists()
+    assert (old / runtime_module.BINARY_NAME).read_bytes() == b"OLD"
 
 
 # --------------------------------------------------------------------------

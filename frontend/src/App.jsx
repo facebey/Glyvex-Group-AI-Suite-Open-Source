@@ -3,10 +3,11 @@ import { useTranslation } from "react-i18next";
 import { createBrowserRouter, RouterProvider, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   MessageSquare, Rocket, Gauge, Activity, FileBarChart, Settings,
-  CheckCircle2, Circle, Palette, Cpu, Download, Loader2, AlertTriangle, ExternalLink,
+  CheckCircle2, Circle, Palette, Cpu, Download, Loader2, AlertTriangle, ExternalLink as ExternalLinkIcon,
 } from "lucide-react";
 import { ToastProvider } from "./components/ToastNotification.jsx";
 import { isTauri } from "./lib/tauri.js";
+import ExternalLink from "./components/ExternalLink.jsx";
 import { getStoredTheme, cycleTheme, nextTheme, THEMES, THEME_META, THEME_CHANGED_EVENT } from "./lib/theme.js";
 import MatrixRain from "./components/MatrixRain.jsx";
 import { consumeSSE } from "./lib/sse.js";
@@ -341,10 +342,8 @@ function Layout() {
       {theme === "matrix" && <MatrixRain />}
       <header className="gx-shell border-b border-glyvex-border bg-glyvex-bg/95 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-[1600px] mx-auto flex items-center gap-6 px-4 py-3">
-          <a
+          <ExternalLink
             href="https://ai.glyvexgroup.com"
-            target="_blank"
-            rel="noopener noreferrer"
             className="flex items-center gap-2.5 hover:opacity-90 transition-opacity"
             title="Glyvex AI — glyvexgroup.com"
           >
@@ -353,7 +352,7 @@ function Layout() {
               <span style={{ color: "#0d9488" }}>GLYVEX</span>
               <span style={{ color: "#7c3aed" }}> AI</span>
             </span>
-          </a>
+          </ExternalLink>
           <nav className="flex items-center gap-1">
             {NAV_ITEMS.map(({ to, labelKey, icon: Icon, end }) => (
               <NavLink key={to} to={to} end={end} className={navLinkClasses}>
@@ -409,35 +408,29 @@ function Layout() {
         <div className="max-w-[1600px] mx-auto flex items-center justify-between text-xs text-glyvex-bg-muted">
           <span>
             {t("footer.developedBy")}{" "}
-            <a
+            <ExternalLink
               href="https://ai.glyvexgroup.com"
-              target="_blank"
-              rel="noopener noreferrer"
               className="text-glyvex-accent hover:text-glyvex-cyan transition-colors"
             >
               Glyvex AI
-            </a>
+            </ExternalLink>
             {" · "}
-            <a
+            <ExternalLink
               href="https://glyvexgroup.com"
-              target="_blank"
-              rel="noopener noreferrer"
               className="hover:text-glyvex-bg-muted transition-colors"
             >
               Glyvex Group
-            </a>
+            </ExternalLink>
             {" · "}
-            <a
+            <ExternalLink
               href="https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source"
-              target="_blank"
-              rel="noopener noreferrer"
               className="hover:text-glyvex-bg-muted transition-colors"
               title={t("footer.openSource")}
             >
               <span className="inline-flex items-center gap-1">
-                <ExternalLink size={12} /> GitHub
+                <ExternalLinkIcon size={12} /> GitHub
               </span>
-            </a>
+            </ExternalLink>
           </span>
           <button
             type="button"
