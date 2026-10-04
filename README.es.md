@@ -25,7 +25,7 @@ de forma segura (ver sección de Módulos).
 ## Descarga (Windows)
 
 La forma más fácil de probarla: bajá el instalador desde
-[**Releases → latest**](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest) (archivo `Glyvex AI Suite_<versión>_x64-setup.exe`),
+[**Releases → latest**](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest) (archivo `Glyvex.AI.Suite_<versión>_x64-setup.exe`),
 ejecutalo y seguí el asistente de 6 pasos que se ve más abajo. Se instala por
 usuario (no pide permisos de administrador) y agrega el acceso **Glyvex** al
 menú Inicio. En el primer arranque, una pantalla de configuración descarga el

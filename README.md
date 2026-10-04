@@ -25,7 +25,7 @@ Without an NVIDIA GPU, the Monitor and the Launcher degrade gracefully
 ## Download (Windows)
 
 The easiest way to try it: download the installer from
-[**Releases → latest**](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest) (file `Glyvex AI Suite_<version>_x64-setup.exe`),
+[**Releases → latest**](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest) (file `Glyvex.AI.Suite_<version>_x64-setup.exe`),
 run it and follow the 6-step wizard shown below. It installs per-user (no
 admin rights needed) and adds a **Glyvex** shortcut to the Start menu. On first
 launch, a setup screen downloads the llama.cpp runtime and, optionally, the
