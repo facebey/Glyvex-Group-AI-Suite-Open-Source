@@ -437,6 +437,12 @@ git push origin main vX.Y.Z
 distribution/sync-oss.ps1
 ```
 
+Las notas de la release son bilingües: inglés primero y luego una sección
+`## Español`, con el link `> **Language:** [Español](#español)` al inicio
+(mismo patrón que este README). Los nombres de asset en las notas usan
+puntos, no espacios (el nombre real de GitHub,
+ej. `Glyvex.AI.Suite_0.7.4-beta_x64-setup.exe`).
+
 ## Licencia
 
 Apache License 2.0 — ver [LICENSE](LICENSE).
