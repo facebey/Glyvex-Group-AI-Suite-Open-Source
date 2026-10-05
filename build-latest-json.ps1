@@ -4,7 +4,7 @@
 # y escribe latest.json (un asset que hay que subir a la GitHub Release).
 #
 # Endpoint prod (tauri.conf.json):
-#   https://github.com/facebey/glyvex-ai-suite/releases/latest/download/latest.json
+#   https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest/download/latest.json
 # "latest" resuelve a la release marcada "Latest", asi latest.json debe subirse
 # como asset en la release actual (mismo nombre de archivo en todas las releases
 # para que las versiones viejas siempre apunten a la ultima).
@@ -43,7 +43,7 @@ $signature = (Get-Content $sig.FullName -Raw).Trim()
 
 # URL de descarga GitHub; el nombre tiene espacios ("Glyvex AI Suite") -> %20.
 $encName = [uri]::EscapeDataString($exe.Name)
-$url = "https://github.com/facebey/glyvex-ai-suite/releases/download/$tag/$encName"
+$url = "https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/download/$tag/$encName"
 
 # Versiones de plugins incluidas en esta build (se leen de Cargo.lock). El
 # updater las usa para validar compatibilidad incremental del update.

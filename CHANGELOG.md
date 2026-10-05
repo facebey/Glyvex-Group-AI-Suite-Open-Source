@@ -7,6 +7,14 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.7.5-beta] — 2026-10-05
+
+### Fixed
+- **Auto-update: the updater now points to the public repo** (`Glyvex-Group-AI-Suite-Open-Source`). The endpoint and the `latest.json` download URL still referenced the private source repo, so installations from the public release could never find or download an update.
+- **Version files no longer drift** (PUB-7): `frontend/package.json`, `src-tauri/Cargo.toml` and both lockfiles now carry 0.7.5-beta together with `APP_VERSION` and `tauri.conf.json` (they were stuck at 0.7.1-beta).
+
+## [0.7.4-beta] — 2026-10-04
+
 ### Changed
 - **Embedded runtime: llama.cpp pin b11146 → b11349**: identical flag surface (329 long-flags, 0 added / 0 removed, verified against the `--help` of both binaries); brings CPU improvements for k-quants, faster model loading and security fixes (BoringSSL, cpp-httplib, GGUF overflow).
 - **Runtime: a pin update no longer leaves the previous build orphaned**: when the new pin is downloaded, the previous managed builds (`llama.cpp-*`) are removed so disk is not duplicated (~700 MB); `keep_previous=True` keeps them (base for rollback, enterprise feature — see PENDIENTES).

@@ -7,6 +7,14 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.7.5-beta] — 2026-10-05
+
+### Corregido
+- **Auto-update: el updater ahora apunta al repo público** (`Glyvex-Group-AI-Suite-Open-Source`). El endpoint y la URL de descarga de `latest.json` seguían refiriendo al repo privado de origen, así que las instalaciones de la release pública nunca podían encontrar ni descargar una actualización.
+- **Los archivos de versión ya no se desfasan** (PUB-7): `frontend/package.json`, `src-tauri/Cargo.toml` y ambos lockfiles ahora llevan 0.7.5-beta junto con `APP_VERSION` y `tauri.conf.json` (se habían quedado en 0.7.1-beta).
+
+## [0.7.4-beta] — 2026-10-04
+
 ### Cambiado
 - **Runtime embebido: pin llama.cpp b11146 → b11349**: superficie de flags idéntica (329 long-flags, 0 agregados / 0 removidos, verificado contra el `--help` de ambos binarios); trae mejoras de CPU para k-quants, carga de modelo más rápida y correcciones de seguridad (BoringSSL, cpp-httplib, overflow GGUF).
 - **Runtime: el update de pin ya no deja la build anterior huérfana**: al descargar el pin nuevo se eliminan las builds gestionadas previas (`llama.cpp-*`) para no duplicar el disco (~700 MB); `keep_previous=True` las conserva (base del rollback, feature empresarial — ver PENDIENTES).
