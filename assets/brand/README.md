@@ -14,7 +14,7 @@ Abrí `brand-guide.html` para ver el kit completo con colores, tipografía y reg
 | `splash/` | 3 splash HTML (A oscuro, B claro, C horizontal) + previews PNG |
 | `installer/nsis/` | Header 150×57 y sidebar 164×314, claro y oscuro (BMP 24-bit + PNG) |
 | `installer/msi/` | Banner 493×58 y diálogo 493×312 de WiX con la marca nueva (BMP + PNG) |
-| `fonts/` | Poppins Regular/Medium/Bold (TTF + WOFF2 subset) + `OFL.txt` |
+| `fonts/` | Glyvex Sans variable (fuente de marca, WOFF2 subset latin) + Exo 2 y JetBrains Mono variables (WOFF2 subset latin) + Poppins Regular/Medium/Bold (TTF + WOFF2) + licencias OFL |
 
 ## Colores
 
@@ -103,6 +103,13 @@ Para probarlo en el navegador: `splash-a-oscuro.html?v=0.5.0&p=0.6`
 
 ## Tipografía
 
-Poppins (SIL Open Font License 1.1, ver `fonts/OFL.txt`). Se puede redistribuir con la app siempre que vaya acompañada de la licencia.
+Todo self-hosted, sin carga remota (la app es 100% offline):
+
+- **Glyvex Sans** (variable, wght 100–900, subset latin) — fuente primaria de la UI y marca. Derivada de Exo 2 (OFL) con el concepto DIAMANTE: rombos en `i`/`j` (punto) y `0`/`o`/`X` (contra/centro). `fonts/glyvex-sans-latin.woff2` + `fonts/glyvex-sans-OFL.txt`
+- **Exo 2** (variable, wght 100–900, subset latin) — base de Glyvex Sans, se conserva como referencia. `fonts/exo-2-latin.woff2` + `fonts/exo-2-OFL.txt`
+- **JetBrains Mono** (variable, wght 100–800, subset latin) — código y terminales. `fonts/jetbrains-mono-latin.woff2` + `fonts/jetbrains-mono-OFL.txt`
+- **Poppins** Regular/Medium/Bold — splash. `fonts/Poppins-*.woff2` + `fonts/OFL.txt`
+
+Todas bajo SIL Open Font License 1.1: se pueden redistribuir con la app siempre que vayan acompañadas de su licencia.
 
 © 2026 Glyvex Group

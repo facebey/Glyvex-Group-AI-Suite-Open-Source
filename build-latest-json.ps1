@@ -41,8 +41,10 @@ if ($sig.Name -ne ($exe.Name + ".sig")) { throw "el .sig no corresponde al .exe"
 # no la URL.
 $signature = (Get-Content $sig.FullName -Raw).Trim()
 
-# URL de descarga GitHub; el nombre tiene espacios ("Glyvex AI Suite") -> %20.
-$encName = [uri]::EscapeDataString($exe.Name)
+# URL de descarga GitHub: GitHub renombra los espacios del asset a dots al
+# subirlos ("Glyvex AI Suite_..." -> "Glyvex.AI.Suite_..."), asi la URL debe
+# usar el nombre con dots, no %20 (un %20 da 404 y rompe el auto-update).
+$encName = [uri]::EscapeDataString(($exe.Name -replace ' ', '.'))
 $url = "https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/download/$tag/$encName"
 
 # Versiones de plugins incluidas en esta build (se leen de Cargo.lock). El

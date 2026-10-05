@@ -27,7 +27,7 @@ export default {
         },
       },
       fontFamily: {
-        sans: ["'Exo 2'", "system-ui", "sans-serif"],
+        sans: ["'Glyvex Sans'", "system-ui", "sans-serif"],
         mono: ["'JetBrains Mono'", "ui-monospace", "monospace"],
       },
       backgroundImage: {

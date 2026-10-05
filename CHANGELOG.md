@@ -7,6 +7,21 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.7.6-beta] — 2026-10-05
+
+### Changed
+- **Brand font: Glyvex Sans (variable, wght 100-900)** now replaces Exo 2
+  across the UI. Same Exo 2 base with brand diamond glyphs on `i`, `j`, `0`,
+  `o` and `X`, so the look stays consistent while every character carries the
+  brand.
+- **Typography is 100% local**: Exo 2, JetBrains Mono and Glyvex Sans ship as
+  self-hosted WOFF2 files with the app — zero requests to Google Fonts, works
+  fully offline.
+
+### Fixed
+- Dead Exo 2 assets removed from `frontend/public/fonts/` (superseded by the
+  brand font; a reference copy stays in `assets/brand/fonts/`).
+
 ## [0.7.5-beta] — 2026-10-05
 
 ### Fixed

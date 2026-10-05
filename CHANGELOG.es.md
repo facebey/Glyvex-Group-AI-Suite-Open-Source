@@ -7,6 +7,21 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.7.6-beta] — 2026-10-05
+
+### Cambiado
+- **Fuente de marca: Glyvex Sans (variable, wght 100-900)** — reemplaza a
+  Exo 2 en toda la UI. Misma base de Exo 2 con glifos de marca (rombos) en
+  `i`, `j`, `0`, `o` y `X`, manteniendo el look mientras cada carácter lleva
+  la marca.
+- **Tipografía 100% local**: Exo 2, JetBrains Mono y Glyvex Sans viajan como
+  WOFF2 self-hosted dentro de la app — cero peticiones a Google Fonts,
+  funciona sin conexión.
+
+### Corregido
+- Activos muertos de Exo 2 fuera de `frontend/public/fonts/` (los sustituye
+  la fuente de marca; una copia de referencia sigue en `assets/brand/fonts/`).
+
 ## [0.7.5-beta] — 2026-10-05
 
 ### Corregido

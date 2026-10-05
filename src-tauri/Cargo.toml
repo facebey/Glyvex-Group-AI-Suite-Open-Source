@@ -1,6 +1,6 @@
 [package]
 name = "glyvex-ai-suite"
-version = "0.7.5-beta"
+version = "0.7.6-beta"
 description = "Glyvex AI Suite — shell desktop (Tauri 2) para la suite local de LLM"
 authors = ["Fabian Acebey"]
 edition = "2021"
