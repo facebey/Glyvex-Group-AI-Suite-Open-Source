@@ -11,3 +11,15 @@
 name = "glyvex-ai-suite"
 description = "Suite 100% local para gestionar, lanzar, chatear y benchear modelos LLM locales (llama-server, Ollama, LM Studio)"
 requires-python = ">=3.11"
+
+# pytest solo colecciona tests/. Sin testpaths, un `pytest` pelado recorre
+# todo el repo y colecciona test_*.py ajenos que PyInstaller copia al
+# empaquetar el sidecar (src-tauri/resources/**/_internal: onnxruntime,
+# torch, etc.), rompiendo la coleccion con ModuleNotFoundError.
+# asyncio_mode/loop scope espejan tests/pytest.ini (ese ini solo se aplica
+# al invocar con `pytest tests`; pelado, rige este archivo).
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+norecursedirs = ["src-tauri", "frontend", "node_modules", "distribution"]
