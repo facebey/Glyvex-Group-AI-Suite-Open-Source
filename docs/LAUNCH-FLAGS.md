@@ -122,6 +122,8 @@ default differs, it's noted in the Impact or Default column.
 | `--spec-type` | Speculation mode. App sends `draft-mtp`. | Enables MTP/NextN draft speculation (~4–5% decode gain with `draft-mtp`). | off (toggle). | On for models with a MTP head. |
 | `--spec-draft-model` | Sidecar draft model path (`mtp-*.gguf`), if not embedded. | Required when the head isn't in the main file. | — (toggle; auto-detected or manual). | Only when the model has an external MTP sidecar. |
 | `--spec-draft-n-max` | Draft tokens per step. | More = more accepted tokens, up to the head's capacity. | `5` (toggle). | Leave at 5. |
+| `--spec-draft-n-min` | Minimum draft tokens per step. | Sets a lower bound on the speculation range. | off (not emitted; build default). | Only if you need a token floor. |
+| `--spec-draft-p-min` | Minimum probability to accept a draft token (greedy). | Build default is `0.00`: it validates tokens with near-zero confidence, wasting GPU cycles on rejections. `0.75` stops dubious speculation early. | off (not emitted; build default `0.00`). | Start at `0.75` if you want to cut rejections. |
 | `--spec-draft-type-k` | Draft KV K quant. | `q8_0` ≈ half the VRAM of the build default `f16`, near-identical acceptance. | `q8_0` (toggle). | Keep `q8_0`. Subject to the FA symmetric-pair rule too. |
 | `--spec-draft-type-v` | Draft KV V quant. | Same as K. | `q8_0` (toggle). | Pair with K. |
 

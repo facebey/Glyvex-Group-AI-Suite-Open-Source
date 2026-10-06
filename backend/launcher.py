@@ -31,6 +31,8 @@ y contra b11349 (bump de mantenimiento, 2026-10-02):
   0 agregados / 0 removidos entre ambos binarios. El re-probe con
   probe_binary + filter_command (config full) descarta únicamente
   --grp-attn-n/-w, el mismo comportamiento que en producción con b11146.
+  --spec-draft-n-min y --spec-draft-p-min confirmados presentes en --help
+  (2026-10-05, spec decoding floors).
 - b11146: los 53 flags que emite el launcher siguen presentes, EXCEPTO:
   - --lora-scale REMOVIDO → --lora-scaled PATH:SCALE (feature-detect por
     probe; ver build_llama_server_command).
@@ -227,6 +229,12 @@ class LaunchConfig(BaseModel):
     mtp_draft_model: str | None = None
     mtp_embedded: bool = False
     n_draft: int = 5
+    # Pisos de la especulación. None = no emitir (default de la build: p-min
+    # 0.00, que acepta tokens del draft sin piso de confianza y desperdicia
+    # ciclos de GPU en verificaciones rechazadas). p_draft_min > 0 (p. ej.
+    # 0.75) frena temprano la especulación dudosa.
+    n_draft_min: int | None = None
+    p_draft_min: float | None = None
     # KV cache del DRAFT. None = no se pasa el flag (llama-server usa f16,
     # que quema VRAM sin necesidad). Default q8_0: mitad de VRAM que f16 con
     # aceptación prácticamente idéntica. Solo aplica con MTP activo.
@@ -862,6 +870,9 @@ def build_llama_server_command(
     #   --spec-draft-model FNAME  modelo de draft (alias -md / --model-draft);
     #                             SOLO cuando la cabeza viene en un archivo aparte
     #   --spec-draft-n-max N      tokens a especular por paso
+    #   --spec-draft-n-min N      tokens draft mínimos (opcional, b11349)
+    #   --spec-draft-p-min P      probabilidad mínima de aceptación (opcional,
+    #                             default de la build 0.00 = sin piso)
     # Ojo: --draft-model nunca existió y --draft/--draft-n/--draft-max fueron
     # removidos del binario ("use --spec-draft-n-max"), por eso no se usan.
     if cfg.mtp_draft_model or cfg.mtp_embedded:
@@ -871,6 +882,10 @@ def build_llama_server_command(
         # Con mtp_embedded y sin path, el propio --model ya trae los tensores
         # nextn: no se pasa ningún archivo extra.
         cmd += ["--spec-draft-n-max", str(cfg.n_draft)]
+        if cfg.n_draft_min is not None:
+            cmd += ["--spec-draft-n-min", str(cfg.n_draft_min)]
+        if cfg.p_draft_min is not None:
+            cmd += ["--spec-draft-p-min", str(cfg.p_draft_min)]
         # cache_type_k/v del DRAFT son flags distintos de los del modelo
         # principal (--spec-draft-type-k/-v, alias -ctkd/-ctvd) — por default
         # llama-server usa f16 para el draft aunque el principal esté en q4_0.

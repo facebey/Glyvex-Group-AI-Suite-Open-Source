@@ -42,6 +42,8 @@ Two concepts that recur:
 | `mtp_draft_model` | `--spec-draft-model` | — | Detected `mtp-*.gguf` sidecar or manual path. |
 | `mtp_embedded` | — | `False` | The model carries the `blk.N.nextn.*` tensors (detected by the M1 scanner). |
 | `n_draft` | `--spec-draft-n-max` | 5 | Draft tokens per step. |
+| `n_draft_min` | `--spec-draft-n-min` | `None` (not emitted) | Floor for draft tokens per step. `None` = build default. |
+| `p_draft_min` | `--spec-draft-p-min` | `None` (not emitted) | Acceptance probability floor. `None` = build's `0.00` (no floor); `0.75` stops dubious speculation early. |
 | `cache_type_k/v_draft` | `--spec-draft-type-k/-v` | `q8_0` | Draft KV. Default q8_0: half the VRAM of f16 (llama-server's default) with practically identical acceptance. With FA it also falls under the symmetric-pair whitelist. |
 
 ## Reasoning / thinking

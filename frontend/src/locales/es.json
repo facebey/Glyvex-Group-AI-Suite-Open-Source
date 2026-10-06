@@ -583,6 +583,8 @@
     "mtpEmbeddedHint": "El modelo ya trae la cabeza MTP: no necesita un archivo aparte.",
     "noPathRequired": "No requiere path",
     "nDraftHint": "Tokens a especular por paso (--spec-draft-n-max).",
+    "nDraftMinHint": "Tokens draft mínimos por paso (--spec-draft-n-min). Vacío = default de la build.",
+    "pDraftMinHint": "Probabilidad mínima para aceptar tokens del draft (--spec-draft-p-min). Default de la build: 0.00 (sin piso). 0.75 frena temprano la especulación dudosa.",
     "draftKvHint": "q8_0 ahorra ~50% de VRAM del draft vs el default f16 de llama-server.",
     "autoF16": "Automático (f16)",
     "draftFaQuantsWarning": "⚠ El KV del draft también cae bajo FA_QUANTS: con flash_attn=on k y v deben ser iguales (o ambos en Automático). El backend rechaza el lanzamiento si difieren.",

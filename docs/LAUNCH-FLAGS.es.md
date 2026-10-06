@@ -123,6 +123,8 @@ Donde el default de la build difiere, se nota en la columna de Impacto o Default
 | `--spec-type` | Modo de especulación. La app envía `draft-mtp`. | Activa la especulación de borrador MTP/NextN (~4–5% de ganancia en decode con `draft-mtp`). | off (toggle). | On para modelos con cabeza MTP. |
 | `--spec-draft-model` | Path del modelo draft sidecar (`mtp-*.gguf`), si no va embebido. | Requerido cuando la cabeza no está en el archivo principal. | — (toggle; auto-detectado o manual). | Solo si el modelo tiene un sidecar MTP externo. |
 | `--spec-draft-n-max` | Tokens draft por paso. | Más = más tokens aceptados, hasta la capacidad de la cabeza. | `5` (toggle). | Dejá en 5. |
+| `--spec-draft-n-min` | Tokens draft mínimos por paso. | Acota el rango inferior de la especulación. | off (no se emite; default de la build). | Solo si necesitás un piso de tokens. |
+| `--spec-draft-p-min` | Probabilidad mínima para aceptar un token del draft (greedy). | El default de la build es `0.00`: valida tokens con confianza casi nula y desperdicia ciclos de GPU en rechazos. Con `0.75` la especulación dudosa se frena temprano. | off (no se emite; default de la build `0.00`). | `0.75` como punto de partida si querés recortar rechazos. |
 | `--spec-draft-type-k` | Cuant del KV K del draft. | `q8_0` ≈ mitad de la VRAM del default de la build `f16`, con aceptación prácticamente idéntica. | `q8_0` (toggle). | Dejá `q8_0`. También cae bajo la regla de pares simétricos con FA. |
 | `--spec-draft-type-v` | Cuant del KV V del draft. | Igual que K. | `q8_0` (toggle). | Emparejá con K. |
 

@@ -79,6 +79,10 @@ const DEFAULT_LAUNCH_CONFIG = {
   mtp_draft_model: "",
   mtp_embedded: false,
   n_draft: 5,
+  // Pisos de la especulación. null = no emitir (default de la build:
+  // p-min 0.00 = acepta tokens del draft sin piso de confianza).
+  n_draft_min: null,
+  p_draft_min: null,
   // q8_0 ahorra ~50% de VRAM del draft vs el default f16 de llama-server,
   // con aceptación prácticamente idéntica. "" = no pasar el flag.
   cache_type_k_draft: "q8_0",
@@ -2053,6 +2057,18 @@ export default function Launcher() {
                           <option value="">{t("launcher.autoF16")}</option>
                           {CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
                         </select>
+                      </Field>
+                    </div>
+                  )}
+                  {(launchConfig.mtp_embedded || launchConfig.mtp_draft_model) && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="n_draft_min" hint={t("launcher.nDraftMinHint")} flagHelp={probeHelp("--spec-draft-n-min")}>
+                        <input type="number" min="1" step="1" className={inputClasses} value={launchConfig.n_draft_min ?? ""}
+                          onChange={(e) => updateConfig({ n_draft_min: e.target.value === "" ? null : Number(e.target.value) })} />
+                      </Field>
+                      <Field label="p_draft_min" hint={t("launcher.pDraftMinHint")} flagHelp={probeHelp("--spec-draft-p-min")}>
+                        <input type="number" min="0" max="1" step="0.05" className={inputClasses} value={launchConfig.p_draft_min ?? ""}
+                          onChange={(e) => updateConfig({ p_draft_min: e.target.value === "" ? null : Number(e.target.value) })} />
                       </Field>
                     </div>
                   )}

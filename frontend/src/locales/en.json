@@ -583,6 +583,8 @@
     "mtpEmbeddedHint": "The model already ships the MTP head: it does not need a separate file.",
     "noPathRequired": "No path required",
     "nDraftHint": "Tokens to speculate per step (--spec-draft-n-max).",
+    "nDraftMinHint": "Minimum draft tokens per step (--spec-draft-n-min). Empty = build default.",
+    "pDraftMinHint": "Minimum probability to accept draft tokens (--spec-draft-p-min). Build default: 0.00 (no floor). 0.75 stops dubious speculation early.",
     "draftKvHint": "q8_0 saves ~50% of the draft VRAM vs the llama-server f16 default.",
     "autoF16": "Automatic (f16)",
     "draftFaQuantsWarning": "⚠ The draft KV also falls under FA_QUANTS: with flash_attn=on, k and v must be equal (or both Automatic). The backend rejects the launch if they differ.",

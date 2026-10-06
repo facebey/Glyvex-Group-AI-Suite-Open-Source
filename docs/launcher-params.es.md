@@ -42,6 +42,8 @@ Dos conceptos que se repiten:
 | `mtp_draft_model` | `--spec-draft-model` | — | Sidecar `mtp-*.gguf` detectado o path manual. |
 | `mtp_embedded` | — | `False` | El modelo trae los tensores `blk.N.nextn.*` (lo detecta el scanner de M1). |
 | `n_draft` | `--spec-draft-n-max` | 5 | Tokens draft por paso. |
+| `n_draft_min` | `--spec-draft-n-min` | `None` (no emitir) | Piso de tokens draft por paso. `None` = default de la build. |
+| `p_draft_min` | `--spec-draft-p-min` | `None` (no emitir) | Piso de probabilidad de aceptación. `None` = `0.00` de la build (sin piso); `0.75` frena temprano la especulación dudosa. |
 | `cache_type_k/v_draft` | `--spec-draft-type-k/-v` | `q8_0` | KV del draft. Default q8_0: mitad de VRAM que f16 (el default de llama-server) con aceptación prácticamente idéntica. Con FA también cae bajo la whitelist de pares simétricos. |
 
 ## Razonamiento / thinking

@@ -31,6 +31,8 @@ def test_build_command_all_params():
         load_mode="mlock",
         mtp_draft_model="/models/draft.gguf",
         n_draft=6,
+        n_draft_min=2,
+        p_draft_min=0.75,
         mmproj_path="/models/mmproj.gguf",
         lora_path="/models/lora.gguf",
         lora_scale=0.8,
@@ -52,6 +54,8 @@ def test_build_command_all_params():
     assert "--spec-type" in cmd and cmd[cmd.index("--spec-type") + 1] == "draft-mtp"
     assert "--spec-draft-model" in cmd and cmd[cmd.index("--spec-draft-model") + 1] == "/models/draft.gguf"
     assert "--spec-draft-n-max" in cmd and cmd[cmd.index("--spec-draft-n-max") + 1] == "6"
+    assert "--spec-draft-n-min" in cmd and cmd[cmd.index("--spec-draft-n-min") + 1] == "2"
+    assert "--spec-draft-p-min" in cmd and cmd[cmd.index("--spec-draft-p-min") + 1] == "0.75"
     assert "--mmproj" in cmd and cmd[cmd.index("--mmproj") + 1] == "/models/mmproj.gguf"
     assert "--lora" in cmd and cmd[cmd.index("--lora") + 1] == "/models/lora.gguf"
     assert "--lora-scale" in cmd and cmd[cmd.index("--lora-scale") + 1] == "0.8"
@@ -149,6 +153,8 @@ def test_build_command_no_optional():
     assert "--spec-type" not in cmd
     assert "--spec-draft-model" not in cmd
     assert "--spec-draft-n-max" not in cmd
+    assert "--spec-draft-n-min" not in cmd
+    assert "--spec-draft-p-min" not in cmd
     assert "--mmproj" not in cmd
     assert "--lora" not in cmd
     assert "--lora-scale" not in cmd
@@ -168,6 +174,21 @@ def test_build_command_with_mtp():
     assert cmd[cmd.index("--spec-draft-model") + 1] == "/models/draft.gguf"
     assert "--spec-draft-n-max" in cmd
     assert cmd[cmd.index("--spec-draft-n-max") + 1] == "8"
+    # Pisos no configurados (None) -> no se emiten: la build usa sus defaults.
+    assert "--spec-draft-n-min" not in cmd
+    assert "--spec-draft-p-min" not in cmd
+
+
+def test_build_command_with_mtp_spec_floors():
+    """Pisos de la especulación (b11349): solo se emiten si el usuario los fija."""
+    cfg = launcher_module.LaunchConfig(
+        model_id="m", mtp_embedded=True,
+        n_draft_min=2, p_draft_min=0.75,
+    )
+    cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/model.gguf")
+
+    assert "--spec-draft-n-min" in cmd and cmd[cmd.index("--spec-draft-n-min") + 1] == "2"
+    assert "--spec-draft-p-min" in cmd and cmd[cmd.index("--spec-draft-p-min") + 1] == "0.75"
 
 
 def test_build_command_with_mtp_embedded():
@@ -495,6 +516,8 @@ FRONTEND_LAUNCH_PAYLOAD = {
     "mtp_draft_model": None,
     "mtp_embedded": False,
     "n_draft": 5,
+    "n_draft_min": None,
+    "p_draft_min": None,
     "cache_type_k_draft": "q8_0",
     "cache_type_v_draft": "q8_0",
     "mmproj_path": None,
