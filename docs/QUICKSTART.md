@@ -7,7 +7,7 @@ minimum; the [README](../README.md) has the full detail (multi-instance,
 environment variables, security, release).
 
 > **Just want to use it on Windows?** None of this is needed: download the
-> installer `Glyvex AI Suite_<version>_x64-setup.exe` from
+> installer `GlyvexAI Suite_<version>_x64-setup.exe` from
 > [Releases → latest](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest),
 > run it and follow the wizard. If Windows SmartScreen warns you, it is
 > because the installer is not signed: **More info → Run anyway**.

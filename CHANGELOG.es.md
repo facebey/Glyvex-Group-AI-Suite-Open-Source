@@ -7,6 +7,28 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.7.7-beta] — 2026-10-05
+
+### Añadido
+- **Monitor: gráficas acumuladas de cache hit rate y MTP acceptance** (B5):
+  dos métricas persistidas nuevas (`llm.cache_hit_pct_total`,
+  `llm.spec_accept_pct_total`) calculadas desde los contadores `/metrics` de
+  llama-server, mostradas como cuarta gráfica.
+- **Launcher: parámetro `--n-cpu-moe`** (F2): offload de expertos MoE a CPU
+  vía `--n-cpu-moe` de llama-server; el probe del binario lo descarta en
+  builds viejas que no conocen el flag.
+- **Botones Browse nativos** (PUB-3): selector de archivos/carpeta (diálogo
+  Tauri) para las rutas de los binarios de backend, los directorios de
+  modelos y los archivos GGUF/draft/mmproj/LORA; en modo navegador cae a
+  entrada manual.
+
+### Cambiado
+- **Nombre de display unificado a "GlyvexAI Suite"** (sin espacio) en el
+  título de ventana, onboarding, diálogo Acerca de, instalador y menú Inicio
+  (carpeta "GlyvexAI"); el ejecutable ahora es `glyvexai.exe`.
+- **Ollama ya no preselecciona `/usr/bin/ollama`** (PUB-4): el default ahora
+  queda vacío en Windows y el launcher resuelve `ollama` desde PATH.
+
 ## [0.7.6-beta] — 2026-10-05
 
 ### Cambiado

@@ -17,5 +17,5 @@
       "http://127.0.0.1:7990"
     ]
   },
-  "permissions": ["core:default", "updater:default", "process:allow-restart", "shell:allow-open", "sidecar-control"]
+  "permissions": ["core:default", "updater:default", "process:allow-restart", "shell:allow-open", "dialog:default", "sidecar-control"]
 }

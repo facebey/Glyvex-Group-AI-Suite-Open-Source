@@ -28,6 +28,7 @@ Dos conceptos que se repiten:
 | `n_batch` | `-b` | 2048 | Medido: pp2048 ~1400 t/s en GPUs anchas; 512 rinde bastante menos en prompt processing. |
 | `n_ubatch` | `--ubatch-size` | 512 | Toggle. Se deja en 512 para no inflar el compute buffer. |
 | `n_gpu_layers` | `-ngl` | -1 (todas) | `gpu_mode="cpu_only"` lo fuerza a 0. |
+| `n_cpu_moe` | `--n-cpu-moe` | 0 (ninguna) | Solo se emite cuando > 0. Mueve las capas de expertos MoE a la RAM del sistema para modelos que no caben en VRAM. |
 | `gpu_mode` | — | `gpu_only` | `gpu_only` \| `cpu_only` \| `hybrid`. `gpu_only` + `n_gpu_layers=0` es inválido (usar `-1` o hybrid). |
 | `cache_type_k` / `cache_type_v` | `--cache-type-k/-v` | `q4_0` | Con Flash Attention **solo pares simétricos**: `q4_0-q4_0`, `q8_0-q8_0`, `f16-f16`, `bf16-bf16`. Cualquier otra combinación termina en crash o fallback silencioso a f16. |
 | `flash_attn` | `--flash-attn` | `on` | Acepta `on`/`off`/`auto` (no 1/0). |

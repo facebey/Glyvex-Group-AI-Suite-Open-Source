@@ -125,6 +125,32 @@ def test_snapshot_con_kv_cache():
     assert llm.flatten_llm_snapshot(snap)["llm.ctx_pct"] == 25.0
 
 
+def test_flatten_incluye_totales_de_cache_y_mtp():
+    # llama.cpp: prompt_tokens_total excluye los cachados
+    # (server-task.cpp), así el hit rate es cached/(cached+processed).
+    values = {
+        "prompt_tokens_total": 100,
+        "prompt_tokens_cached_total": 900,
+        "spec_decode_num_draft_tokens_total": 40,
+        "spec_decode_num_accepted_tokens_total": 30,
+    }
+    snap = llm.build_snapshot(_process(), values, dict(llm.EMPTY_RATES), None)
+    flat = llm.flatten_llm_snapshot(snap)
+    assert flat["llm.cache_hit_pct_total"] == 90.0
+    assert flat["llm.spec_accept_pct_total"] == 75.0
+    assert llm.PERSISTED_UNITS["llm.cache_hit_pct_total"] == "%"
+    assert llm.PERSISTED_UNITS["llm.spec_accept_pct_total"] == "%"
+
+    # Sin MTP no hay serie de aceptación: null no genera muestra.
+    sin_mtp = llm.build_snapshot(
+        _process(),
+        {"prompt_tokens_total": 10, "prompt_tokens_cached_total": 5},
+        dict(llm.EMPTY_RATES), None,
+    )
+    flat2 = llm.flatten_llm_snapshot(sin_mtp)
+    assert "llm.spec_accept_pct_total" not in flat2
+
+
 def test_salida_real_de_llama_server_2026_09():
     """Salida de /metrics de un llama-server real (build 2026-09)."""
     text = (Path(__file__).parent / "fixtures" / "llama_server_metrics_2026-09.txt").read_text()

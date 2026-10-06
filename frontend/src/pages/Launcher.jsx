@@ -32,6 +32,8 @@ import { useLlmStream } from "../hooks/useLlmStream.js";
 import { useDisplay } from "../lib/metricsDisplay.js";
 import { useTranslation } from "react-i18next";
 import CollapsiblePanel from "../components/ui/CollapsiblePanel.jsx";
+import BrowseButton from "../components/ui/BrowseButton.jsx";
+import { pickFile } from "../lib/pickPath.js";
 
 // Espejo de SAMPLING_PRESETS de backend/launcher.py. Vive acá para poder
 // previsualizar los valores sin round-trip; si cambian en el backend, hay
@@ -57,6 +59,8 @@ const SAMPLING_PRESETS = {
   },
 };
 
+const GGUF_FILTERS = [{ name: "GGUF", extensions: ["gguf"] }];
+
 const SAMPLING_PRESET_LABELS = {
   thinking: "🧠 Thinking",
   instruct: "💬 Instruct",
@@ -71,6 +75,9 @@ const DEFAULT_LAUNCH_CONFIG = {
   n_batch: 2048,
   n_ubatch: 512,
   n_gpu_layers: -1,
+  // 0 = todo en GPU (no se emite --n-cpu-moe). >0 mueve esas capas de
+  // expertos a la CPU (modelos MoE que no caben en VRAM).
+  n_cpu_moe: 0,
   gpu_mode: "gpu_only",
   cache_type_k: "q4_0",
   cache_type_v: "q4_0",
@@ -192,7 +199,7 @@ const TEMPLATE_FIELDS = [
   // (al reaplicarlo volvía el default 127.0.0.1:8080).
   "host", "port",
   "auto_mode",
-  "n_ctx", "n_batch", "n_ubatch", "n_gpu_layers", "gpu_mode",
+  "n_ctx", "n_batch", "n_ubatch", "n_gpu_layers", "n_cpu_moe", "gpu_mode",
   "cache_type_k", "cache_type_v", "flash_attn", "load_mode",
   "n_draft", "n_parallel", "cache_type_k_draft", "cache_type_v_draft",
   // Razonamiento
@@ -1984,6 +1991,11 @@ export default function Launcher() {
               <Field label={t("launcher.gpuLayersLabel", { value: launchConfig.n_gpu_layers === -1 ? t("launcher.gpuLayersAll") : launchConfig.n_gpu_layers })} flagHelp={probeHelp("--n-gpu-layers")}>
                 <input type="range" min={-1} max={100} value={launchConfig.n_gpu_layers} disabled={launchConfig.gpu_mode === "cpu_only"} onChange={(e) => updateConfig({ n_gpu_layers: Number(e.target.value) })} className="w-full accent-glyvex-accent" />
               </Field>
+              <Field label={t("launcher.nCpuMoeLabel")} hint={t("launcher.nCpuMoeHint")} flagHelp={probeHelp("--n-cpu-moe")}>
+                <input type="number" min={0} max={999} value={launchConfig.n_cpu_moe}
+                  onChange={(e) => updateConfig({ n_cpu_moe: Math.max(0, Number(e.target.value)) })}
+                  className={inputClasses} />
+              </Field>
             </Panel>
 
             {advancedMode && (
@@ -2032,11 +2044,19 @@ export default function Launcher() {
                       label="MTP draft model (path)"
                       hint={launchConfig.mtp_embedded ? t("launcher.mtpEmbeddedHint") : undefined}
                       flagHelp={probeHelp("--spec-draft-model")}>
-                      <input className={inputClasses}
-                        value={launchConfig.mtp_draft_model || ""}
-                        onChange={(e) => updateConfig({ mtp_draft_model: e.target.value })}
-                        placeholder={launchConfig.mtp_embedded ? t("launcher.noPathRequired") : "/models/draft.gguf"}
-                        disabled={launchConfig.mtp_embedded} />
+                      <div className="flex gap-2">
+                        <input className={inputClasses}
+                          value={launchConfig.mtp_draft_model || ""}
+                          onChange={(e) => updateConfig({ mtp_draft_model: e.target.value })}
+                          placeholder={launchConfig.mtp_embedded ? t("launcher.noPathRequired") : "/models/draft.gguf"}
+                          disabled={launchConfig.mtp_embedded} />
+                        {!launchConfig.mtp_embedded && (
+                          <BrowseButton label={t("launcher.browseGguf")} onBrowse={async () => {
+                            const p = await pickFile(GGUF_FILTERS);
+                            if (p) updateConfig({ mtp_draft_model: p });
+                          }} />
+                        )}
+                      </div>
                     </Field>
                       <Field label="n_draft" hint={t("launcher.nDraftHint")} flagHelp={probeHelp("--spec-draft-n-max")}>
                       <input type="number" className={inputClasses} value={launchConfig.n_draft} onChange={(e) => updateConfig({ n_draft: Number(e.target.value) })} />
@@ -2099,13 +2119,29 @@ export default function Launcher() {
                           : undefined
                     }
                     flagHelp={probeHelp("--mmproj")}>
-                    <input className={inputClasses}
-                      disabled={!toggles.mmproj || isToggleUnavailable("mmproj")}
-                      value={launchConfig.mmproj_path || (selectedModel.has_vision_embedded ? "" : (selectedModel.mmproj_path ?? ""))}
-                      onChange={(e) => updateConfig({ mmproj_path: e.target.value })}
-                      placeholder={selectedModel.has_vision_embedded ? t("launcher.noPathRequired") : "/models/mmproj.gguf"} />
+                    <div className="flex gap-2">
+                      <input className={inputClasses}
+                        disabled={!toggles.mmproj || isToggleUnavailable("mmproj")}
+                        value={launchConfig.mmproj_path || (selectedModel.has_vision_embedded ? "" : (selectedModel.mmproj_path ?? ""))}
+                        onChange={(e) => updateConfig({ mmproj_path: e.target.value })}
+                        placeholder={selectedModel.has_vision_embedded ? t("launcher.noPathRequired") : "/models/mmproj.gguf"} />
+                      {toggles.mmproj && !isToggleUnavailable("mmproj") && (
+                        <BrowseButton label={t("launcher.browseGguf")} onBrowse={async () => {
+                          const p = await pickFile(GGUF_FILTERS);
+                          if (p) updateConfig({ mmproj_path: p });
+                        }} />
+                      )}
+                    </div>
                   </Field>
-                  <Field label="LoRA (path)" flagHelp={probeHelp("--lora")}><input className={inputClasses} value={launchConfig.lora_path || ""} onChange={(e) => updateConfig({ lora_path: e.target.value })} placeholder="/models/lora.gguf" /></Field>
+                  <Field label="LoRA (path)" flagHelp={probeHelp("--lora")}>
+                    <div className="flex gap-2">
+                      <input className={inputClasses} value={launchConfig.lora_path || ""} onChange={(e) => updateConfig({ lora_path: e.target.value })} placeholder="/models/lora.gguf" />
+                      <BrowseButton label={t("launcher.browseGguf")} onBrowse={async () => {
+                        const p = await pickFile(GGUF_FILTERS);
+                        if (p) updateConfig({ lora_path: p });
+                      }} />
+                    </div>
+                  </Field>
                   <Field label={`lora_scale: ${Number(launchConfig.lora_scale).toFixed(2)}`} flagHelp={probeHelp("--lora-scale")}><input type="range" min={0} max={2} step={0.05} value={launchConfig.lora_scale} onChange={(e) => updateConfig({ lora_scale: Number(e.target.value) })} className="w-full accent-glyvex-accent" /></Field>
                 </Panel>
 

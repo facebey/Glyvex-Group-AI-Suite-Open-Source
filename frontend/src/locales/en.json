@@ -41,7 +41,7 @@
     "themeCycle": "Theme: {{current}} — click to switch to {{next}}"
   },
   "onboarding": {
-    "title": "Welcome to Glyvex AI Suite",
+    "title": "Welcome to GlyvexAI Suite",
     "subtitle": "Follow these 3 steps to get your first model running.",
     "step1": "Configure backend paths",
     "step2": "Add a model directory and scan",
@@ -68,7 +68,7 @@
     "openSource": "Open source — Apache 2.0"
   },
   "about": {
-    "title": "About Glyvex AI Suite",
+    "title": "About GlyvexAI Suite",
     "tagline": "Local AI, no cloud",
     "webSite": "Website",
     "group": "Glyvex Group",
@@ -565,6 +565,8 @@
     "mode": "Mode",
     "gpuLayersLabel": "n_gpu_layers: {{value}}",
     "gpuLayersAll": "all",
+    "nCpuMoeLabel": "n_cpu_moe (MoE layers on CPU)",
+    "nCpuMoeHint": "For MoE models: moves expert layers to system RAM when they don't fit in VRAM. 0 = all on GPU.",
     "toggleUnavailable": "Not available in this build ({{build}}): {{flag}} is not in the binary --help",
     "errLoadInventory": "Could not load the model inventory or the templates.",
     "errReloadTemplates": "Could not reload the template list.",
@@ -582,6 +584,7 @@
     "mtpLayers_other": " ({{count}} nextn layers)",
     "mtpEmbeddedHint": "The model already ships the MTP head: it does not need a separate file.",
     "noPathRequired": "No path required",
+    "browseGguf": "Browse GGUF file…",
     "nDraftHint": "Tokens to speculate per step (--spec-draft-n-max).",
     "nDraftMinHint": "Minimum draft tokens per step (--spec-draft-n-min). Empty = build default.",
     "pDraftMinHint": "Minimum probability to accept draft tokens (--spec-draft-p-min). Build default: 0.00 (no floor). 0.75 stops dubious speculation early.",
@@ -731,17 +734,21 @@
       "liveChartCtxPct": "Last 5 min · context (%)",
       "liveChartCtxPeak": "Last 5 min · context peak",
       "liveChartQueue": "Last 5 min · queue",
+      "liveChartCache": "Last 5 min · prompt cache / MTP (%)",
       "liveWaiting": "Waiting for live data…",
       "histChartSpeed": "Speed (t/s)",
       "histChartCtxPct": "Context usage (%)",
       "histChartCtxPeak": "Context peak (tokens)",
       "histChartQueue": "Request queue",
+      "histChartCache": "Prompt cache / MTP (%)",
       "legend": {
         "generation": "Generation",
         "contextUsed": "Context used",
         "contextPeak": "Context peak",
         "inProgress": "In progress",
-        "waiting": "Waiting"
+        "waiting": "Waiting",
+        "cacheHit": "Prompt cache",
+        "mtpAccept": "MTP accepted"
       }
     },
     "processes": {
@@ -928,7 +935,9 @@
     "backends": {
       "section": "Backends",
       "binaryPath": "{{name}} — binary path"
-    }
+    },
+    "browseFile": "Browse file…",
+    "browseDirs": "Browse folder(s)…"
   },
   "reports": {
     "backToHistory": "Back to history",

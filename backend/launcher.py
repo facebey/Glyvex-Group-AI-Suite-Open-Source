@@ -215,6 +215,10 @@ class LaunchConfig(BaseModel):
     # se emite --ubatch-size -> default de la build.
     n_ubatch: int | None = 512
     n_gpu_layers: int = -1
+    # MoE: capas de expertos que se quedan en la CPU (--n-cpu-moe). 0 = todo
+    # en GPU (no se emite el flag). Para modelos MoE cuyos expertos no caben
+    # en VRAM: la atención/KV sigue en GPU y los expertos corren en RAM.
+    n_cpu_moe: int = Field(default=0, ge=0)
     gpu_mode: GpuMode = "gpu_only"
     cache_type_k: CacheType | None = "q4_0"
     cache_type_v: CacheType | None = "q4_0"
@@ -794,6 +798,8 @@ def build_llama_server_command(
     if cfg.n_ubatch is not None:
         cmd += ["--ubatch-size", str(cfg.n_ubatch)]
     cmd += ["--n-gpu-layers", str(cfg.n_gpu_layers)]
+    if cfg.n_cpu_moe > 0:
+        cmd += ["--n-cpu-moe", str(cfg.n_cpu_moe)]
     if cfg.cache_type_k is not None:
         cmd += ["--cache-type-k", cfg.cache_type_k]
     if cfg.cache_type_v is not None:
@@ -1316,7 +1322,8 @@ class ModelProcessManager:
                 info.build or "desconocida", binary_path,
             )
         elif cfg.backend == "ollama":
-            binary_path = config.get("backends.ollama.binary_path") or "/usr/bin/ollama"
+            # Vacío = "ollama" en el PATH del SO (create_subprocess_exec lo resuelve).
+            binary_path = config.get("backends.ollama.binary_path") or "ollama"
             cmd = build_ollama_command(binary_path, model.name)
         else:
             raise HTTPException(status_code=400, detail=f"Backend desconocido: {cfg.backend}")
@@ -1438,7 +1445,7 @@ async def preview_command(cfg: LaunchConfig) -> CommandPreview:
         )
 
     if cfg.backend == "ollama":
-        binary_path = config.get("backends.ollama.binary_path") or "/usr/bin/ollama"
+        binary_path = config.get("backends.ollama.binary_path") or "ollama"
         return CommandPreview(
             command=mask_command(build_ollama_command(binary_path, model.name)),
             dropped=[],

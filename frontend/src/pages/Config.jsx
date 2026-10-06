@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, Save, RotateCcw, ScanSearch } from "lucide-react";
 import Section from "../components/ui/Section.jsx";
 import Field from "../components/ui/Field.jsx";
+import BrowseButton from "../components/ui/BrowseButton.jsx";
+import { pickFile, pickDirectories } from "../lib/pickPath.js";
 import ChatSettings from "../components/ChatSettings.jsx";
 import RuntimeSettings from "../components/RuntimeSettings.jsx";
 import MetricsDisplaySettings from "../components/MetricsDisplaySettings.jsx";
@@ -34,7 +36,7 @@ const EMPTY_CONFIG = {
   hardware: { gpu_model: "", vram_gb: 0, ram_gb: 0, cpu_model: "", cpu_cores: 0 },
   backends: {
     llama_server: { binary_path: "", default_port: 8080, enabled: true },
-    ollama: { binary_path: "/usr/bin/ollama", default_port: 11434, enabled: false },
+    ollama: { binary_path: "", default_port: 11434, enabled: false },
     lm_studio: { binary_path: "", default_port: 1234, enabled: false },
     unsloth: { python_env: "", enabled: false },
   },
@@ -307,28 +309,46 @@ export default function Config() {
 
       <Section title={t("config.backends.section")}>
         <Field label={t("config.backends.binaryPath", { name: "llama-server" })}>
-          <input
-            className={inputClasses}
-            value={config.backends.llama_server.binary_path}
-            onChange={(e) => updateBackend("llama_server", { binary_path: e.target.value })}
-            placeholder={PATH_EXAMPLES.llama_server}
-          />
+          <div className="flex gap-2">
+            <input
+              className={inputClasses}
+              value={config.backends.llama_server.binary_path}
+              onChange={(e) => updateBackend("llama_server", { binary_path: e.target.value })}
+              placeholder={PATH_EXAMPLES.llama_server}
+            />
+            <BrowseButton label={t("config.browseFile")} onBrowse={async () => {
+              const p = await pickFile();
+              if (p) updateBackend("llama_server", { binary_path: p });
+            }} />
+          </div>
         </Field>
         <Field label={t("config.backends.binaryPath", { name: "Ollama" })}>
-          <input
-            className={inputClasses}
-            value={config.backends.ollama.binary_path}
-            onChange={(e) => updateBackend("ollama", { binary_path: e.target.value })}
-            placeholder={PATH_EXAMPLES.ollama}
-          />
+          <div className="flex gap-2">
+            <input
+              className={inputClasses}
+              value={config.backends.ollama.binary_path}
+              onChange={(e) => updateBackend("ollama", { binary_path: e.target.value })}
+              placeholder={PATH_EXAMPLES.ollama}
+            />
+            <BrowseButton label={t("config.browseFile")} onBrowse={async () => {
+              const p = await pickFile();
+              if (p) updateBackend("ollama", { binary_path: p });
+            }} />
+          </div>
         </Field>
         <Field label={t("config.backends.binaryPath", { name: "LM Studio" })}>
-          <input
-            className={inputClasses}
-            value={config.backends.lm_studio.binary_path}
-            onChange={(e) => updateBackend("lm_studio", { binary_path: e.target.value })}
-            placeholder={PATH_EXAMPLES.lm_studio}
-          />
+          <div className="flex gap-2">
+            <input
+              className={inputClasses}
+              value={config.backends.lm_studio.binary_path}
+              onChange={(e) => updateBackend("lm_studio", { binary_path: e.target.value })}
+              placeholder={PATH_EXAMPLES.lm_studio}
+            />
+            <BrowseButton label={t("config.browseFile")} onBrowse={async () => {
+              const p = await pickFile();
+              if (p) updateBackend("lm_studio", { binary_path: p });
+            }} />
+          </div>
         </Field>
       </Section>
 
@@ -351,6 +371,15 @@ export default function Config() {
             <Plus size={16} />
             {t("config.modelDirs.add")}
           </button>
+          <BrowseButton label={t("config.browseDirs")} onBrowse={async () => {
+            const dirs = await pickDirectories();
+            if (!dirs) return;
+            const list = Array.isArray(dirs) ? dirs : [dirs];
+            setConfig((prev) => ({
+              ...prev,
+              model_dirs: [...prev.model_dirs, ...list.filter((d) => !prev.model_dirs.includes(d))],
+            }));
+          }} />
         </div>
         {config.model_dirs.length === 0 ? (
           <p className="text-sm text-glyvex-muted">{t("config.modelDirs.empty")}</p>

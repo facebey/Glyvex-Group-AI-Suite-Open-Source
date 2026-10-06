@@ -37,9 +37,10 @@ class BackendsConfig(BaseModel):
     llama_server: BackendConfig = Field(
         default_factory=lambda: BackendConfig(default_port=8080, enabled=True)
     )
+    # binary_path vacío = resolver "ollama" contra el PATH del SO.
     ollama: BackendConfig = Field(
         default_factory=lambda: BackendConfig(
-            binary_path="/usr/bin/ollama", default_port=11434, enabled=False
+            binary_path="", default_port=11434, enabled=False
         )
     )
     lm_studio: BackendConfig = Field(
@@ -309,6 +310,10 @@ class Config:
         # Merge sobre los defaults para tolerar config.json parcial o de una
         # versión anterior del esquema.
         self._data = _deep_merge(self.defaults(), loaded)
+        # Migración: el default viejo de Ollama era una ruta fija de Linux;
+        # vacío significa "resolver contra el PATH" (Windows/Mac/Linux).
+        if self.get("backends.ollama.binary_path") == "/usr/bin/ollama":
+            self.set("backends.ollama.binary_path", "")
         return self._data
 
     async def save(self) -> None:

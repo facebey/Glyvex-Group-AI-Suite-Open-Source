@@ -7,6 +7,26 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.7.7-beta] — 2026-10-05
+
+### Added
+- **Monitor: cumulative cache-hit and MTP accept rate charts** (B5): two new
+  persisted metrics (`llm.cache_hit_pct_total`, `llm.spec_accept_pct_total`)
+  computed from the llama-server `/metrics` counters, shown as a fourth chart.
+- **Launcher: `--n-cpu-moe` parameter** (F2): offloads MoE experts to CPU
+  through llama-server's `--n-cpu-moe`; the binary probe filters it out on
+  older builds that do not know the flag.
+- **Native Browse buttons** (PUB-3): a Tauri dialog file/folder picker for the
+  backend binary paths, model directories and GGUF/draft/mmproj/LORA files;
+  in browser mode it falls back to manual input.
+
+### Changed
+- **Display name unified to "GlyvexAI Suite"** (no space) in the window title,
+  onboarding, About dialog, installer and Start Menu (folder "GlyvexAI"); the
+  executable is now `glyvexai.exe`.
+- **Ollama no longer pre-fills `/usr/bin/ollama`** (PUB-4): the default is now
+  empty on Windows and the launcher resolves `ollama` from PATH.
+
 ## [0.7.6-beta] — 2026-10-05
 
 ### Changed

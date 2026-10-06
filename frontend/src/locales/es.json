@@ -41,7 +41,7 @@
     "themeCycle": "Tema: {{current}} — clic para cambiar a {{next}}"
   },
   "onboarding": {
-    "title": "Bienvenido a Glyvex AI Suite",
+    "title": "Bienvenido a GlyvexAI Suite",
     "subtitle": "Seguí estos 3 pasos para tener tu primer modelo corriendo.",
     "step1": "Configurar paths de backends",
     "step2": "Agregar directorio de modelos y escanear",
@@ -68,7 +68,7 @@
     "openSource": "Código abierto — Apache 2.0"
   },
   "about": {
-    "title": "Acerca de Glyvex AI Suite",
+    "title": "Acerca de GlyvexAI Suite",
     "tagline": "IA local, sin nube",
     "webSite": "Sitio web",
     "group": "Glyvex Group",
@@ -565,6 +565,8 @@
     "mode": "Modo",
     "gpuLayersLabel": "n_gpu_layers: {{value}}",
     "gpuLayersAll": "todas",
+    "nCpuMoeLabel": "n_cpu_moe (capas MoE en CPU)",
+    "nCpuMoeHint": "Para modelos MoE: mueve las capas de expertos a la RAM si no caben en VRAM. 0 = todo en GPU.",
     "toggleUnavailable": "No disponible en esta build ({{build}}): {{flag}} no está en el --help del binario",
     "errLoadInventory": "No se pudo cargar el inventario de modelos o los templates.",
     "errReloadTemplates": "No se pudo recargar la lista de templates.",
@@ -582,6 +584,7 @@
     "mtpLayers_other": " ({{count}} capas nextn)",
     "mtpEmbeddedHint": "El modelo ya trae la cabeza MTP: no necesita un archivo aparte.",
     "noPathRequired": "No requiere path",
+    "browseGguf": "Elegir archivo GGUF…",
     "nDraftHint": "Tokens a especular por paso (--spec-draft-n-max).",
     "nDraftMinHint": "Tokens draft mínimos por paso (--spec-draft-n-min). Vacío = default de la build.",
     "pDraftMinHint": "Probabilidad mínima para aceptar tokens del draft (--spec-draft-p-min). Default de la build: 0.00 (sin piso). 0.75 frena temprano la especulación dudosa.",
@@ -731,17 +734,21 @@
       "liveChartCtxPct": "Últimos 5 min · contexto (%)",
       "liveChartCtxPeak": "Últimos 5 min · pico de contexto",
       "liveChartQueue": "Últimos 5 min · cola",
+      "liveChartCache": "Últimos 5 min · caché / MTP (%)",
       "liveWaiting": "Esperando datos en vivo…",
       "histChartSpeed": "Velocidad (t/s)",
       "histChartCtxPct": "Uso de contexto (%)",
       "histChartCtxPeak": "Pico de contexto (tokens)",
       "histChartQueue": "Cola de requests",
+      "histChartCache": "Caché de prompt / MTP (%)",
       "legend": {
         "generation": "Generación",
         "contextUsed": "Contexto usado",
         "contextPeak": "Pico de contexto",
         "inProgress": "En curso",
-        "waiting": "En espera"
+        "waiting": "En espera",
+        "cacheHit": "Caché de prompt",
+        "mtpAccept": "MTP aceptados"
       }
     },
     "processes": {
@@ -928,7 +935,9 @@
     "backends": {
       "section": "Backends",
       "binaryPath": "{{name}} — ruta del binario"
-    }
+    },
+    "browseFile": "Elegir archivo…",
+    "browseDirs": "Elegir carpeta(s)…"
   },
   "reports": {
     "backToHistory": "Volver al historial",

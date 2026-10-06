@@ -92,6 +92,8 @@ PERSISTED_UNITS: dict[str, str] = {
     "llm.requests_deferred": "",
     "llm.cache_hit_pct": "%",
     "llm.spec_accept_pct": "%",
+    "llm.cache_hit_pct_total": "%",
+    "llm.spec_accept_pct_total": "%",
 }
 
 
@@ -383,6 +385,8 @@ def flatten_llm_snapshot(snap: LlmMetricsSnapshot) -> dict[str, float]:
     put("llm.requests_deferred", snap.requests_deferred)
     put("llm.cache_hit_pct", snap.cache_hit_pct)
     put("llm.spec_accept_pct", snap.spec_accept_pct)
+    put("llm.cache_hit_pct_total", snap.cache_hit_pct_total)
+    put("llm.spec_accept_pct_total", snap.spec_accept_pct_total)
     return out
 
 

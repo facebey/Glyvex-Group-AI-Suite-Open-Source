@@ -7,7 +7,7 @@ el mínimo; el [README](../README.md) trae el detalle completo (multi-instancia,
 variables de entorno, seguridad, release).
 
 > **¿Solo querés usarla en Windows?** No hace falta nada de esto: bajá el
-> instalador `Glyvex AI Suite_<versión>_x64-setup.exe` desde
+> instalador `GlyvexAI Suite_<versión>_x64-setup.exe` desde
 > [Releases → latest](https://github.com/facebey/Glyvex-Group-AI-Suite-Open-Source/releases/latest),
 > ejecutalo y seguí el asistente. Si Windows SmartScreen avisa, es porque el
 > instalador no está firmado: **Más información → Ejecutar de todas formas**.

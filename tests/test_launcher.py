@@ -24,6 +24,7 @@ def test_build_command_all_params():
         n_batch=1024,
         n_ubatch=512,
         n_gpu_layers=-1,
+        n_cpu_moe=8,
         gpu_mode="gpu_only",
         cache_type_k="q8_0",
         cache_type_v="q8_0",
@@ -49,6 +50,7 @@ def test_build_command_all_params():
     assert "--model" in cmd and cmd[cmd.index("--model") + 1] == "/models/model.gguf"
     assert "--ctx-size" in cmd and cmd[cmd.index("--ctx-size") + 1] == "32768"
     assert "--flash-attn" in cmd
+    assert "--n-cpu-moe" in cmd and cmd[cmd.index("--n-cpu-moe") + 1] == "8"
     # use_mlock/use_mmap ya no existen: se unifican en --load-mode (b11146).
     assert "--load-mode" in cmd and cmd[cmd.index("--load-mode") + 1] == "mlock"
     assert "--spec-type" in cmd and cmd[cmd.index("--spec-type") + 1] == "draft-mtp"
@@ -508,6 +510,7 @@ FRONTEND_LAUNCH_PAYLOAD = {
     "n_batch": 2048,
     "n_ubatch": 512,
     "n_gpu_layers": -1,
+    "n_cpu_moe": 0,
     "gpu_mode": "gpu_only",
     "cache_type_k": "q4_0",
     "cache_type_v": "q4_0",

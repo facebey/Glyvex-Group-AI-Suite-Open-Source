@@ -54,6 +54,7 @@ const RAM_LEGEND = [{ key: "ram.pct", name: "RAM", color: "var(--color-glyvex-ch
 const LLM_KEYS = [
   "llm.tg_tps", "llm.throughput_tps", "llm.ctx_pct", "llm.ctx_peak",
   "llm.requests_processing", "llm.requests_deferred",
+  "llm.cache_hit_pct_total", "llm.spec_accept_pct_total",
 ];
 const LLM_SPEED_LEGEND = [
   { key: "llm.tg_tps", nameKey: "monitor.llm.legend.generation", color: "var(--color-glyvex-chart-4)" },
@@ -64,6 +65,12 @@ const LLM_CTX_PEAK_LEGEND = [{ key: "llm.ctx_peak", nameKey: "monitor.llm.legend
 const LLM_QUEUE_LEGEND = [
   { key: "llm.requests_processing", nameKey: "monitor.llm.legend.inProgress", color: "var(--color-glyvex-chart-1)" },
   { key: "llm.requests_deferred", nameKey: "monitor.llm.legend.waiting", color: "var(--color-glyvex-chart-3)" },
+];
+// Totales desde el arranque (no tasas de intervalo): la línea sube hasta
+// estabilizarse, lo que muestra cuánto se aprovecha la caché / la especulación.
+const LLM_CACHE_LEGEND = [
+  { key: "llm.cache_hit_pct_total", nameKey: "monitor.llm.legend.cacheHit", color: "var(--color-glyvex-chart-2)" },
+  { key: "llm.spec_accept_pct_total", nameKey: "monitor.llm.legend.mtpAccept", color: "var(--color-glyvex-chart-3)" },
 ];
 
 function translateLegend(legend, t) {
@@ -158,6 +165,8 @@ function snapValues(snap) {
     "llm.ctx_peak": snap.ctx_peak,
     "llm.requests_processing": snap.requests_processing,
     "llm.requests_deferred": snap.requests_deferred,
+    "llm.cache_hit_pct_total": snap.cache_hit_pct_total,
+    "llm.spec_accept_pct_total": snap.spec_accept_pct_total,
   };
 }
 
@@ -586,6 +595,7 @@ export default function Monitor() {
   const llmCtxPctLegend = useMemo(() => translateLegend(LLM_CTX_PCT_LEGEND, t), [t]);
   const llmCtxPeakLegend = useMemo(() => translateLegend(LLM_CTX_PEAK_LEGEND, t), [t]);
   const llmQueueLegend = useMemo(() => translateLegend(LLM_QUEUE_LEGEND, t), [t]);
+  const llmCacheLegend = useMemo(() => translateLegend(LLM_CACHE_LEGEND, t), [t]);
 
   // Últimos 5 minutos, medidos desde el último dato (no desde el reloj del navegador).
   const llmLiveWindow = useMemo(() => {
@@ -1157,7 +1167,7 @@ export default function Monitor() {
             )}
 
             {llmSelectedOption?.live && show("monitor.llm.live_charts") && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 <div>
                   <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.liveChartSpeed")}</p>
                   <HistoryChart
@@ -1183,6 +1193,15 @@ export default function Monitor() {
                   <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.liveChartQueue")}</p>
                   <HistoryChart
                     series={llmLiveWindow} legend={llmQueueLegend}
+                    rangeSeconds={LLM_LIVE_WINDOW_S} height={130} connectGaps={false}
+                    emptyText={t("monitor.llm.liveWaiting")}
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.liveChartCache")}</p>
+                  <HistoryChart
+                    series={llmLiveWindow} legend={llmCacheLegend}
+                    unit="%" domain={[0, 100]}
                     rangeSeconds={LLM_LIVE_WINDOW_S} height={130} connectGaps={false}
                     emptyText={t("monitor.llm.liveWaiting")}
                   />
@@ -1217,6 +1236,13 @@ export default function Monitor() {
               <div>
                 <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.histChartQueue")}</p>
                 <HistoryChart series={llmSeriesWithTail} legend={llmQueueLegend} rangeSeconds={rangeSeconds} height={140} />
+              </div>
+              <div>
+                <p className="text-xs text-glyvex-muted mb-1">{t("monitor.llm.histChartCache")}</p>
+                <HistoryChart
+                  series={llmSeriesWithTail} legend={llmCacheLegend}
+                  unit="%" domain={[0, 100]} rangeSeconds={rangeSeconds} height={140}
+                />
               </div>
             </div>
             </>)}
