@@ -22,10 +22,25 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ### Changed
 - **Display name unified to "GlyvexAI Suite"** (no space) in the window title,
-  onboarding, About dialog, installer and Start Menu (folder "GlyvexAI"); the
-  executable is now `glyvexai.exe`.
+  onboarding and About dialog; the executable is now `glyvexai.exe`. The NSIS
+  installer identity stays `"Glyvex AI Suite"` (with space, folder
+  "Glyvex-AI-Suite") so in-place upgrades from 0.7.6 keep working — see Fixed.
 - **Ollama no longer pre-fills `/usr/bin/ollama`** (PUB-4): the default is now
   empty on Windows and the launcher resolves `ollama` from PATH.
+
+### Fixed (re-release 2026-10-06, same version — assets replaced)
+- **NSIS in-place upgrade was broken by the name change**: the initial
+  0.7.7-beta build renamed the installer identity ("Glyvex AI Suite" →
+  "GlyvexAI Suite"), which moves the NSIS default install dir and the
+  uninstall registry key, so the passive updater could not find the 0.7.6
+  install and placed 0.7.7 side-by-side. `productName` reverted to
+  "Glyvex AI Suite" and `startMenuFolder` to "Glyvex-AI-Suite"; the
+  "GlyvexAI Suite" branding remains in the window title and in-app UI.
+- **Stale-chunk crash after an update**: a router `errorElement`
+  (`ChunkReloadError`) now detects "Failed to fetch dynamically imported
+  module" (hashed chunks 404 when a stale instance serves the previous
+  build's assets) and does a one-time guarded hard reload instead of showing
+  a broken page.
 
 ## [0.7.6-beta] — 2026-10-05
 

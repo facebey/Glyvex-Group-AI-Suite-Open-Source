@@ -989,5 +989,12 @@
   "statusWidget": {
     "noModel": "No model launched",
     "noModelHint": "No model launched from the suite. Servers started outside the app are not tracked here, even if the chat is connected to them."
+  },
+  "chunkError": {
+    "title": "Updating the application…",
+    "hint": "The application was updated while you were using it. Reloading with the new version.",
+    "manual": "The application was updated while you were using it",
+    "manualHint": "Reload to continue with the new version.",
+    "reload": "Reload"
   }
 }

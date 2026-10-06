@@ -302,6 +302,73 @@ function PageLoading() {
   );
 }
 
+// Chunk stale: un auto-update (o reinstalación) cambia los assets en disco
+// mientras la webview sigue con el documento viejo; Vite re-hace el hash de
+// los nombres de chunk en cada build, así que el import dinámico de una
+// página falla con "Failed to fetch dynamically imported module". Un reload
+// completo carga el index.html nuevo con los hashes vigentes. Guardia de
+// 30 s: si vuelve a fallar de inmediato, los assets están realmente rotos —
+// se detiene el loop y se ofrece recarga manual.
+const CHUNK_RELOAD_GUARD_MS = 30000;
+const CHUNK_RELOAD_KEY = "gx-stale-chunk-reload";
+
+function isStaleChunkError(error) {
+  return /dynamically imported module|loading chunk|unable to preload/i.test(
+    String(error?.message || error || ""),
+  );
+}
+
+function ChunkReloadError({ error }) {
+  const { t } = useTranslation();
+  const [manual, setManual] = useState(false);
+  useEffect(() => {
+    if (!isStaleChunkError(error)) return;
+    let last = 0;
+    try {
+      last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) || 0);
+    } catch {
+      /* sin sessionStorage: se intenta el reload de todos modos */
+    }
+    if (Date.now() - last < CHUNK_RELOAD_GUARD_MS) {
+      setManual(true);
+      return;
+    }
+    try {
+      sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+    } catch {
+      /* guard no disponible: el reload sigue siendo idempotente */
+    }
+    const timer = setTimeout(() => window.location.reload(), 1500);
+    return () => clearTimeout(timer);
+  }, [error]);
+  return (
+    <div className="flex items-center justify-center py-24">
+      <div className="max-w-md w-full bg-glyvex-card border border-glyvex-border rounded-lg p-6 text-center space-y-3">
+        {manual ? (
+          <>
+            <AlertTriangle size={28} className="mx-auto text-amber-400" />
+            <h2 className="text-lg font-semibold">{t("chunkError.manual")}</h2>
+            <p className="text-sm text-glyvex-muted">{t("chunkError.manualHint")}</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium border border-glyvex-accent/40 bg-glyvex-accent/15 text-glyvex-accent hover:bg-glyvex-accent/25"
+            >
+              {t("chunkError.reload")}
+            </button>
+          </>
+        ) : (
+          <>
+            <Loader2 size={28} className="mx-auto animate-spin text-glyvex-accent" />
+            <h2 className="text-lg font-semibold">{t("chunkError.title")}</h2>
+            <p className="text-sm text-glyvex-muted">{t("chunkError.hint")}</p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Layout() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
@@ -475,16 +542,19 @@ function AutoProvisionGuard() {
   return null;
 }
 
+// El errorElement va en cada ruta hija (no solo en la raíz): así el Layout —
+// y con él el tema aplicado al document — sigue montado detrás de la
+// pantalla de error.
 const router = createBrowserRouter([
-  { path: "/", element: <Layout />,
+  { path: "/", element: <Layout />, errorElement: <ChunkReloadError />,
     children: [
-      { index: true, element: <Chat /> },
-      { path: "launcher", element: <Launcher /> },
-      { path: "benchmark", element: <Benchmark /> },
-      { path: "monitor", element: <Monitor /> },
-      { path: "reports", element: <Reports /> },
-      { path: "config", element: <Config /> },
-      { path: "provision", element: <Provision /> },
+      { index: true, element: <Chat />, errorElement: <ChunkReloadError /> },
+      { path: "launcher", element: <Launcher />, errorElement: <ChunkReloadError /> },
+      { path: "benchmark", element: <Benchmark />, errorElement: <ChunkReloadError /> },
+      { path: "monitor", element: <Monitor />, errorElement: <ChunkReloadError /> },
+      { path: "reports", element: <Reports />, errorElement: <ChunkReloadError /> },
+      { path: "config", element: <Config />, errorElement: <ChunkReloadError /> },
+      { path: "provision", element: <Provision />, errorElement: <ChunkReloadError /> },
     ],
   },
 ]);

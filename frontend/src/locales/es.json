@@ -989,5 +989,12 @@
   "statusWidget": {
     "noModel": "Sin modelo lanzado",
     "noModelHint": "Ningún modelo lanzado desde la suite. Los servidores arrancados por fuera de la app no se muestran acá, aunque el chat esté conectado a ellos."
+  },
+  "chunkError": {
+    "title": "Actualizando la aplicación…",
+    "hint": "La aplicación se actualizó mientras la estabas usando. Recargando con la nueva versión.",
+    "manual": "La aplicación se actualizó mientras la usabas",
+    "manualHint": "Recargá para continuar con la nueva versión.",
+    "reload": "Recargar"
   }
 }
