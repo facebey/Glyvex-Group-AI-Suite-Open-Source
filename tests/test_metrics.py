@@ -182,9 +182,14 @@ class _FakePynvml:
     soportado (240–350 W, por defecto 350 W) y un interruptor para hacer fallar
     el set (permisos, no soportado, etc.)."""
 
-    def __init__(self, fail_set: str | None = None):
+    def __init__(self, fail_set: str | None = None, fail_fan_set: str | None = None,
+                 ignore_fan_set: bool = False, fan_speed: int = 42):
         self.fail_set = fail_set
+        self.fail_fan_set = fail_fan_set
+        self.ignore_fan_set = ignore_fan_set
+        self.fan_speed = fan_speed
         self.last_set = None
+        self.last_fan_set = None
         self.shutdowns = 0
 
     def nvmlShutdown(self):
@@ -213,11 +218,43 @@ class _FakePynvml:
             raise Exception(self.fail_set)
         self.last_set = limit_mw
 
+    def nvmlDeviceGetFanSpeed(self, handle):
+        return self.fan_speed
+
+    def nvmlDeviceSetFanSpeed_v2(self, handle, fan, percent):
+        if self.fail_fan_set:
+            raise Exception(self.fail_fan_set)
+        self.last_fan_set = percent
+        # Con `ignore_fan_set` simula el driver que "acepta" la escritura y la
+        # ignora en silencio (GeForce con VBIOS de consumo): el read-back
+        # del collector debe detectar que el valor real no cambió.
+        if not self.ignore_fan_set:
+            self.fan_speed = percent
+
 
 def _mock_nvml(monkeypatch, fake: _FakePynvml) -> None:
     monkeypatch.setattr(metrics_module, "PYNVML_AVAILABLE", True)
     monkeypatch.setattr(metrics_module, "pynvml", fake)
     monkeypatch.setattr(metrics_module.manager.collector, "_nvml_ready", True)
+
+
+class _FakeNvApi:
+    """Sustituye el adapter NvAPI Direct sin cargar nvapi64.dll: `available`
+    decide si el collector toma la vía Windows o cae a NVML."""
+
+    def __init__(self, available: bool = False,
+                 set_result: tuple[bool, str | None] = (False, "nvapi_no_disponible")):
+        self.available = available
+        self.set_result = set_result
+        self.calls = []
+
+    def set_manual(self, index, percent, tolerance=2, readback_s=1.0):
+        self.calls.append((index, percent, tolerance, readback_s))
+        return self.set_result
+
+
+def _mock_nvapi(monkeypatch, fake: _FakeNvApi) -> None:
+    monkeypatch.setattr(metrics_module.manager.collector, "_nvapi_fan", fake)
 
 
 async def test_power_limit_get(client, monkeypatch):
@@ -236,6 +273,21 @@ async def test_power_limit_get(client, monkeypatch):
     assert gpu["min_w"] == 240.0
     assert gpu["max_w"] == 350.0
     assert gpu["default_w"] == 350.0
+
+
+async def test_power_limit_get_privilege_hint(client, monkeypatch):
+    # La clave depende del SO ("admin" en Windows, "root" en POSIX); el
+    # frontend la traduce a su texto i18n.
+    _mock_nvml(monkeypatch, _FakePynvml())
+    monkeypatch.setattr(metrics_module.platform, "system", lambda: "Windows")
+    res = await client.get("/api/metrics/gpu/power-limit")
+    assert res.json()["privilege_hint"] == "admin"
+
+    monkeypatch.setattr(metrics_module.platform, "system", lambda: "Linux")
+    res = await client.get("/api/metrics/gpu/power-limit")
+    data = res.json()
+    assert data["privilege_hint"] == "root"
+    assert data["privileged"] is False
 
 
 async def test_power_limit_set(client, monkeypatch):
@@ -288,6 +340,130 @@ async def test_power_limit_sin_nvidia(client, monkeypatch):
     assert data["available"] is False
     assert data["gpus"] is None
     assert data["error"] is not None
+
+
+# --------------------------------------------------------------------------
+# Ventilador: fan_speed_pct en el snapshot, POST /api/metrics/gpu/fan
+# --------------------------------------------------------------------------
+
+
+async def test_fan_speed_en_snapshot(client, monkeypatch):
+    _mock_nvml(monkeypatch, _FakePynvml(fan_speed=55))
+    res = await client.get("/api/metrics/gpu")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["gpu"][0]["fan_speed_pct"] == 55
+
+
+async def test_fan_set_ok(client, monkeypatch):
+    fake = _FakePynvml()
+    _mock_nvml(monkeypatch, fake)
+    _mock_nvapi(monkeypatch, _FakeNvApi())
+    res = await client.post("/api/metrics/gpu/fan", json={"index": 0, "percent": 70})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert data["error"] is None
+    assert data["percent"] == 70
+    assert data["privilege_hint"] in ("admin", "root")
+    assert fake.last_fan_set == 70
+    assert fake.fan_speed == 70  # el read-back confirma el cambio real
+
+
+async def test_fan_set_silent_noop(client, monkeypatch):
+    fake = _FakePynvml(ignore_fan_set=True)
+    _mock_nvml(monkeypatch, fake)
+    _mock_nvapi(monkeypatch, _FakeNvApi())
+    res = await client.post("/api/metrics/gpu/fan", json={"index": 0, "percent": 70})
+    data = res.json()
+    assert data["ok"] is False
+    assert data["error"] == "fan_no_change"
+    assert fake.fan_speed == 42  # el valor real no cambió
+
+
+async def test_fan_set_error(client, monkeypatch):
+    fake = _FakePynvml(fail_fan_set="NVML_ERROR_NOT_SUPPORTED")
+    _mock_nvml(monkeypatch, fake)
+    _mock_nvapi(monkeypatch, _FakeNvApi())
+    res = await client.post("/api/metrics/gpu/fan", json={"index": 0, "percent": 70})
+    data = res.json()
+    assert data["ok"] is False
+    # El backend normaliza el mensaje crudo de NVML a una clave estable.
+    assert data["error"] == "fan_not_supported"
+    assert fake.last_fan_set is None
+
+
+async def test_fan_set_no_permission(client, monkeypatch):
+    fake = _FakePynvml(fail_fan_set="NVML_ERROR_NO_PERMISSION")
+    _mock_nvml(monkeypatch, fake)
+    _mock_nvapi(monkeypatch, _FakeNvApi())
+    res = await client.post("/api/metrics/gpu/fan", json={"index": 0, "percent": 70})
+    data = res.json()
+    assert data["ok"] is False
+    assert data["error"] == "fan_no_privilege"
+    assert data["privilege_hint"] in ("admin", "root")
+
+
+async def test_fan_set_percent_fuera_de_rango(client, monkeypatch):
+    fake = _FakePynvml()
+    _mock_nvml(monkeypatch, fake)
+    _mock_nvapi(monkeypatch, _FakeNvApi())
+    res = await client.post("/api/metrics/gpu/fan", json={"index": 0, "percent": 101})
+    assert res.status_code == 422
+    assert fake.last_fan_set is None
+
+
+# --------------------------------------------------------------------------
+# Ventilador vía NvAPI Direct (Windows): el adapter reemplaza a NVML, que en
+# GeForce rechaza la escritura con NOT_SUPPORTED.
+# --------------------------------------------------------------------------
+
+
+async def test_fan_set_windows_nvapi_ok(client, monkeypatch):
+    fake = _FakePynvml()
+    _mock_nvml(monkeypatch, fake)
+    nv = _FakeNvApi(available=True, set_result=(True, None))
+    _mock_nvapi(monkeypatch, nv)
+    res = await client.post("/api/metrics/gpu/fan", json={"index": 1, "percent": 65})
+    data = res.json()
+    assert data["ok"] is True
+    assert data["error"] is None
+    assert nv.calls == [(1, 65, 2, 1.0)]
+    assert fake.last_fan_set is None  # la vía Windows no toca NVML
+
+
+async def test_fan_set_windows_nvapi_sin_admin(client, monkeypatch):
+    _mock_nvml(monkeypatch, _FakePynvml())
+    nv = _FakeNvApi(available=True, set_result=(False, "fan_no_privilege"))
+    _mock_nvapi(monkeypatch, nv)
+    res = await client.post("/api/metrics/gpu/fan", json={"index": 0, "percent": 50})
+    data = res.json()
+    assert data["ok"] is False
+    assert data["error"] == "fan_no_privilege"
+    # El hint permite que el frontend pida admin/root sin conocer el SO.
+    assert data["privilege_hint"] in ("admin", "root")
+
+
+async def test_fan_set_windows_nvapi_no_cambio(client, monkeypatch):
+    _mock_nvml(monkeypatch, _FakePynvml())
+    nv = _FakeNvApi(available=True, set_result=(False, "fan_no_change"))
+    _mock_nvapi(monkeypatch, nv)
+    res = await client.post("/api/metrics/gpu/fan", json={"index": 0, "percent": 50})
+    data = res.json()
+    assert data["ok"] is False
+    assert data["error"] == "fan_no_change"
+
+
+async def test_fan_set_windows_nvapi_no_soportado(client, monkeypatch):
+    fake = _FakePynvml()
+    _mock_nvml(monkeypatch, fake)
+    nv = _FakeNvApi(available=True, set_result=(False, "fan_not_supported"))
+    _mock_nvapi(monkeypatch, nv)
+    res = await client.post("/api/metrics/gpu/fan", json={"index": 0, "percent": 50})
+    data = res.json()
+    assert data["ok"] is False
+    assert data["error"] == "fan_not_supported"
+    assert fake.last_fan_set is None  # sin fallback a NVML: también fallaría
 
 
 # --------------------------------------------------------------------------

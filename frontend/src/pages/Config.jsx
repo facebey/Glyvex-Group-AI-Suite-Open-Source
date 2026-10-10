@@ -87,9 +87,18 @@ function notifyConfigSaved(data) {
  * lugar leemos el body del fetch como stream y parseamos manualmente los
  * bloques "data: {...}\n\n", que es el mismo formato que EventSource
  * consumiría. `onEvent` se llama por cada evento parseado.
+ *
+ * Se envía la lista de directorios que hay en el panel en este momento
+ * (aun sin guardar): el backend escanea esa lista, así no hace falta
+ * guardar la config antes de escanear.
  */
-async function consumeScanStream(signal, onEvent) {
-  const res = await fetch("/api/models/scan", { method: "POST", signal });
+async function consumeScanStream(modelDirs, signal, onEvent) {
+  const res = await fetch("/api/models/scan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model_dirs: modelDirs }),
+    signal,
+  });
   if (!res.ok || !res.body) {
     throw new Error("scan_failed");
   }
@@ -151,7 +160,7 @@ export default function Config() {
     scanAbortRef.current = controller;
 
     try {
-      await consumeScanStream(controller.signal, (event) => {
+      await consumeScanStream(config.model_dirs || [], controller.signal, (event) => {
         if (event.status === "complete") {
           setScanSummary(event);
         } else {

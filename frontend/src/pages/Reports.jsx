@@ -153,6 +153,7 @@ export default function Reports() {
   const [compareIds, setCompareIds] = useState([]);
   const [viewRun, setViewRun] = useState(null);
   const [compareRuns, setCompareRuns] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
   function loadHistory() {
     setLoading(true);
@@ -171,14 +172,26 @@ export default function Reports() {
 
   async function viewRunDetail(runId) {
     const res = await fetch(`/api/benchmark/history/${runId}`);
-    const run = await res.json();
-    setViewRun(run);
+    if (!res.ok) {
+      setLoadError(t("reports.loadFailed", { status: res.status }));
+      return;
+    }
+    setViewRun(await res.json());
   }
 
   async function doCompare() {
     if (compareIds.length !== 2) return;
-    const [a, b] = await Promise.all(compareIds.map((id) => fetch(`/api/benchmark/history/${id}`).then((r) => r.json())));
-    setCompareRuns([a, b]);
+    try {
+      const [a, b] = await Promise.all(compareIds.map(async (id) => {
+        const res = await fetch(`/api/benchmark/history/${id}`);
+        if (!res.ok) throw new Error(String(res.status));
+        return res.json();
+      }));
+      setLoadError(null);
+      setCompareRuns([a, b]);
+    } catch (err) {
+      setLoadError(t("reports.loadFailed", { status: err.message }));
+    }
   }
 
   async function deleteRun(runId) {
@@ -199,6 +212,9 @@ export default function Reports() {
           <GitCompare size={14} />{t("reports.compareSelected", { n: compareIds.length })}
         </button>
       </div>
+      {loadError && (
+        <p className="text-sm text-red-400">{loadError}</p>
+      )}
       {loading ? (
         <p className="text-sm text-glyvex-bg-muted">{t("reports.loading")}</p>
       ) : history.length === 0 ? (

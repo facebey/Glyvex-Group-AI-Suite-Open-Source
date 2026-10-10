@@ -42,7 +42,7 @@ export default function StatusWidget() {
   }, []);
 
   const runningProcess = state?.active_processes?.find((p) => p.state === "running");
-  const gpu = state?.gpu?.[0] ?? null;
+  const gpus = state?.gpu ?? [];
 
   return (
     <div className="flex items-center gap-4 text-xs">
@@ -58,17 +58,22 @@ export default function StatusWidget() {
         </span>
       </div>
 
-      {gpu && (
-        <div className="flex items-center gap-2">
-          <span className={`flex items-center gap-1 text-sm font-semibold px-2 py-0.5 rounded-md border ${tempBadgeClasses(gpu.temperature_c)}`}>
+      {/* Una entrada por GPU: en sistemas multi-GPU cada tarjeta muestra su
+          propia temp y VRAM (con índice para distinguirlas). */}
+      {gpus.map((g) => (
+        <div key={g.index} className="flex items-center gap-2">
+          {gpus.length > 1 && (
+            <span className="text-glyvex-bg-muted">{t("monitor.gpu.index", { index: g.index })}</span>
+          )}
+          <span className={`flex items-center gap-1 text-sm font-semibold px-2 py-0.5 rounded-md border ${tempBadgeClasses(g.temperature_c)}`}>
             <Thermometer size={14} />
-            {gpu.temperature_c != null ? `${gpu.temperature_c}°C` : "—"}
+            {g.temperature_c != null ? `${g.temperature_c}°C` : "—"}
           </span>
           <span className="text-xs text-glyvex-bg-muted">
-            VRAM {(gpu.vram_used_mb / 1024).toFixed(1)}/{(gpu.vram_total_mb / 1024).toFixed(0)}GB
+            VRAM {(g.vram_used_mb / 1024).toFixed(1)}/{(g.vram_total_mb / 1024).toFixed(0)}GB
           </span>
         </div>
-      )}
+      ))}
     </div>
   );
 }

@@ -7,11 +7,29 @@ import { useDisplay } from "../lib/metricsDisplay.js";
 import { useToast } from "../components/ToastNotification.jsx";
 import CollapsiblePanel from "../components/ui/CollapsiblePanel.jsx";
 
-const GPU_KEYS = ["monitor.gpu.vram", "monitor.gpu.util", "monitor.gpu.temp", "monitor.gpu.power_clocks", "monitor.gpu.power_limit", "monitor.gpu.chart"];
+const GPU_KEYS = ["monitor.gpu.vram", "monitor.gpu.util", "monitor.gpu.temp", "monitor.gpu.power_clocks", "monitor.gpu.power_limit", "monitor.gpu.fan", "monitor.gpu.chart"];
 const CPU_KEYS = ["monitor.cpu.total", "monitor.cpu.cores", "monitor.cpu.freq", "monitor.cpu.chart"];
 const LLM_KEYS_DISPLAY = ["monitor.llm.live", "monitor.llm.live_charts", "monitor.llm.history"];
 
 const SPARKLINE_POINTS = 60;
+
+/**
+ * Punto del buffer de sparklines: CPU/RAM una sola vez, y util/VRAM por GPU
+ * (keys g{index}_util / g{index}_vram) para poder graficar cada tarjeta con
+ * su propio mini-gráfico.
+ */
+function snapToSparkPoint(snap, tIndex) {
+  const point = {
+    t: tIndex,
+    cpu: snap.cpu?.percent_total ?? null,
+    ram: snap.ram?.percent ?? null,
+  };
+  for (const g of snap.gpu || []) {
+    point[`g${g.index}_util`] = g.gpu_utilization ?? null;
+    point[`g${g.index}_vram`] = g.vram_percent ?? null;
+  }
+  return point;
+}
 
 // -- Histórico (GET /api/metrics/query) --------------------------------------
 //
@@ -40,12 +58,15 @@ function tierLabel(t, tier) {
 // paleta que ya usa Sparkline para GPU/VRAM/CPU/RAM, así el histórico se
 // lee como una continuación de los gráficos en vivo, no algo aparte.
 const TEMP_LEGEND = [
-  { key: "gpu.0.temp_c", name: "GPU", color: "var(--color-glyvex-chart-1)" },
+  { key: "gpu.0.temp_c", name: "GPU 0", color: "var(--color-glyvex-chart-1)" },
+  { key: "gpu.1.temp_c", name: "GPU 1", color: "var(--color-glyvex-chart-4)" },
   { key: "cpu.temp_c", name: "CPU", color: "var(--color-glyvex-chart-3)" },
 ];
 const LOAD_LEGEND = [
-  { key: "gpu.0.util_pct", name: "GPU", color: "var(--color-glyvex-chart-1)" },
-  { key: "gpu.0.vram_pct", name: "VRAM", color: "var(--color-glyvex-chart-2)" },
+  { key: "gpu.0.util_pct", name: "GPU 0", color: "var(--color-glyvex-chart-1)" },
+  { key: "gpu.1.util_pct", name: "GPU 1", color: "var(--color-glyvex-chart-4)" },
+  { key: "gpu.0.vram_pct", name: "VRAM 0", color: "var(--color-glyvex-chart-2)" },
+  { key: "gpu.1.vram_pct", name: "VRAM 1", color: "var(--color-glyvex-chart-5)" },
   { key: "cpu.total_pct", name: "CPU", color: "var(--color-glyvex-chart-3)" },
 ];
 const RAM_LEGEND = [{ key: "ram.pct", name: "RAM", color: "var(--color-glyvex-chart-2)" }];
@@ -446,6 +467,238 @@ function CoreHeatmap({ cores }) {
 // 30s alcanza: el rango más corto (1h) igual se sirve en ventanas de 5s.
 const HISTORY_REFRESH_MS = 30_000;
 
+/**
+ * Control de límite de potencia (TDP) de UNA GPU. El estado vive por índice
+ * para que cada tarjeta de un sistema multi-GPU gestione su propio límite:
+ * el rango lo pone NVML (mín/máx reales) y si el backend no va con
+ * privilegios el botón de Aplicar queda bloqueado con una pista.
+ */
+function GpuTdpControl({ index }) {
+  const { t } = useTranslation();
+  const { addToast } = useToast();
+  const [enabled, setEnabled] = useState(false);
+  const [info, setInfo] = useState(null);
+  const [value, setValue] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const gpu = useMemo(
+    () => (info?.gpus || []).find((g) => g.index === index) || null,
+    [info, index]
+  );
+
+  const load = () =>
+    fetch("/api/metrics/gpu/power-limit")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setInfo(data);
+        if (!data.available) return;
+        const g = (data.gpus || []).find((x) => x.index === index);
+        if (g && g.current_w != null) setValue(g.current_w);
+        // Si la GPU tiene un límite distinto al de fábrica, el control está
+        // activo: restaurar el toggle desde el estado real (sobrevive refresh).
+        if (g && g.current_w != null && g.default_w != null && g.current_w !== g.default_w) {
+          setEnabled(true);
+        }
+      })
+      .catch(() => {});
+
+  useEffect(() => {
+    load();
+  }, [index]);
+
+  // Al activar el control, re-sincroniza con el valor real actual.
+  useEffect(() => {
+    if (enabled && gpu?.current_w != null) setValue(gpu.current_w);
+  }, [enabled, gpu?.current_w]);
+
+  const canApply =
+    enabled && Boolean(gpu?.supported) && Boolean(info?.privileged) && !busy && value != null;
+
+  const apply = async (payload, successKey, successVars) => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/metrics/gpu/power-limit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.ok) {
+        addToast(t(successKey, successVars || {}), "success");
+        load();
+      } else {
+        addToast(t("monitor.gpu.tdp.applyError", { error: data?.error || "?" }), "error");
+      }
+    } catch {
+      addToast(t("monitor.gpu.tdp.loadError"), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="gx-recess rounded-lg border border-glyvex-border-soft bg-glyvex-veil-faint p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-glyvex-muted uppercase tracking-wide">
+          {t("monitor.gpu.tdp.title")}
+        </span>
+        <button
+          type="button"
+          onClick={() => setEnabled((v) => !v)}
+          className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
+            enabled
+              ? "bg-glyvex-accent/20 text-glyvex-accent border-glyvex-accent/40"
+              : "bg-glyvex-veil text-glyvex-muted border-glyvex-border-soft hover:bg-glyvex-veil-strong"
+          }`}
+        >
+          {enabled ? t("monitor.gpu.tdp.on") : t("monitor.gpu.tdp.off")}
+        </button>
+      </div>
+
+      {enabled && (
+        info === null ? (
+          <p className="text-xs text-glyvex-muted">{t("monitor.gpu.tdp.loading")}</p>
+        ) : !info.available ? (
+          <p className="text-xs text-glyvex-muted">{info.error || t("monitor.gpu.tdp.notSupported")}</p>
+        ) : !gpu || !gpu.supported ? (
+          <p className="text-xs text-glyvex-muted">{t("monitor.gpu.tdp.notSupported")}</p>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-end justify-between text-[11px] text-glyvex-muted">
+              <span>{t("monitor.gpu.tdp.min")} {gpu.min_w}W</span>
+              <span className="text-lg font-semibold text-glyvex-text leading-none">{Math.round(value ?? 0)}W</span>
+              <span>{gpu.max_w}W {t("monitor.gpu.tdp.max")}</span>
+            </div>
+            <input
+              type="range"
+              min={gpu.min_w}
+              max={gpu.max_w}
+              step={5}
+              value={value ?? gpu.min_w}
+              onChange={(e) => setValue(Number(e.target.value))}
+              disabled={!info.privileged || busy}
+              className="gx-range w-full accent-glyvex-accent"
+              style={{
+                "--gx-pct": `${(((value ?? gpu.min_w) - gpu.min_w) / Math.max(1, gpu.max_w - gpu.min_w)) * 100}%`,
+              }}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => apply({ index, default: true }, "monitor.gpu.tdp.resetSuccess")}
+                disabled={!info.privileged || busy || gpu.default_w == null}
+                className="text-[11px] px-2.5 py-1 rounded-md border border-glyvex-border-soft bg-glyvex-veil text-glyvex-muted hover:bg-glyvex-veil-strong disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {t("monitor.gpu.tdp.reset")}
+                {gpu.default_w != null ? ` (${gpu.default_w}W)` : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => apply({ index, watts: value }, "monitor.gpu.tdp.applySuccess", { watts: Math.round(value) })}
+                disabled={!canApply}
+                className="text-[11px] px-3 py-1 rounded-md bg-glyvex-accent text-white font-medium hover:bg-glyvex-accent/85 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {busy ? t("monitor.gpu.tdp.applying") : t("monitor.gpu.tdp.apply")}
+              </button>
+            </div>
+            {!info.privileged && (
+              <p className="text-[11px] text-amber-400/90">
+                {info.privilege_hint === "root"
+                  ? t("monitor.gpu.tdp.needsRoot")
+                  : t("monitor.gpu.tdp.needsAdmin")}
+              </p>
+            )}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+function GpuFanControl({ index, fanPct }) {
+  const { t } = useTranslation();
+  const { addToast } = useToast();
+  const [value, setValue] = useState(fanPct);
+  const [busy, setBusy] = useState(false);
+
+  // El slider sigue el fan real del snapshot live: tras aplicar un valor
+  // fijo se actualiza, y con la curva automática el usuario ve dónde está
+  // el fan ahora. Mientras aplica, no se pisa (la verificación tarda ~1 s).
+  useEffect(() => {
+    if (fanPct != null && !busy) setValue(fanPct);
+  }, [fanPct, busy]);
+
+  const apply = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/metrics/gpu/fan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ index, percent: value }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.ok) {
+        addToast(t("monitor.gpu.fan.applySuccess", { pct: value }), "success");
+      } else if (data?.error === "fan_no_change") {
+        addToast(t("monitor.gpu.fan.noChange"), "error");
+      } else if (data?.error === "fan_no_privilege" || data?.error?.includes("NO_PERMISSION")) {
+        addToast(
+          data?.privilege_hint === "root"
+            ? t("monitor.gpu.fan.needsRoot")
+            : t("monitor.gpu.fan.needsAdmin"),
+          "error"
+        );
+      } else if (data?.error === "fan_not_supported" || data?.error?.includes("NOT_SUPPORTED")) {
+        addToast(t("monitor.gpu.fan.notSupported"), "error");
+      } else {
+        addToast(t("monitor.gpu.fan.applyError", { error: data?.error || "?" }), "error");
+      }
+    } catch {
+      addToast(t("monitor.gpu.fan.loadError"), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pct = value ?? 0;
+  return (
+    <div className="gx-recess rounded-lg border border-glyvex-border-soft bg-glyvex-veil-faint p-3 space-y-3">
+      <span className="block text-xs font-medium text-glyvex-muted uppercase tracking-wide">
+        {t("monitor.gpu.fan.title")}
+      </span>
+      <div className="space-y-2">
+        <div className="flex items-end justify-between text-[11px] text-glyvex-muted">
+          <span>0%</span>
+          <span className="text-lg font-semibold text-glyvex-text leading-none">{pct}%</span>
+          <span>100%</span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={pct}
+          onChange={(e) => setValue(Number(e.target.value))}
+          disabled={busy}
+          className="gx-range w-full accent-glyvex-accent"
+          style={{ "--gx-pct": `${pct}%` }}
+        />
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={apply}
+            disabled={busy}
+            className="text-[11px] px-3 py-1 rounded-md bg-glyvex-accent text-white font-medium hover:bg-glyvex-accent/85 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {busy ? t("monitor.gpu.fan.applying") : t("monitor.gpu.fan.apply")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Monitor() {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -463,8 +716,23 @@ export default function Monitor() {
   const [historyError, setHistoryError] = useState(null);
 
   const historyKeys = useMemo(
-    () => ["gpu.0.temp_c", "cpu.temp_c", "gpu.0.util_pct", "gpu.0.vram_pct", "cpu.total_pct", "ram.pct"],
+    () => [
+      "gpu.0.temp_c", "gpu.1.temp_c", "cpu.temp_c",
+      "gpu.0.util_pct", "gpu.0.vram_pct", "gpu.1.util_pct", "gpu.1.vram_pct",
+      "cpu.total_pct", "ram.pct",
+    ],
     []
+  );
+
+  // La leyenda solo muestra las series que tienen datos: en una máquina de
+  // una sola GPU no debe aparecer "GPU 1" con su color y su línea fantasma.
+  const tempLegend = useMemo(
+    () => TEMP_LEGEND.filter((l) => (historySeries[l.key] || []).length > 0),
+    [historySeries]
+  );
+  const loadLegend = useMemo(
+    () => LOAD_LEGEND.filter((l) => (historySeries[l.key] || []).length > 0),
+    [historySeries]
   );
 
   const fetchHistory = useMemo(
@@ -624,123 +892,76 @@ export default function Monitor() {
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
-        const points = data.slice(-SPARKLINE_POINTS).map((snap, i) => ({
-          t: i,
-          gpu: snap.gpu?.[0]?.gpu_utilization ?? null,
-          vram: snap.gpu?.[0]?.vram_percent ?? null,
-          cpu: snap.cpu?.percent_total ?? null,
-          ram: snap.ram?.percent ?? null,
-        }));
+        const points = data.slice(-SPARKLINE_POINTS).map((snap, i) => snapToSparkPoint(snap, i));
         setHistory(points);
         if (data.length > 0) setSnapshot(data[data.length - 1]);
       })
       .catch(() => {});
 
-    const ws = new WebSocket(wsUrlFor("/api/metrics/stream"));
-    wsRef.current = ws;
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onmessage = (event) => {
-      const snap = JSON.parse(event.data);
-      setSnapshot(snap);
-      setHistory((prev) => {
-        const next = [...prev, {
-          t: prev.length,
-          gpu: snap.gpu?.[0]?.gpu_utilization ?? null,
-          vram: snap.gpu?.[0]?.vram_percent ?? null,
-          cpu: snap.cpu?.percent_total ?? null,
-          ram: snap.ram?.percent ?? null,
-        }];
-        return next.length > SPARKLINE_POINTS ? next.slice(next.length - SPARKLINE_POINTS) : next;
-      });
-    };
+    // Sin reconexión, un reinicio del backend deja las métricas congeladas
+    // hasta recargar la página: backoff 1→15 s como el WS de progreso del
+    // benchmark.
+    let retryTimer = null;
+    let attempts = 0;
+    function connect() {
+      if (cancelled) return;
+      const ws = new WebSocket(wsUrlFor("/api/metrics/stream"));
+      wsRef.current = ws;
+      ws.onopen = () => { attempts = 0; setConnected(true); };
+      ws.onclose = () => {
+        setConnected(false);
+        if (cancelled || wsRef.current !== ws) return;
+        const delay = Math.min(1000 * 2 ** attempts, 15000);
+        attempts += 1;
+        retryTimer = setTimeout(connect, delay);
+      };
+      ws.onmessage = (event) => {
+        let snap;
+        try { snap = JSON.parse(event.data); } catch { return; }
+        setSnapshot(snap);
+        setHistory((prev) => {
+          const next = [...prev, snapToSparkPoint(snap, prev.length)];
+          return next.length > SPARKLINE_POINTS ? next.slice(next.length - SPARKLINE_POINTS) : next;
+        });
+      };
+    }
+    connect();
 
     return () => {
       cancelled = true;
-      ws.close();
+      clearTimeout(retryTimer);
+      wsRef.current?.close();
     };
   }, []);
 
-  const gpu = snapshot?.gpu?.[0] ?? null;
+  const gpus = snapshot?.gpu ?? [];
   const cpu = snapshot?.cpu ?? null;
   const ram = snapshot?.ram ?? null;
   const processes = snapshot?.processes ?? [];
 
-  const gpuTempAlert = gpu && gpu.temperature_c != null && gpu.temperature_c > 85;
-  const vramAlert = gpu && gpu.vram_percent != null && gpu.vram_percent > 95;
+  // Alertas de GPU y VRAM (85°C / 95%): gana el peor caso — basta con que una
+  // de las tarjetas se pase de umbral para disparar, y la razón indica cuál.
+  const hotGpu = gpus.reduce(
+    (worst, g) =>
+      g.temperature_c != null && (worst?.temperature_c == null || g.temperature_c > worst.temperature_c)
+        ? g : worst,
+    null
+  );
+  const fullVramGpu = gpus.reduce(
+    (worst, g) =>
+      g.vram_percent != null && (worst?.vram_percent == null || g.vram_percent > worst.vram_percent)
+        ? g : worst,
+    null
+  );
+  const gpuTempAlert = Boolean(hotGpu && hotGpu.temperature_c != null && hotGpu.temperature_c > 85);
+  const vramAlert = Boolean(fullVramGpu && fullVramGpu.vram_percent != null && fullVramGpu.vram_percent > 95);
   const anyAlert = gpuTempAlert || vramAlert;
   // El badge dice qué lo disparó: un "ALERTA" a secas no le dice al usuario
   // si tiene que mirar la temperatura o la VRAM.
   const alertReasons = [
-    gpuTempAlert && t("monitor.alerts.reasonTemp", { temp: gpu.temperature_c }),
-    vramAlert && t("monitor.alerts.reasonVram", { pct: Math.round(gpu.vram_percent) }),
+    gpuTempAlert && t("monitor.alerts.reasonTemp", { gpu: hotGpu.index, temp: hotGpu.temperature_c }),
+    vramAlert && t("monitor.alerts.reasonVram", { gpu: fullVramGpu.index, pct: Math.round(fullVramGpu.vram_percent) }),
   ].filter(Boolean);
-
-  // -- Control de límite de potencia (TDP) ---------------------------------
-  // El rango lo pone NVML (mín/máx reales de la GPU); si el proceso no va en
-  // modo admin el slider se habilita pero el botón de Aplicar queda bloqueado
-  // con una pista, en vez de fallar al tocarlo.
-  const [tdpEnabled, setTdpEnabled] = useState(false);
-  const [tdpInfo, setTdpInfo] = useState(null);
-  const [tdpValue, setTdpValue] = useState(null);
-  const [tdpBusy, setTdpBusy] = useState(false);
-
-  const gpuIndex = gpu?.index ?? null;
-  const tdpGpu = useMemo(
-    () => (tdpInfo?.gpus || []).find((g) => g.index === gpuIndex) || (tdpInfo?.gpus || [])[0] || null,
-    [tdpInfo, gpuIndex]
-  );
-
-  const loadTdp = () =>
-    fetch("/api/metrics/gpu/power-limit")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!data || !data.available) return;
-        setTdpInfo(data);
-        const g = (data.gpus || []).find((x) => x.index === gpuIndex) || data.gpus?.[0];
-        if (g && g.current_w != null) setTdpValue(g.current_w);
-        // Si la GPU tiene un límite distinto al de fábrica, el control está
-        // activo: restaurar el toggle desde el estado real (sobrevive refresh).
-        if (g && g.current_w != null && g.default_w != null && g.current_w !== g.default_w) {
-          setTdpEnabled(true);
-        }
-      })
-      .catch(() => {});
-
-  useEffect(() => {
-    if (gpuIndex == null) return undefined;
-    loadTdp();
-  }, [gpuIndex]);
-
-  // Al activar el control, re-sincroniza con el valor real actual.
-  useEffect(() => {
-    if (tdpEnabled && tdpGpu?.current_w != null) setTdpValue(tdpGpu.current_w);
-  }, [tdpEnabled, tdpGpu?.current_w]);
-
-  const tdpCanApply =
-    tdpEnabled && Boolean(tdpGpu?.supported) && Boolean(tdpInfo?.privileged) && !tdpBusy && tdpValue != null;
-
-  const applyTdp = async (payload, successKey, successVars) => {
-    setTdpBusy(true);
-    try {
-      const res = await fetch("/api/metrics/gpu/power-limit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => null);
-      if (data?.ok) {
-        addToast(t(successKey, successVars || {}), "success");
-        loadTdp();
-      } else {
-        addToast(t("monitor.gpu.tdp.applyError", { error: data?.error || "?" }), "error");
-      }
-    } catch {
-      addToast(t("monitor.gpu.tdp.loadError"), "error");
-    } finally {
-      setTdpBusy(false);
-    }
-  };
 
   return (
     <div className="space-y-4">
@@ -754,12 +975,19 @@ export default function Monitor() {
       {/* Barra de alertas */}
       {show("monitor.alerts") && (
       <div className="flex flex-wrap items-center gap-2">
-        <span className={`text-sm px-3 py-1 rounded-full border font-medium ${tempBadgeClasses(gpu?.temperature_c)}`}>
-          {t("monitor.alerts.gpuTemp")} {gpu?.temperature_c != null ? `${gpu.temperature_c}°C` : "—"}
-        </span>
-        <span className="text-xs px-2.5 py-1 rounded-full border bg-glyvex-card border-glyvex-border-soft text-glyvex-text">
-          {t("monitor.alerts.freeVram")} {gpu ? `${(gpu.vram_free_mb / 1024).toFixed(1)} GB` : "—"}
-        </span>
+        {/* Un chip por GPU: temp + VRAM libre de cada tarjeta (el color marca
+            la temp de esa GPU). Con 1 GPU queda igual que antes, sin índice. */}
+        {gpus.map((g) => (
+          <span key={g.index} className={`flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border font-medium ${tempBadgeClasses(g.temperature_c)}`}>
+            {gpus.length > 1 && (
+              <span className="text-xs font-normal">{t("monitor.gpu.index", { index: g.index })}</span>
+            )}
+            {t("monitor.alerts.gpuTemp")} {g.temperature_c != null ? `${g.temperature_c}°C` : "—"}
+            <span className="text-xs font-normal opacity-80">
+              {t("monitor.alerts.freeVram")} {(g.vram_free_mb / 1024).toFixed(1)} GB
+            </span>
+          </span>
+        ))}
         {anyAlert && (
           <span
             className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-red-500/15 text-glyvex-crit border border-red-500/30 font-medium"
@@ -774,19 +1002,28 @@ export default function Monitor() {
       {/* Card GPU */}
       {anyVisible(GPU_KEYS) && (
       <CollapsiblePanel icon={Gauge} title="GPU" storageKey="monitor_panel_gpu">
-        {!gpu ? (
+        {!gpus.length ? (
           // El backend manda el motivo en español; se muestra el texto
           // traducido y el detalle técnico queda en el tooltip.
           <p className="text-sm text-glyvex-muted" title={snapshot?.gpu_error || undefined}>
             {t("monitor.gpu.notDetected")}
           </p>
         ) : (
-          <div className="space-y-4">
+          // Una tarjeta por GPU: en sistemas multi-GPU cada una muestra sus
+          // propios sensores, su TDP y su sparkline.
+          <div className="space-y-5">
+            {gpus.map((g) => (
+            <div key={g.index} className={`space-y-4 ${gpus.length > 1 ? "rounded-lg border border-glyvex-border-soft p-3" : ""}`}>
             <div className="flex items-center justify-between">
-              <p className="text-sm text-glyvex-text">{gpu.name}</p>
+              <p className="text-sm text-glyvex-text">
+                {g.name}
+                {gpus.length > 1 && (
+                  <span className="text-glyvex-muted"> · {t("monitor.gpu.index", { index: g.index })}</span>
+                )}
+              </p>
               {show("monitor.gpu.temp") && (
-                <span className={`text-sm font-semibold px-2.5 py-1 rounded-full border ${tempBadgeClasses(gpu.temperature_c)}`}>
-                  {gpu.temperature_c != null ? `${gpu.temperature_c}°C` : "—"}
+                <span className={`text-sm font-semibold px-2.5 py-1 rounded-full border ${tempBadgeClasses(g.temperature_c)}`}>
+                  {g.temperature_c != null ? `${g.temperature_c}°C` : "—"}
                 </span>
               )}
             </div>
@@ -795,9 +1032,9 @@ export default function Monitor() {
             <div>
               <div className="flex justify-between text-xs text-glyvex-muted mb-1">
                 <span>VRAM</span>
-                <span>{(gpu.vram_used_mb / 1024).toFixed(1)} GB / {(gpu.vram_total_mb / 1024).toFixed(1)} GB ({gpu.vram_percent}%)</span>
+                <span>{(g.vram_used_mb / 1024).toFixed(1)} GB / {(g.vram_total_mb / 1024).toFixed(1)} GB ({g.vram_percent}%)</span>
               </div>
-              <ProgressBar value={gpu.vram_used_mb} max={gpu.vram_total_mb} color={pctBarColor(gpu.vram_percent)} />
+              <ProgressBar value={g.vram_used_mb} max={g.vram_total_mb} color={pctBarColor(g.vram_percent)} />
             </div>
             )}
 
@@ -805,100 +1042,39 @@ export default function Monitor() {
             <div>
               <div className="flex justify-between text-xs text-glyvex-muted mb-1">
                 <span>{t("monitor.gpu.util")}</span>
-                <span>{gpu.gpu_utilization ?? "—"}%</span>
+                <span>{g.gpu_utilization ?? "—"}%</span>
               </div>
-              <ProgressBar value={gpu.gpu_utilization ?? 0} max={100} color={pctBarColor(gpu.gpu_utilization)} />
+              <ProgressBar value={g.gpu_utilization ?? 0} max={100} color={pctBarColor(g.gpu_utilization)} />
             </div>
             )}
 
             {show("monitor.gpu.power_clocks") && (
             <div className="flex flex-wrap gap-4 text-xs text-glyvex-muted">
-              <span>{t("monitor.gpu.power")}: {gpu.power_draw_w ?? "—"}W / {gpu.power_limit_w ?? "—"}W</span>
-              <span>{t("monitor.gpu.clockGraphics")}: {gpu.clock_graphics_mhz ?? "—"} MHz</span>
-              <span>{t("monitor.gpu.clockMemory")}: {gpu.clock_memory_mhz ?? "—"} MHz</span>
+              <span>{t("monitor.gpu.power")}: {g.power_draw_w ?? "—"}W / {g.power_limit_w ?? "—"}W</span>
+              <span>{t("monitor.gpu.clockGraphics")}: {g.clock_graphics_mhz ?? "—"} MHz</span>
+              <span>{t("monitor.gpu.clockMemory")}: {g.clock_memory_mhz ?? "—"} MHz</span>
             </div>
             )}
 
-            {show("monitor.gpu.power_limit") && (
-            <div className="gx-recess rounded-lg border border-glyvex-border-soft bg-glyvex-veil-faint p-3 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-glyvex-muted uppercase tracking-wide">
-                  {t("monitor.gpu.tdp.title")}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setTdpEnabled((v) => !v)}
-                  className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
-                    tdpEnabled
-                      ? "bg-glyvex-accent/20 text-glyvex-accent border-glyvex-accent/40"
-                      : "bg-glyvex-veil text-glyvex-muted border-glyvex-border-soft hover:bg-glyvex-veil-strong"
-                  }`}
-                >
-                  {tdpEnabled ? t("monitor.gpu.tdp.on") : t("monitor.gpu.tdp.off")}
-                </button>
-              </div>
+            {show("monitor.gpu.power_limit") && <GpuTdpControl index={g.index} />}
 
-              {tdpEnabled && (
-                !tdpInfo ? (
-                  <p className="text-xs text-glyvex-muted">{t("monitor.gpu.tdp.loading")}</p>
-                ) : !tdpInfo.available ? (
-                  <p className="text-xs text-glyvex-muted">{tdpInfo.error || t("monitor.gpu.tdp.notSupported")}</p>
-                ) : !tdpGpu || !tdpGpu.supported ? (
-                  <p className="text-xs text-glyvex-muted">{t("monitor.gpu.tdp.notSupported")}</p>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex items-end justify-between text-[11px] text-glyvex-muted">
-                      <span>{t("monitor.gpu.tdp.min")} {tdpGpu.min_w}W</span>
-                      <span className="text-lg font-semibold text-glyvex-text leading-none">{Math.round(tdpValue ?? 0)}W</span>
-                      <span>{tdpGpu.max_w}W {t("monitor.gpu.tdp.max")}</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={tdpGpu.min_w}
-                      max={tdpGpu.max_w}
-                      step={5}
-                      value={tdpValue ?? tdpGpu.min_w}
-                      onChange={(e) => setTdpValue(Number(e.target.value))}
-                      disabled={!tdpInfo.privileged || tdpBusy}
-                      className="gx-range w-full accent-glyvex-accent"
-                      style={{
-                        "--gx-pct": `${(((tdpValue ?? tdpGpu.min_w) - tdpGpu.min_w) / Math.max(1, tdpGpu.max_w - tdpGpu.min_w)) * 100}%`,
-                      }}
-                    />
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => applyTdp({ index: gpuIndex, default: true }, "monitor.gpu.tdp.resetSuccess")}
-                        disabled={!tdpInfo.privileged || tdpBusy || tdpGpu.default_w == null}
-                        className="text-[11px] px-2.5 py-1 rounded-md border border-glyvex-border-soft bg-glyvex-veil text-glyvex-muted hover:bg-glyvex-veil-strong disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {t("monitor.gpu.tdp.reset")}
-                        {tdpGpu.default_w != null ? ` (${tdpGpu.default_w}W)` : ""}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => applyTdp({ index: gpuIndex, watts: tdpValue }, "monitor.gpu.tdp.applySuccess", { watts: Math.round(tdpValue) })}
-                        disabled={!tdpCanApply}
-                        className="text-[11px] px-3 py-1 rounded-md bg-glyvex-accent text-white font-medium hover:bg-glyvex-accent/85 disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {tdpBusy ? t("monitor.gpu.tdp.applying") : t("monitor.gpu.tdp.apply")}
-                      </button>
-                    </div>
-                    {!tdpInfo.privileged && (
-                      <p className="text-[11px] text-amber-400/90">{t("monitor.gpu.tdp.needsAdmin")}</p>
-                    )}
-                  </div>
-                )
-              )}
-            </div>
+            {show("monitor.gpu.fan") && g.fan_speed_pct != null && (
+              <GpuFanControl index={g.index} fanPct={g.fan_speed_pct} />
             )}
 
             {show("monitor.gpu.chart") && (
             <div>
               <p className="text-xs text-glyvex-muted mb-1">{t("monitor.gpu.last60s")}</p>
-              <Sparkline data={history} dataKeys={["gpu", "vram"]} colors={["var(--color-glyvex-chart-1)", "var(--color-glyvex-chart-2)"]} height={100} />
+              <Sparkline
+                data={history}
+                dataKeys={[`g${g.index}_util`, `g${g.index}_vram`]}
+                colors={["var(--color-glyvex-chart-1)", "var(--color-glyvex-chart-2)"]}
+                height={100}
+              />
             </div>
             )}
+            </div>
+            ))}
           </div>
         )}
       </CollapsiblePanel>
@@ -1017,7 +1193,7 @@ export default function Monitor() {
               <p className="text-xs text-glyvex-muted mb-1">{t("monitor.history.chartTemp")}</p>
               <HistoryChart
                 series={historySeries}
-                legend={TEMP_LEGEND}
+                legend={tempLegend}
                 unit="°C"
                 rangeSeconds={rangeSeconds}
               />
@@ -1026,7 +1202,7 @@ export default function Monitor() {
               <p className="text-xs text-glyvex-muted mb-1">{t("monitor.history.chartLoad")}</p>
               <HistoryChart
                 series={historySeries}
-                legend={LOAD_LEGEND}
+                legend={loadLegend}
                 unit="%"
                 domain={[0, 100]}
                 rangeSeconds={rangeSeconds}

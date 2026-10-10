@@ -59,7 +59,8 @@
     "runtimeError": "Error al descargar el runtime",
     "runtimeRetry": "Reintentar",
     "runtimeDegraded": "Aceleración GPU no instalada — corriendo en CPU.",
-    "runtimeUnsupported": "El runtime embebido es Windows-only en v1. Usá modo experto en Config.",
+    "runtimeCudaNote": "GPU con compute capability {{cc}} — se usó el bundle CUDA 12.x porque CUDA 13.x no soporta esta arquitectura.",
+    "runtimeUnsupported": "El runtime embebido soporta Windows x64 y Linux x64 en v1. Usá modo experto en Config.",
     "runtimeGoConfig": "Ir a Config"
   },
   "footer": {
@@ -116,6 +117,7 @@
           "temp": "GPU · temperatura",
           "power_clocks": "GPU · potencia y clocks",
           "powerLimit": "GPU · límite de potencia (TDP)",
+          "fan": "GPU · ventilador",
           "chart": "GPU · gráfico 60 s"
         },
         "cpu": {
@@ -413,7 +415,9 @@
     "regenerateTitle": "Regenerar respuesta con el razonamiento elegido",
     "speakTitle": "Leer la respuesta en voz alta",
     "speakLoadingTitle": "Generando el audio…",
-    "speakStopTitle": "Detener la lectura"
+    "speakStopTitle": "Detener la lectura",
+    "speakPlayFailed": "El navegador no pudo reproducir el audio generado",
+    "speakBlocked": "El navegador bloqueó la reproducción (tocá el altavoz de la pestaña si está mutada)"
   },
   "composer": {
     "contextOver": "Este envío supera el contexto del modelo por unos {{over}} tokens",
@@ -659,12 +663,13 @@
       "gpuTemp": "Temp GPU:",
       "freeVram": "VRAM libre:",
       "alert": "ALERTA",
-      "reasonTemp": "GPU {{temp}}°C",
-      "reasonVram": "VRAM {{pct}}%",
-      "thresholds": "Se activa cuando la temperatura de la GPU supera 85°C o el uso de VRAM supera 95%."
+      "reasonTemp": "GPU {{gpu}}: {{temp}}°C",
+      "reasonVram": "GPU {{gpu}}: VRAM {{pct}}%",
+      "thresholds": "Se activa cuando la temperatura de alguna GPU supera 85°C o el uso de VRAM de alguna supera 95%."
     },
     "gpu": {
       "notDetected": "GPU NVIDIA no detectada",
+      "index": "GPU {{index}}",
       "util": "Utilización GPU",
       "last60s": "Últimos 60s — GPU util % / VRAM %",
       "tdp": {
@@ -679,9 +684,22 @@
         "apply": "Aplicar",
         "applying": "Aplicando…",
         "needsAdmin": "Ejecutá Glyvex como administrador para aplicar el límite.",
+        "needsRoot": "Ejecutá Glyvex con root (sudo) para aplicar el límite.",
         "applySuccess": "Límite de potencia aplicado: {{watts}} W",
         "resetSuccess": "Límite de potencia restaurado al valor de fábrica",
         "applyError": "No se pudo aplicar el límite: {{error}}",
+        "loadError": "No se pudo comunicarse con el backend."
+      },
+      "fan": {
+        "title": "Ventilador",
+        "apply": "Aplicar",
+        "applying": "Aplicando…",
+        "applySuccess": "Ventilador fijado al {{pct}}%",
+        "applyError": "No se pudo fijar el ventilador: {{error}}",
+        "noChange": "La tarjeta aceptó el comando pero el ventilador no cambió: no soporta control manual (se mantiene la curva automática).",
+        "notSupported": "Esta GPU no permite fijar el ventilador manualmente.",
+        "needsAdmin": "Ejecutá Glyvex como administrador para fijar el ventilador.",
+        "needsRoot": "Ejecutá Glyvex con root (sudo) para fijar el ventilador.",
         "loadError": "No se pudo comunicarse con el backend."
       },
       "power": "Consumo",
@@ -808,7 +826,9 @@
       "setsRetry": "Reintentar",
       "judgeStatus": "El judge respondió {{status}}",
       "noStream": "El navegador no devolvió un stream para el judge.",
-      "judgeCatch": "Error al evaluar con el judge."
+      "judgeCatch": "Error al evaluar con el judge.",
+      "cancelFailed": "El servidor respondió {{status}} al intentar cancelar el benchmark",
+      "cancelNoResponse": "No se pudo cancelar el benchmark (sin respuesta del servidor)"
     },
     "resultsTitle": "Resultados",
     "summary": {
@@ -923,13 +943,14 @@
       "expertSub": "Tenés un binario propio configurado (binary_path en Backends) y ese gana siempre.",
       "cpuNote": "la aceleración GPU llega próximamente; por ahora corre en CPU",
       "degraded": "Aceleración GPU no instalada — corriendo en CPU.",
+      "cudaNote": "GPU con compute capability {{cc}} — bundle CUDA 12.x (CUDA 13.x no soporta esta arquitectura).",
       "outdated": "Runtime desactualizado — {{pin}} aún no instalado",
       "outdatedSub": "Hay una build anterior ({{prev}}, {{prevSize}} MB) en disco. Descarga estimada: ~{{size}} MB.",
       "update": "Actualizar runtime",
       "keepPrevious": "Conservar build anterior (rollback)",
       "uninstall": "Desinstalar",
       "uninstallConfirm": "¿Desinstalar el runtime gestionado? Se borra la copia local. Usá modo experto (binary_path en Backends) para apuntar a tu binario.",
-      "unsupported": "El runtime embebido es Windows-only en v1. Configurá un binario propio en Backends (modo experto)."
+      "unsupported": "El runtime embebido soporta Windows x64 y Linux x64 en v1. Configurá un binario propio en Backends (modo experto)."
     },
     "title": "Config",
     "backends": {
@@ -944,6 +965,7 @@
     "compareSelected": "Comparar seleccionados ({{n}}/2)",
     "loading": "Cargando historial…",
     "empty": "Todavía no corriste ningún benchmark.",
+    "loadFailed": "No se pudo cargar el run (el servidor respondió {{status}}).",
     "detail": {
       "model": "Modelo",
       "started": "Iniciado",

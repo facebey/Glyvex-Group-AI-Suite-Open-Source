@@ -131,6 +131,26 @@ async def test_endpoints_list(client):
     assert "url" in data[0] and "status" in data[0]
 
 
+async def test_endpoint_models_proxy(client, mock_llama_server):
+    # E4: el navegador no puede llamar /v1/models directo al endpoint (CORS);
+    # el backend hace el fetch por él.
+    res = await client.get(f"/api/chat/endpoint-models?url={mock_llama_server}")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["models"] == ["test-model"]
+
+
+async def test_endpoint_models_bad_scheme(client):
+    res = await client.get("/api/chat/endpoint-models?url=ftp://127.0.0.1:1")
+    assert res.status_code == 400
+
+
+async def test_endpoint_models_unreachable(client):
+    # Puerto cerrado en loopback: connection refused inmediato, sin red real.
+    res = await client.get("/api/chat/endpoint-models?url=http://127.0.0.1:1")
+    assert res.status_code == 502
+
+
 async def test_reasoning_content_llega_como_thinking(client, mock_llama_server):
     payload = {
         "endpoint": mock_llama_server,

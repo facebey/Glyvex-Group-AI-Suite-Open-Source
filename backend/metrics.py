@@ -39,6 +39,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 import metrics_export
+import nvapi_fan
 from config import config
 from paths import DATA_DIR
 from metrics_store import RAW_STEP_S, MetricsStore, Retention, SampleWindow
@@ -48,6 +49,11 @@ logger = logging.getLogger("glyvex.metrics")
 HISTORY_MAXLEN = 300
 STREAM_INTERVAL_S = 1.0
 MAINTENANCE_INTERVAL_S = 60.0
+
+# Read-back del set de fan: algunos drivers aceptan la escritura y la ignoran
+# en silencio, así que se espera un poco y se lee el valor real.
+FAN_SET_READBACK_S = 1.0
+FAN_SET_TOLERANCE_PCT = 2
 
 METRICS_DB_PATH = DATA_DIR / "metrics.db"
 
@@ -94,6 +100,7 @@ class GpuMetrics(BaseModel):
     power_limit_w: float | None = None
     clock_graphics_mhz: int | None = None
     clock_memory_mhz: int | None = None
+    fan_speed_pct: int | None = None
 
 
 class CpuMetrics(BaseModel):
@@ -137,6 +144,11 @@ class PowerLimitSet(BaseModel):
     default: bool = False
 
 
+class FanSpeedSet(BaseModel):
+    index: int
+    percent: int = Field(..., ge=0, le=100)
+
+
 # --------------------------------------------------------------------------
 # Recolección de métricas
 # --------------------------------------------------------------------------
@@ -151,6 +163,10 @@ class MetricsCollector:
                 self._nvml_ready = True
             except Exception:
                 self._nvml_ready = False
+
+        # Adapter NvAPI Direct para el set de fan en Windows (lazy: no toca
+        # la DLL hasta que se consulta `available`).
+        self._nvapi_fan = nvapi_fan.NvApiFan()
 
         if PSUTIL_AVAILABLE:
             # cpu_percent (global y per-core) necesita una primera llamada
@@ -222,6 +238,7 @@ class MetricsCollector:
             power_limit = self._safe(lambda: pynvml.nvmlDeviceGetPowerManagementLimit(handle))
             clock_g = self._safe(lambda: pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_GRAPHICS))
             clock_m = self._safe(lambda: pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_MEM))
+            fan_pct = self._safe(lambda: pynvml.nvmlDeviceGetFanSpeed(handle))
 
             vram_total_mb = round(mem.total / (1024**2), 1) if mem else 0.0
             vram_used_mb = round(mem.used / (1024**2), 1) if mem else 0.0
@@ -242,6 +259,7 @@ class MetricsCollector:
                 power_limit_w=round(power_limit / 1000, 1) if power_limit is not None else None,
                 clock_graphics_mhz=clock_g,
                 clock_memory_mhz=clock_m,
+                fan_speed_pct=fan_pct,
             ))
 
         return gpus, None
@@ -265,6 +283,12 @@ class MetricsCollector:
             return os.geteuid() == 0
         except Exception:
             return False
+
+    def privilege_hint(self) -> str:
+        # Qué privilegio exige la plataforma para cambiar el power limit:
+        # "admin" en Windows, "root" en POSIX. Es una clave, no texto: el
+        # frontend la traduce a su i18n correspondiente.
+        return "admin" if platform.system() == "Windows" else "root"
 
     def collect_power_limits(self) -> tuple[list[dict[str, Any]] | None, str | None, bool]:
         """(gpus, error, privileged). Por GPU: índice, nombre y el rango real
@@ -322,6 +346,45 @@ class MetricsCollector:
             return True, None
         except Exception as exc:
             return False, str(exc)
+
+    def set_fan_speed(self, index: int, percent: int) -> tuple[bool, str | None]:
+        """(ok, error). Fija el fan y lo verifica con read-back: hay drivers
+        que "aceptan" la escritura y la ignoran en silencio (GeForce con VBIOS
+        de consumo), así que el ok de NVML no basta — si el valor real no
+        cambia, error="fan_no_change" para que el frontend lo explique.
+
+        En Windows NVML rechaza la escritura en GeForce, así que se usa
+        NvAPI Direct (adapter nvapi_fan); su read-back es GetControl, porque
+        el porcentaje de NVML arrastra varios segundos tras el set."""
+        if not PYNVML_AVAILABLE:
+            return False, "pynvml no está instalado"
+        if not self._nvml_ready:
+            return False, "No se pudo inicializar NVML (¿hay una GPU NVIDIA?)"
+        if self._nvapi_fan.available:
+            return self._nvapi_fan.set_manual(index, percent,
+                                              tolerance=FAN_SET_TOLERANCE_PCT,
+                                              readback_s=FAN_SET_READBACK_S)
+        try:
+            handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+            pynvml.nvmlDeviceSetFanSpeed_v2(handle, 0, percent)
+        except Exception as exc:
+            return False, self._fan_error_key(str(exc))
+        time.sleep(FAN_SET_READBACK_S)
+        actual = self._safe(lambda: pynvml.nvmlDeviceGetFanSpeed(handle))
+        if actual is None or abs(actual - percent) > FAN_SET_TOLERANCE_PCT:
+            return False, "fan_no_change"
+        return True, None
+
+    @staticmethod
+    def _fan_error_key(exc: str) -> str:
+        # Claves estables para que el frontend traduzca sin parsear mensajes
+        # crudos de NVML (los sub-casos de permisos y soporte ya tenían su
+        # rama en el UI; el resto sigue viajando como mensaje original).
+        if "NOT_SUPPORTED" in exc:
+            return "fan_not_supported"
+        if "NO_PERMISSION" in exc or "Insufficient" in exc:
+            return "fan_no_privilege"
+        return exc
 
     # -- CPU / RAM ---------------------------------------------------------
 
@@ -694,7 +757,13 @@ async def get_gpu() -> dict[str, Any]:
 @router.get("/gpu/power-limit")
 async def get_gpu_power_limit() -> dict[str, Any]:
     gpus, error, privileged = await asyncio.to_thread(manager.collector.collect_power_limits)
-    return {"available": gpus is not None, "privileged": privileged, "gpus": gpus, "error": error}
+    return {
+        "available": gpus is not None,
+        "privileged": privileged,
+        "privilege_hint": manager.collector.privilege_hint(),
+        "gpus": gpus,
+        "error": error,
+    }
 
 
 @router.post("/gpu/power-limit")
@@ -703,6 +772,15 @@ async def set_gpu_power_limit(body: PowerLimitSet) -> dict[str, Any]:
         return {"ok": False, "index": body.index, "watts": None, "error": "watts es requerido"}
     ok, error = await asyncio.to_thread(manager.collector.set_power_limit, body.index, body.watts, body.default)
     return {"ok": ok, "index": body.index, "watts": body.watts, "error": error}
+
+
+@router.post("/gpu/fan")
+async def set_gpu_fan(body: FanSpeedSet) -> dict[str, Any]:
+    ok, error = await asyncio.to_thread(manager.collector.set_fan_speed, body.index, body.percent)
+    # El hint permite que el frontend traduzca un error de permisos al
+    # mensaje correcto (root en POSIX, admin en Windows) sin conocer el SO.
+    return {"ok": ok, "index": body.index, "percent": body.percent, "error": error,
+            "privilege_hint": manager.collector.privilege_hint()}
 
 
 @router.get("/cpu")

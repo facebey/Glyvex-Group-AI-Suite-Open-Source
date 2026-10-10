@@ -7,6 +7,36 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+### Corregido
+- **Chat: la lista de modelos del endpoint ahora va por proxy del backend**
+  (E4): el navegador no puede llamar `/v1/models` directo a un endpoint
+  ajeno (CORS), así que Chat hace `GET /api/chat/endpoint-models?url=...`; el
+  backend valida la URL (solo http/https), aplica timeout de 3s y devuelve
+  los ids de modelos.
+- **Launcher: parada ordenada de llama-server** (E6): `stop()` ahora envía
+  primero `POST /exit` (shutdown ordenado, unload del modelo) y espera un
+  grace period antes de caer a terminate/kill — en Windows `terminate()` es
+  un kill inmediato que podía saltarse el unload.
+- **Chat: el debounce del autosave mantiene identidad estable** (E8):
+  `scheduleSave` lee `open`/`search` por referencia (deps `[save, load]`), de
+  modo que `onFinish` del chat ya no reprograma el debounce en cada cambio de
+  open/search y el recargo de lista tras guardar usa los valores actuales.
+- **Árbol de conversaciones: `getPath` construye el índice de hijos una
+  vez** (E3): el Map `kidsOf` hace cada salto del camino O(1) en vez de
+  rescanear el array (O(n) por salto en árboles profundos); mismo resultado,
+  incluido el fallback al último hijo creado. Con test unitario nuevo.
+- **Arranque: silenciado el warning de deprecation de
+  `WindowsProactorEventLoopPolicy`** (E11) y la llamada se salta en Python
+  ≥3.15, donde el selector ya soporta subprocess.
+
+### Docs
+- **Checklist de release** (`docs/RELEASE-CHECKLIST.md` + `.es.md`): el
+  procedimiento completo de release — bump de versión en 6 archivos juntos,
+  tag/push, build (sidecar + NSIS desde la raíz del repo con override
+  mínimo), `latest.json`, sync público, GitHub Release no-prerelease,
+  verificación — más los gotchas aprendidos. Enlazado desde la sección de
+  versionado del README.
+
 ## [0.7.7-beta] — 2026-10-05
 
 ### Añadido

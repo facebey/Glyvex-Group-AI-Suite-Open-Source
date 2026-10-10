@@ -40,9 +40,18 @@ import stt_runtime_api
 import tts
 import asyncio
 import sys
+import warnings
 
 if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    # Subprocess en Windows necesita el event loop proactor. La clase está
+    # deprecada desde 3.12 (y se elimina en 3.15, donde el selector ya
+    # soporta subprocess): se silencia el warning y se salta si ya no existe.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        except AttributeError:
+            pass
 
 # En dev: frontend/dist del repo. En el bundle: el dist empaquetado
 # (glyvex.spec, datas → _internal/frontend/dist).

@@ -7,6 +7,35 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+### Fixed
+- **Chat: endpoint model list now goes through the backend proxy** (E4): the
+  browser cannot call `/v1/models` directly on a third-party endpoint (CORS),
+  so Chat fetches `GET /api/chat/endpoint-models?url=...` instead; the backend
+  validates the URL (http/https only), applies a 3s timeout and returns the
+  model IDs.
+- **Launcher: graceful llama-server stop** (E6): `stop()` now sends
+  `POST /exit` first (ordered shutdown, model unload) and waits a grace
+  period before falling back to terminate/kill — on Windows `terminate()` is
+  an immediate kill that could skip the unload.
+- **Chat: autosave debounce keeps a stable identity** (E8): `scheduleSave`
+  reads `open`/`search` through refs (deps `[save, load]`), so the chat's
+  `onFinish` no longer reprograms the debounce on every open/search change,
+  and the post-save list reload uses the current values.
+- **Conversation tree: `getPath` builds the children index once** (E3): the
+  `kidsOf` Map makes each path hop O(1) instead of rescanning the array
+  (O(n) per hop on deep trees); same result, including the last-created
+  child fallback. Covered by a new unit test.
+- **Startup: silenced the `WindowsProactorEventLoopPolicy` deprecation
+  warning** (E11) and the call is skipped on Python ≥3.15, where the selector
+  loop already supports subprocesses.
+
+### Docs
+- **Release checklist** (`docs/RELEASE-CHECKLIST.md` + `.es.md`): the full
+  release procedure — version bump in 6 files together, tag/push, build
+  (sidecar + NSIS from the repo root with a minimal override), `latest.json`,
+  public sync, non-prerelease GitHub Release, verification — plus the learned
+  gotchas. Linked from the README versioning section.
+
 ## [0.7.7-beta] — 2026-10-05
 
 ### Added

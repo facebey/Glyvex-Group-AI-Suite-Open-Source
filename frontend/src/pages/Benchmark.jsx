@@ -270,6 +270,16 @@ export default function Benchmark() {
         fetch(`/api/benchmark/run/${id}`).then((r) => r.json()).then(setFinishedRun).catch(() => {});
         wsClosedByUsRef.current = true;
         ws.close();
+      } else if (data.error) {
+        // Frame sin `type` (p. ej. {"error": "Run no encontrado"} tras un
+        // reinicio del backend, y el socket se cierra): terminal. Sin esto el
+        // onclose reintentaría el WS en loop y la UI quedaría congelada en
+        // "running".
+        setRunning(false);
+        setRunError(data.error);
+        localStorage.removeItem(ACTIVE_RUN_KEY);
+        wsClosedByUsRef.current = true;
+        ws.close();
       }
     };
     ws.onclose = () => {
@@ -360,7 +370,18 @@ export default function Benchmark() {
 
   async function handleCancel() {
     if (!runId) return;
-    await fetch(`/api/benchmark/run/${runId}`, { method: "DELETE" }).catch(() => {});
+    // El endpoint es dual (cancelar o eliminar): si el run ya no está, el
+    // DELETE borra datos. Chequear la respuesta y reportar el error evita
+    // que un fallo (o la rama de eliminación) pase en silencio.
+    try {
+      const res = await fetch(`/api/benchmark/run/${runId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        setRunError(detail?.detail || t("benchmark.errors.cancelFailed", { status: res.status }));
+      }
+    } catch {
+      setRunError(t("benchmark.errors.cancelNoResponse"));
+    }
     localStorage.removeItem(ACTIVE_RUN_KEY);
   }
 
@@ -415,8 +436,8 @@ export default function Benchmark() {
               currentPrompt: null,
               currentScore: null,
             }));
-            const updated = await fetch(`/api/benchmark/history/${finishedRun.run_id}`).then((r) => r.json());
-            setFinishedRun(updated);
+            const refreshed = await fetch(`/api/benchmark/history/${finishedRun.run_id}`);
+            if (refreshed.ok) setFinishedRun(await refreshed.json());
           } else if (data.error) {
             setJudgeError(data.error);
           } else {

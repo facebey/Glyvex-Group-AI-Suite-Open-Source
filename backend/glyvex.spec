@@ -128,7 +128,8 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    icon="../assets/brand/icons/glyvex-ai-suite.ico",
+    # .ico solo se aplica en Windows; en Linux/macOS PyInstaller lo ignora.
+    icon="../assets/brand/icons/glyvex-ai-suite.ico" if sys.platform == "win32" else None,
 )
 
 coll = COLLECT(

@@ -20,6 +20,7 @@ export const DISPLAY_CATALOG = [
       { key: "monitor.gpu.temp", labelKey: "display.items.monitor.gpu.temp" },
       { key: "monitor.gpu.power_clocks", labelKey: "display.items.monitor.gpu.power_clocks" },
       { key: "monitor.gpu.power_limit", labelKey: "display.items.monitor.gpu.powerLimit" },
+      { key: "monitor.gpu.fan", labelKey: "display.items.monitor.gpu.fan" },
       { key: "monitor.gpu.chart", labelKey: "display.items.monitor.gpu.chart" },
       { key: "monitor.cpu.total", labelKey: "display.items.monitor.cpu.total" },
       { key: "monitor.cpu.cores", labelKey: "display.items.monitor.cpu.cores" },

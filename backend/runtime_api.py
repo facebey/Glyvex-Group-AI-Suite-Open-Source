@@ -47,9 +47,10 @@ async def status() -> dict:
 
 @router.post("/download")
 async def download(keep_previous: bool = False) -> StreamingResponse:
-    if platform.system() != "Windows":
+    if not runtime.platform_supported():
         raise HTTPException(
-            status_code=400, detail="El runtime gestionado es Windows-only en v1"
+            status_code=400,
+            detail="El runtime gestionado soporta Windows x64 y Linux x64 (v1)",
         )
     if runtime.runtime_status()["state"] == "downloading":
         raise HTTPException(status_code=409, detail="Ya hay una descarga de runtime en curso")

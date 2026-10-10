@@ -59,7 +59,8 @@
     "runtimeError": "Error downloading the runtime",
     "runtimeRetry": "Retry",
     "runtimeDegraded": "GPU acceleration not installed — running on CPU.",
-    "runtimeUnsupported": "The embedded runtime is Windows-only in v1. Use expert mode in Config.",
+    "runtimeCudaNote": "GPU with compute capability {{cc}} — using the CUDA 12.x bundle because CUDA 13.x does not support this architecture.",
+    "runtimeUnsupported": "The embedded runtime supports Windows x64 and Linux x64 in v1. Use expert mode in Config.",
     "runtimeGoConfig": "Go to Config"
   },
   "footer": {
@@ -116,6 +117,7 @@
           "temp": "GPU · temperature",
           "power_clocks": "GPU · power and clocks",
           "powerLimit": "GPU · power limit (TDP)",
+          "fan": "GPU · fan",
           "chart": "GPU · 60 s chart"
         },
         "cpu": {
@@ -413,7 +415,9 @@
     "regenerateTitle": "Regenerate the response with the chosen reasoning",
     "speakTitle": "Read the response aloud",
     "speakLoadingTitle": "Generating audio…",
-    "speakStopTitle": "Stop reading"
+    "speakStopTitle": "Stop reading",
+    "speakPlayFailed": "The browser could not play the generated audio",
+    "speakBlocked": "The browser blocked playback (tap the tab's speaker if it is muted)"
   },
   "composer": {
     "contextOver": "This send exceeds the model context by about {{over}} tokens",
@@ -659,12 +663,13 @@
       "gpuTemp": "GPU temp:",
       "freeVram": "Free VRAM:",
       "alert": "ALERT",
-      "reasonTemp": "GPU {{temp}}°C",
-      "reasonVram": "VRAM {{pct}}%",
-      "thresholds": "Triggered when GPU temperature goes above 85°C or VRAM usage goes above 95%."
+      "reasonTemp": "GPU {{gpu}}: {{temp}}°C",
+      "reasonVram": "GPU {{gpu}}: VRAM {{pct}}%",
+      "thresholds": "Triggered when any GPU temperature goes above 85°C or any GPU's VRAM usage goes above 95%."
     },
     "gpu": {
       "notDetected": "NVIDIA GPU not detected",
+      "index": "GPU {{index}}",
       "util": "GPU utilization",
       "last60s": "Last 60s — GPU util % / VRAM %",
       "tdp": {
@@ -679,9 +684,22 @@
         "apply": "Apply",
         "applying": "Applying…",
         "needsAdmin": "Run Glyvex as administrator to apply the limit.",
+        "needsRoot": "Run Glyvex as root (sudo) to apply the limit.",
         "applySuccess": "Power limit applied: {{watts}} W",
         "resetSuccess": "Power limit reset to factory default",
         "applyError": "Could not apply the power limit: {{error}}",
+        "loadError": "Could not reach the backend."
+      },
+      "fan": {
+        "title": "Fan",
+        "apply": "Apply",
+        "applying": "Applying…",
+        "applySuccess": "Fan set to {{pct}}%",
+        "applyError": "Could not set the fan: {{error}}",
+        "noChange": "The card accepted the command but the fan did not change: it does not support manual control (auto curve is kept).",
+        "notSupported": "This GPU does not allow setting the fan manually.",
+        "needsAdmin": "Run Glyvex as administrator to set the fan.",
+        "needsRoot": "Run Glyvex as root (sudo) to set the fan.",
         "loadError": "Could not reach the backend."
       },
       "power": "Power",
@@ -808,7 +826,9 @@
       "setsRetry": "Retry",
       "judgeStatus": "The judge responded with {{status}}",
       "noStream": "The browser did not return a stream for the judge.",
-      "judgeCatch": "Error evaluating with the judge."
+      "judgeCatch": "Error evaluating with the judge.",
+      "cancelFailed": "The server responded {{status}} while trying to cancel the benchmark",
+      "cancelNoResponse": "Could not cancel the benchmark (no server response)"
     },
     "resultsTitle": "Results",
     "summary": {
@@ -923,13 +943,14 @@
       "expertSub": "You have your own binary configured (binary_path in Backends) and it always wins.",
       "cpuNote": "GPU acceleration is coming soon; it runs on CPU for now",
       "degraded": "GPU acceleration not installed — running on CPU.",
+      "cudaNote": "GPU with compute capability {{cc}} — CUDA 12.x bundle (CUDA 13.x does not support this architecture).",
       "outdated": "Runtime outdated — {{pin}} not installed yet",
       "outdatedSub": "Previous build {{prev}} ({{prevSize}} MB) is on disk. Estimated download: ~{{size}} MB.",
       "update": "Update runtime",
       "keepPrevious": "Keep previous build (rollback)",
       "uninstall": "Uninstall",
       "uninstallConfirm": "Uninstall the managed runtime? The local copy will be deleted. Use expert mode (binary_path in Backends) to point to your own binary.",
-      "unsupported": "The embedded runtime is Windows-only in v1. Configure your own binary in Backends (expert mode)."
+      "unsupported": "The embedded runtime supports Windows x64 and Linux x64 in v1. Configure your own binary in Backends (expert mode)."
     },
     "title": "Config",
     "backends": {
@@ -944,6 +965,7 @@
     "compareSelected": "Compare selected ({{n}}/2)",
     "loading": "Loading history…",
     "empty": "You haven't run any benchmark yet.",
+    "loadFailed": "Could not load the run (the server responded {{status}}).",
     "detail": {
       "model": "Model",
       "started": "Started",

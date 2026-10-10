@@ -98,6 +98,11 @@ LOGS_DIR = DATA_DIR / "logs"
 LOG_BUFFER_MAXLEN = 2000
 HEALTH_CHECK_INTERVAL_S = 2.0
 HEALTH_CHECK_TIMEOUT_TOTAL_S = 30.0
+# Un modelo grande (p. ej. 70B en CPU) puede tardar más de 30 s en servir:
+# agotado el timeout normal el monitor degrada a un intervalo largo hasta el
+# tope extendido en vez de marcar "error" mientras llama-server sigue cargando.
+HEALTH_CHECK_INTERVAL_EXTENDED_S = 15.0
+HEALTH_CHECK_TIMEOUT_EXTENDED_S = 300.0
 STOP_GRACE_PERIOD_S = 5.0
 
 # llama-server escribe esta línea cada vez que atiende una tarea sin nada que
@@ -1104,7 +1109,8 @@ class ModelProcessManager:
         if info is None:
             return
         elapsed = 0.0
-        while elapsed < HEALTH_CHECK_TIMEOUT_TOTAL_S:
+        degraded = False
+        while elapsed < HEALTH_CHECK_TIMEOUT_EXTENDED_S:
             if process_id not in self._info or self._info[process_id].state == "stopped":
                 return
             if await self.health_check(info.host, info.port):
@@ -1112,13 +1118,24 @@ class ModelProcessManager:
                 if current and current.state == "starting":
                     current.state = "running"
                 return
-            await asyncio.sleep(HEALTH_CHECK_INTERVAL_S)
-            elapsed += HEALTH_CHECK_INTERVAL_S
+            if elapsed < HEALTH_CHECK_TIMEOUT_TOTAL_S:
+                interval = HEALTH_CHECK_INTERVAL_S
+            else:
+                interval = HEALTH_CHECK_INTERVAL_EXTENDED_S
+                if not degraded:
+                    degraded = True
+                    self._publish_log_line(
+                        process_id,
+                        "[glyvex] carga lenta: el servidor aún no sirve; "
+                        f"seguiré el health check hasta {HEALTH_CHECK_TIMEOUT_EXTENDED_S:.0f}s",
+                    )
+            await asyncio.sleep(interval)
+            elapsed += interval
         current = self._info.get(process_id)
         if current and current.state == "starting":
             current.state = "error"
             current.error_message = (
-                f"Health check no respondió 200 en {HEALTH_CHECK_TIMEOUT_TOTAL_S:.0f}s"
+                f"Health check no respondió 200 en {HEALTH_CHECK_TIMEOUT_EXTENDED_S:.0f}s"
             )
 
     # -- lectura de stdout/stderr combinados -----------------------------
@@ -1380,6 +1397,19 @@ class ModelProcessManager:
             info.pid = None
             return info
         self._stopping.add(process_id)
+        if info.backend == "llama_server" and info.host and info.port:
+            # /exit pide el shutdown ordenado (unload del modelo). En Windows
+            # terminate() es un kill inmediato (TerminateProcess) que salta el
+            # unload si llega antes.
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    await client.post(f"http://{info.host}:{info.port}/exit")
+            except httpx.HTTPError:
+                pass
+            try:
+                await asyncio.wait_for(process.wait(), timeout=STOP_GRACE_PERIOD_S)
+            except asyncio.TimeoutError:
+                pass  # no cerró a tiempo: el terminate/kill de abajo sigue
         try:
             process.terminate()  # SIGTERM (en Windows: TerminateProcess)
         except ProcessLookupError:

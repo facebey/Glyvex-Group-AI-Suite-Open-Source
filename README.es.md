@@ -233,6 +233,11 @@ instalar nada de inferencia: pin **b11349**, en layout plano, en dos niveles:
 - **motor base** (~19 MB): corre en cualquier GPU/CPU.
 - **aceleración** (~531 MB para NVIDIA + CUDA 13.4; la de AMD/Intel llega
   en la fase B). Se elige según la familia de GPU detectada.
+- **Arquitectura CUDA** — el bundle de aceleración se elige según la
+  capacidad de cómputo de la GPU (se consulta en runtime), así que calza con
+  la tarjeta que tenés: las NVIDIA recientes (Turing/Ampere/Ada) y las más
+  antiguas (Pascal, ej. serie GTX 10) reciben la build de CUDA correcta en
+  vez de un mismatch.
 
 - **Dónde vive:** `<DATA_DIR>/runtime/llama.cpp-b11349/` (exe + DLLs en la
   misma carpeta, porque `llama-server.exe` busca sus DLLs en su propio

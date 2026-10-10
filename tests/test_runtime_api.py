@@ -24,8 +24,10 @@ def _force_windows(monkeypatch):
     monkeypatch.setattr(runtime_module.platform, "system", lambda: "Windows")
 
 
-def _force_non_windows(monkeypatch):
-    monkeypatch.setattr(runtime_module.platform, "system", lambda: "Linux")
+def _force_unsupported(monkeypatch):
+    # RT-14: Linux x64 quedó soportado; una plataforma fuera de v1 es
+    # Windows x64 + Linux x64 → se simula con Darwin.
+    monkeypatch.setattr(runtime_module.platform, "system", lambda: "Darwin")
 
 
 def _fake_base_source() -> list[dict]:
@@ -77,14 +79,14 @@ async def test_status_missing_on_windows(client, monkeypatch):
     assert data["platform"] == "Windows"
 
 
-async def test_status_unsupported_on_non_windows(client, monkeypatch):
-    _force_non_windows(monkeypatch)
+async def test_status_unsupported_on_unsupported_platform(client, monkeypatch):
+    _force_unsupported(monkeypatch)
 
     res = await client.get("/api/runtime/status")
     assert res.status_code == 200
     data = res.json()
     assert data["state"] == "unsupported"
-    assert data["platform"] == "Linux"
+    assert data["platform"] == "Darwin"
 
 
 async def test_status_ready_when_binary_present(client, monkeypatch):
@@ -152,12 +154,12 @@ def test_detect_gpu_cpu_when_nothing(monkeypatch):
 # --------------------------------------------------------------------------
 
 
-async def test_download_rejects_non_windows(client, monkeypatch):
-    _force_non_windows(monkeypatch)
+async def test_download_rejects_unsupported_platform(client, monkeypatch):
+    _force_unsupported(monkeypatch)
 
     res = await client.post("/api/runtime/download")
     assert res.status_code == 400
-    assert "Windows-only" in res.json()["detail"]
+    assert "Windows x64 y Linux x64" in res.json()["detail"]
 
 
 async def test_download_conflict_when_already_downloading(client, monkeypatch):
@@ -259,7 +261,8 @@ async def test_reset_noop_when_missing(client, monkeypatch):
     assert data["reset"] is False
     assert data["status"]["state"] == "missing"
     # El frontend setea este status directo en su estado: sin platform la
-    # UI mostraría "Windows-only" en vez de la pantalla de descarga.
+    # UI mostraría "plataforma no soportada" en vez de la pantalla de
+    # descarga.
     assert data["status"]["platform"] == "Windows"
 
 

@@ -233,6 +233,10 @@ install any inference software: pin **b11349**, flat layout, in two levels:
 - **base engine** (~19 MB): runs on any GPU/CPU.
 - **acceleration** (~531 MB for NVIDIA + CUDA 13.4; the AMD/Intel one comes
   in phase B). It's picked based on the detected GPU family.
+- **CUDA arch** — the acceleration bundle is matched to the GPU's compute
+  capability (queried at runtime), so it fits the card you have: both recent
+  (Turing/Ampere/Ada) and older (Pascal, e.g. GTX 10-series) NVIDIA cards
+  get the correct CUDA build instead of a mismatch.
 
 - **Where it lives:** `<DATA_DIR>/runtime/llama.cpp-b11349/` (exe + DLLs in
   the same folder, because `llama-server.exe` looks for its DLLs in its own

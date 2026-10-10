@@ -10,9 +10,19 @@ def _log_file():
     if raw:
         data_dir = raw
     else:
+        # Misma lógica de default que paths._frozen_default_data_dir (los
+        # logs deben vivir junto al resto del estado, no en otra parte).
         local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
-        data_dir = os.path.join(local_appdata or os.path.expanduser("~"),
-                                "Glyvex-AI-Suite", "data")
+        if local_appdata:
+            data_dir = os.path.join(local_appdata, "Glyvex-AI-Suite", "data")
+        elif sys.platform == "linux":
+            xdg_data_home = os.environ.get("XDG_DATA_HOME", "").strip()
+            base = (xdg_data_home or os.path.join(os.path.expanduser("~"),
+                                                  ".local", "share"))
+            data_dir = os.path.join(base, "Glyvex-AI-Suite", "data")
+        else:
+            data_dir = os.path.join(os.path.expanduser("~"),
+                                    "Glyvex-AI-Suite", "data")
     log_dir = os.path.join(data_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
     return open(os.path.join(log_dir, "sidecar-console.log"), "a",

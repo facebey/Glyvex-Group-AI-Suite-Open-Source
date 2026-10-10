@@ -24,6 +24,46 @@ async def test_scan_finds_gguf(client, sample_model_dir):
     assert len(listed) == 3  # los 3 .gguf de sample_model_dir
 
 
+async def test_scan_body_uses_unsaved_dirs(client, tmp_path):
+    # WYSIWYG del panel Config: el body manda un directorio que NO está en
+    # config.json guardado, y el scan lo encuentra igual.
+    unsaved = tmp_path / "no_guardado"
+    unsaved.mkdir()
+    (unsaved / "nuevo-8B-Q4_K_M.gguf").touch()
+
+    events = await scan_and_wait(client, model_dirs=[str(unsaved)])
+    assert any('"complete"' in e for e in events)
+
+    listed = (await client.get("/api/models")).json()
+    assert len(listed) == 1
+    assert listed[0]["filename"] == "nuevo-8B-Q4_K_M.gguf"
+
+
+async def test_scan_body_overrides_saved_config(client, sample_model_dir, tmp_path):
+    # Config guardado con dir A; el body manda dir B: se escanea B, y las
+    # entradas de A sobreviven porque su archivo sigue en disco.
+    await client.post("/api/config", json={"model_dirs": [str(sample_model_dir)]})
+    await scan_and_wait(client)
+    assert len((await client.get("/api/models")).json()) == 3
+
+    other = tmp_path / "otro"
+    other.mkdir()
+    (other / "otro-4B-Q4_K_M.gguf").touch()
+
+    await scan_and_wait(client, model_dirs=[str(other)])
+    names = {m["filename"] for m in (await client.get("/api/models")).json()}
+    assert "otro-4B-Q4_K_M.gguf" in names
+    assert "Qwen3.8-27B-UD-Q4_K_XL.gguf" in names
+
+
+async def test_scan_without_body_falls_back_to_saved_config(client, sample_model_dir):
+    # Sin body: comportamiento original, usa el config.json guardado.
+    await client.post("/api/config", json={"model_dirs": [str(sample_model_dir)]})
+    events = await scan_and_wait(client)
+    assert any('"complete"' in e for e in events)
+    assert len((await client.get("/api/models")).json()) == 3
+
+
 async def test_parse_qwen3(client, sample_model_dir):
     await client.post("/api/config", json={"model_dirs": [str(sample_model_dir)]})
     await scan_and_wait(client)

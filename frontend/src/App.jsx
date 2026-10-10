@@ -149,11 +149,11 @@ function OnboardingScreen({ onDismiss }) {
   const step3Done = hasActiveProcess;
 
   // Estado del paso "Descargar runtime" (RT-10): experto gana (usa su
-  // binario), luego descarga en curso, error, ready. En Windows el motor
-  // base se ofrece a TODA la GPU (la aceleración depende de la familia);
-  // fuera de Windows va al banner "no soportado".
+  // binario), luego descarga en curso, error, ready. En plataformas
+  // soportadas (Windows x64 / Linux x64) el motor base se ofrece a TODA la
+  // GPU (la aceleración depende de la familia); el backend decide "no
+  // soportado" vía state, y el frontend solo lo renderiza.
   const expertBinary = cfg?.backends?.llama_server?.binary_path;
-  const isWindows = runtime?.platform === "Windows";
   const gpuLabel = runtime?.gpu === "cpu" ? "CPU" : (runtime?.gpu || "CPU");
   const isNvidia = runtime?.gpu_family === "nvidia";
   const sizeMb = isNvidia ? 549 : 19;
@@ -163,7 +163,7 @@ function OnboardingScreen({ onDismiss }) {
   else if (dl?.phase === "downloading" || runtime?.state === "downloading") runtimeView = "downloading";
   else if (dl?.phase === "error" || runtime?.state === "error") runtimeView = "error";
   else if (runtime?.state === "ready") runtimeView = "ready";
-  else if (!isWindows) runtimeView = "skipped";
+  else if (runtime?.state === "unsupported") runtimeView = "skipped";
   else runtimeView = "action";
 
   const steps = [
@@ -196,6 +196,11 @@ function OnboardingScreen({ onDismiss }) {
               {isNvidia && !runtime?.accel && (
                 <p className="text-xs text-amber-400">
                   {t("onboarding.runtimeDegraded")}
+                </p>
+              )}
+              {runtime?.cuda_note && (
+                <p className="text-xs text-amber-400">
+                  {t("onboarding.runtimeCudaNote", { cc: runtime.cuda_note })}
                 </p>
               )}
             </>
@@ -531,11 +536,17 @@ function AutoProvisionGuard() {
   const checked = useRef(false);
   useEffect(() => {
     if (checked.current || !isTauri() || location.pathname === "/provision") return;
-    checked.current = true;
     fetch("/api/runtime/status")
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => {
-        if (data && data.state !== "ready") navigate("/provision", { replace: true });
+        // checked=true solo con el fetch resuelto: un fallo transitorio
+        // (backend arrancando) no cierra el guard para siempre y permite
+        // reintentar en la próxima navegación.
+        checked.current = true;
+        if (data.state !== "ready") navigate("/provision", { replace: true });
       })
       .catch(() => {});
   }, [navigate, location.pathname]);

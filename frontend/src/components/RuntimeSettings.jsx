@@ -123,7 +123,6 @@ export default function RuntimeSettings({ expertBinary }) {
     );
   }
 
-  const isWindows = runtime.platform === "Windows";
   const gpuLabel = runtime.gpu === "cpu" ? "CPU" : runtime.gpu || "CPU";
   const isNvidia = runtime.gpu_family === "nvidia";
   const sizeMb = isNvidia ? SIZE_MB : SIZE_MB_BASE;
@@ -134,7 +133,7 @@ export default function RuntimeSettings({ expertBinary }) {
   else if (dl?.phase === "error" || runtime.state === "error") view = "error";
   else if (runtime.state === "ready") view = "ready";
   else if (runtime.state === "outdated") view = "outdated";
-  else if (!isWindows) view = "skipped";
+  else if (runtime.state === "unsupported") view = "skipped";
   else view = "action";
 
   return (
@@ -154,6 +153,11 @@ export default function RuntimeSettings({ expertBinary }) {
           </p>
           {isNvidia && !runtime.accel && (
             <p className="text-xs text-amber-400">{t("config.runtime.degraded")}</p>
+          )}
+          {runtime.cuda_note && (
+            <p className="text-xs text-amber-400">
+              {t("config.runtime.cudaNote", { cc: runtime.cuda_note })}
+            </p>
           )}
           <div className="flex gap-2">
             <button

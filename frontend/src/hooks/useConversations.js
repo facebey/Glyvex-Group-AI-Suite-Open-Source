@@ -24,6 +24,13 @@ export function useConversations({ stateRef, setCurrentConvId, onError }) {
   const saveTimerRef = useRef(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  // E8: open/search por referencia — meterlos en deps cambiaría la identidad
+  // de scheduleSave y el caller (onFinish de useChat) reprogramaría el
+  // debounce de autosave en cada cambio.
+  const openRef = useRef(open);
+  openRef.current = open;
+  const searchRef = useRef(search);
+  searchRef.current = search;
 
   const load = useCallback(async (term = "") => {
     setLoading(true);
@@ -89,9 +96,9 @@ export function useConversations({ stateRef, setCurrentConvId, onError }) {
     saveTimerRef.current = setTimeout(async () => {
       saveTimerRef.current = null;
       await save();
-      if (open) load(search);
+      if (openRef.current) load(searchRef.current);
     }, AUTOSAVE_DEBOUNCE_MS);
-  }, [save, open, search, load]);
+  }, [save, load]);
 
   /** Fuerza el guardado pendiente, si lo hay. Útil antes de limpiar o cambiar. */
   const flushSave = useCallback(async () => {

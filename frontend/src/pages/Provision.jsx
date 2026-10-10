@@ -118,7 +118,6 @@ export default function Provision() {
     </div>
   );
 
-  const isWindows = runtime ? runtime.platform === "Windows" : true;
   const sizeMb = runtime?.gpu_family === "nvidia" ? SIZE_MB : SIZE_MB_BASE;
 
   // Paso 1 — runtime llama.cpp (obligatorio)
@@ -141,7 +140,7 @@ export default function Provision() {
         {t("config.runtime.readySub", { pin: runtime.pin, size: runtime.size_mb ?? sizeMb, source: runtime.source })}
       </p>
     );
-  } else if (!isWindows) {
+  } else if (runtime?.state === "unsupported") {
     runtimeView = <p className="text-xs text-amber-400">{t("config.runtime.unsupported")}</p>;
   } else {
     runtimeView = (
@@ -212,7 +211,7 @@ export default function Provision() {
         </div>
       );
     }
-  } else if (!isWindows) {
+  } else if (stt?.state === "unsupported") {
     sttView = <p className="text-xs text-amber-400">{t("config.runtime.unsupported")}</p>;
   } else {
     sttView = (
@@ -261,7 +260,7 @@ export default function Provision() {
     ttsView = <p className="text-xs text-glyvex-muted">{t("config.runtime.loading")}</p>;
   }
 
-  const canEnter = runtime ? runtime.state === "ready" || !isWindows : false;
+  const canEnter = runtime ? runtime.state === "ready" || runtime.state === "unsupported" : false;
 
   return (
     <div className="max-w-lg mx-auto space-y-5">

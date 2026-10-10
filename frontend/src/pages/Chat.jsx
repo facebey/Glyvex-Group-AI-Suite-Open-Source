@@ -185,11 +185,13 @@ export default function Chat() {
   useEffect(() => {
     if (!endpointUrl) return undefined;
     let cancelled = false;
-    fetch(`${endpointUrl.replace(/\/$/, "")}/v1/models`)
-      .then((r) => r.json())
+    // E4: vía proxy del backend — el navegador no puede llamar /v1/models
+    // directo a un endpoint ajeno (CORS).
+    fetch(`/api/chat/endpoint-models?url=${encodeURIComponent(endpointUrl)}`)
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled) return;
-        const list = (data.data || []).map((m) => m.id);
+        const list = data?.models || [];
         setModels(list);
         if (list.length > 0 && !list.includes(selectedModel)) setSelectedModel(list[0]);
       })
@@ -415,6 +417,10 @@ export default function Chat() {
   }, [history, resetConversation]);
 
   const handleClear = useCallback(async () => {
+    // Detener ANTES de vaciar: sin esto el fetch del stream sigue en
+    // background, `streaming` queda true y el composer se bloquea sobre una
+    // conversación vacía hasta que el stream termine solo.
+    stream.stop();
     const { path: visible, currentConvId: convId } = stateRef.current;
     if (visible.length > 0 && !convId) {
       if (window.confirm(t("chat.saveBeforeClearConfirm"))) {
@@ -424,7 +430,7 @@ export default function Chat() {
     }
     resetConversation();
     if (history.open) history.load(history.search);
-  }, [history, resetConversation, t]);
+  }, [history, resetConversation, stream, t]);
 
   // -- adjuntos ---------------------------------------------------------------
   // Una tanda (selección múltiple, drop o paste) = un request por archivo,

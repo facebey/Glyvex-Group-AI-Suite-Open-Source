@@ -15,9 +15,9 @@ estado en meta local.
 from __future__ import annotations
 
 import json
+import asyncio
 import logging
 import shutil
-import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -119,7 +119,7 @@ PIPER_DEFAULT_VOICE = "es_AR-daniela-high"
 
 VOICES_META_FILE = ".piper-voices-meta.json"
 
-_download_lock = threading.Lock()
+_download_lock = asyncio.Lock()
 _downloading_voices: set[str] = set()
 
 def piper_voices_dir() -> Path:
@@ -293,7 +293,7 @@ async def download_piper_voice(
     spec = PIPER_VOICES.get(name)
     if spec is None:
         raise ValueError(f"Voz Piper desconocida: {name}")
-    with _download_lock:
+    async with _download_lock:
         if name in _downloading_voices:
             raise RuntimeError(f"La voz {name} ya se está descargando")
         base = piper_voices_dir()

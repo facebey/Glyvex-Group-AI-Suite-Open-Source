@@ -10,6 +10,7 @@ import config as config_module
 import runtime as runtime_module
 from fastapi import HTTPException
 from helpers import scan_and_wait, wait_until, write_gguf
+from mock_llm_server import EXIT_CALLS, reset_exit_calls
 
 # --------------------------------------------------------------------------
 # Construcción de comandos (funciones puras, sin red ni subprocess)
@@ -601,6 +602,41 @@ async def test_stop_process(client, sample_model_dir, mock_llama_server):
     assert res.json()["state"] == "stopped"
 
 
+async def test_stop_llama_server_calls_exit(client, sample_model_dir, mock_llama_server, fake_llama_binary, monkeypatch):
+    # E6: stop() pide primero el shutdown ordenado (POST /exit, que hace el
+    # unload) antes del terminate(), que en Windows es un kill inmediato.
+    monkeypatch.setattr(launcher_module, "STOP_GRACE_PERIOD_S", 0.3)
+    reset_exit_calls()
+    await client.post(
+        "/api/config",
+        json={
+            "model_dirs": [str(sample_model_dir)],
+            "backends": {"llama_server": {"binary_path": fake_llama_binary, "default_port": 8080, "enabled": True}},
+        },
+    )
+    await scan_and_wait(client)
+    model_id = (await client.get("/api/models")).json()[0]["id"]
+
+    launched = (
+        await client.post(
+            "/api/launcher/launch",
+            json={"model_id": model_id, "backend": "llama_server", "host": "127.0.0.1", "port": 18080},
+        )
+    ).json()
+
+    res = await client.post(f"/api/launcher/stop/{launched['process_id']}")
+    assert res.status_code == 200
+    # stop() regresa antes de que _watch_exit marque "stopped" (transición
+    # asíncrona); se espera por polling, igual que el frontend.
+    async def is_stopped():
+        status = (await client.get(f"/api/launcher/status/{launched['process_id']}")).json()
+        return status["state"] == "stopped"
+
+    assert await wait_until(is_stopped, timeout=5.0)
+    assert len(EXIT_CALLS) == 1
+    assert ":18080" in EXIT_CALLS[0]
+
+
 async def test_status_starting_to_running(client, sample_model_dir, mock_llama_server, fake_llama_binary):
     await client.post(
         "/api/config",
@@ -628,6 +664,64 @@ async def test_status_starting_to_running(client, sample_model_dir, mock_llama_s
         return status["state"] == "running"
 
     assert await wait_until(is_running, timeout=5.0)
+
+    await client.post(f"/api/launcher/stop/{process_id}")
+
+
+async def test_health_slow_load_degrades_to_extended_polling(
+    client, sample_model_dir, probeable_binary, monkeypatch
+):
+    # F-e12 (SEC-1.e): al agotar el timeout inicial sin ver 200, NO marcar
+    # "error" definitivo (un 70B en CPU tarda >30s en servir): degradar a un
+    # intervalo extendido hasta el tope extendido, y solo entonces "error".
+    monkeypatch.setattr(launcher_module, "HEALTH_CHECK_INTERVAL_S", 0.02)
+    monkeypatch.setattr(launcher_module, "HEALTH_CHECK_TIMEOUT_TOTAL_S", 0.1)
+    monkeypatch.setattr(launcher_module, "HEALTH_CHECK_INTERVAL_EXTENDED_S", 0.05)
+    monkeypatch.setattr(launcher_module, "HEALTH_CHECK_TIMEOUT_EXTENDED_S", 0.6)
+
+    # Timing determinista: en esta máquina un connect a puerto cerrado tarda
+    # los 2s de ConnectTimeout de httpx, lo que estiraría el test sin
+    # aportar nada al fix que se prueba (la degradación de intervalos).
+    async def fast_fail_health(host: str, port: int) -> bool:
+        return False
+
+    monkeypatch.setattr(launcher_module.manager, "health_check", fast_fail_health)
+
+    # probeable_binary responde --help/--version: sin el probe, launch se
+    # colgaría 15s (timeout del probe) en un fake_llama_binary que busy-loops.
+    await client.post(
+        "/api/config",
+        json={
+            "model_dirs": [str(sample_model_dir)],
+            "backends": {"llama_server": {"binary_path": probeable_binary, "default_port": 8080, "enabled": True}},
+        },
+    )
+    await scan_and_wait(client)
+    model_id = (await client.get("/api/models")).json()[0]["id"]
+
+    # Puerto sin nada escuchando: el health nunca llega a 200.
+    launched = (
+        await client.post(
+            "/api/launcher/launch",
+            json={"model_id": model_id, "backend": "llama_server", "host": "127.0.0.1", "port": 39998},
+        )
+    ).json()
+    process_id = launched["process_id"]
+
+    # A mitad de la ventana degradada el código viejo ya devolvía "error";
+    # debe mantener "starting".
+    await asyncio.sleep(0.3)
+    status = (await client.get(f"/api/launcher/status/{process_id}")).json()
+    assert status["state"] == "starting"
+
+    async def is_error():
+        s = (await client.get(f"/api/launcher/status/{process_id}")).json()
+        return s["state"] == "error"
+
+    assert await wait_until(is_error, timeout=5.0)
+
+    logs = (await client.get(f"/api/launcher/logs/{process_id}")).json()
+    assert any("carga lenta" in line for line in logs["lines"])
 
     await client.post(f"/api/launcher/stop/{process_id}")
 

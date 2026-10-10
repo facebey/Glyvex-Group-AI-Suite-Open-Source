@@ -1277,6 +1277,29 @@ async def list_endpoints() -> list[EndpointInfo]:
     return results
 
 
+@router.get("/endpoint-models")
+async def endpoint_models(url: str) -> dict[str, Any]:
+    """
+    El navegador no puede llamar /v1/models directo al endpoint (CORS), así
+    que el backend hace el fetch: mismo patrón que _ping de list_endpoints.
+    """
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="La URL debe ser http o https")
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            res = await client.get(url.rstrip("/") + "/v1/models")
+            res.raise_for_status()
+            data = res.json()
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(status_code=502, detail="No se pudo leer los modelos del endpoint")
+    models = [
+        m.get("id")
+        for m in data.get("data", [])
+        if isinstance(m, dict) and m.get("id")
+    ]
+    return {"url": url, "models": models}
+
+
 # --------------------------------------------------------------------------
 # Adjuntos
 # --------------------------------------------------------------------------

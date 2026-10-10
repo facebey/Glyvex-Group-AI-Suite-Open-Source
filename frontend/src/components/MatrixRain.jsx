@@ -5,7 +5,8 @@ import { useEffect, useRef } from "react";
  *
  * - Canvas fijo detrás del contenido (los paneles son vidrio semitransparente).
  * - ~24 fps con throttle; se pausa con la pestaña oculta.
- * - Con prefers-reduced-motion dibuja un cuadro estático y se detiene.
+ * - Siempre anima: el tema matrix se elige a propósito, por lo que la lluvia
+ *   corre igual con prefers-reduced-motion activo.
  * - Easter egg: de vez en cuando una columna deletrea "GLYVEX".
  */
 const GLYPHS =
@@ -27,7 +28,6 @@ export default function MatrixRain({ opacity = 0.55 }) {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
     const ctx = canvas.getContext("2d", { alpha: false });
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
     let width = 0;
     let height = 0;
@@ -123,11 +123,7 @@ export default function MatrixRain({ opacity = 0.55 }) {
     resize();
     window.addEventListener("resize", resize);
 
-    if (reduced) {
-      for (let k = 0; k < 60; k++) frame();   // un cuadro "asentado", sin animar
-    } else {
-      raf = requestAnimationFrame(loop);
-    }
+    raf = requestAnimationFrame(loop);
 
     return () => {
       cancelAnimationFrame(raf);

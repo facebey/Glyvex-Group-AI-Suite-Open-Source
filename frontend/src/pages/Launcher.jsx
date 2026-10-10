@@ -1246,10 +1246,13 @@ export default function Launcher() {
     let cancelled = false;
     (async () => {
       try {
+        // Un 500 con body JSON ({"detail": ...}) no es un array: sin el
+        // chequeo de res.ok, setModelList(object) rompe el render (TypeError
+        // en modelList.find) y cae al errorElement en vez del toast/reintento.
         const [models, groups, tpls] = await Promise.all([
-          fetch("/api/models").then((r) => r.json()),
-          fetch("/api/models/groups").then((r) => r.json()),
-          fetch("/api/launcher/templates").then((r) => r.json()),
+          fetch("/api/models").then(async (r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+          fetch("/api/models/groups").then(async (r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+          fetch("/api/launcher/templates").then(async (r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
         ]);
         if (cancelled) return;
         setModelList(models);

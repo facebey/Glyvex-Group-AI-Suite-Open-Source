@@ -13,6 +13,9 @@ Expone:
   GET  /metrics               → formato Prometheus de llama-server; cada lectura
                                 avanza los contadores (50 tokens en 1 s de decode).
   POST /v1/chat/completions   → SSE con dos tokens ("Hola" + " mundo") y [DONE].
+  POST /exit                  → shutdown de llama-server; queda registrado en
+                                 EXIT_CALLS para que los tests verifiquen el stop
+                                 gracioso del launcher.
                                 Con "__REASONING_TEST__" en el mensaje: razonamiento
                                 en reasoning_content + usage y timings al final.
 """
@@ -33,6 +36,20 @@ async def _health(request: Request) -> JSONResponse:
 
 async def _v1_models(request: Request) -> JSONResponse:
     return JSONResponse({"data": [{"id": "test-model", "object": "model"}]})
+
+
+# URLs de POST /exit recibidos (el stop gracioso del launcher). Los tests lo
+# reinician con reset_exit_calls().
+EXIT_CALLS: list[str] = []
+
+
+def reset_exit_calls() -> None:
+    EXIT_CALLS.clear()
+
+
+async def _exit(request: Request) -> JSONResponse:
+    EXIT_CALLS.append(str(request.url))
+    return JSONResponse({"status": "exiting"})
 
 
 # Estado del /metrics simulado. Los tests lo reinician con reset_metrics().
@@ -170,5 +187,6 @@ def build_mock_app() -> Starlette:
             Route("/api/v2/write", _influx_write, methods=["POST"]),
             Route("/write", _influx_write, methods=["POST"]),
             Route("/v1/chat/completions", _chat_completions, methods=["POST"]),
+            Route("/exit", _exit, methods=["POST"]),
         ]
     )

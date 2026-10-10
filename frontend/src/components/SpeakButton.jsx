@@ -72,7 +72,7 @@ export default function SpeakButton({ content, onError }) {
       };
       audio.onerror = () => {
         stop();
-        onError?.("el navegador no pudo reproducir el audio generado");
+        onError?.(t("message.speakPlayFailed"));
       };
       setState("playing");
       try {
@@ -81,7 +81,7 @@ export default function SpeakButton({ content, onError }) {
         stop();
         throw new Error(
           playErr?.name === "NotAllowedError"
-            ? "el navegador bloqueó la reproducción (tocá el altavoz de la pestaña si está mutada)"
+            ? t("message.speakBlocked")
             : playErr?.message || String(playErr)
         );
       }

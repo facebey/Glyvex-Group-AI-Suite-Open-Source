@@ -110,6 +110,16 @@ class ModelPatch(BaseModel):
     tags: list[str] | None = None
 
 
+class ScanRequest(BaseModel):
+    """
+    Body opcional de POST /api/models/scan: los directorios que el usuario
+    ve en el panel Config (pueden no estar aún guardados en config.json).
+    Si no se envía (o es None), se usa el config guardado.
+    """
+
+    model_dirs: list[str] | None = None
+
+
 class ModelGroup(BaseModel):
     """
     Agrupación de modelos por carpeta padre (mejora M5): una cuantización
@@ -1517,9 +1527,13 @@ async def patch_model(model_id: str, patch: ModelPatch) -> ModelEntry:
 
 
 @router.post("/scan")
-async def scan_models() -> StreamingResponse:
+async def scan_models(body: ScanRequest | None = None) -> StreamingResponse:
     await inventory.ensure_loaded()
-    model_dirs = config.get("model_dirs", [])
+    model_dirs = (
+        body.model_dirs
+        if body is not None and body.model_dirs is not None
+        else config.get("model_dirs", [])
+    )
 
     async def event_stream() -> AsyncGenerator[str, None]:
         async for event in inventory.scan(model_dirs):

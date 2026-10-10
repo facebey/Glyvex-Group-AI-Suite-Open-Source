@@ -11,9 +11,12 @@ endpoint) viven en test_runtime_api.py.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import json
+import os
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -27,8 +30,19 @@ def _force_windows(monkeypatch):
     monkeypatch.setattr(runtime_module.platform, "system", lambda: "Windows")
 
 
-def _force_non_windows(monkeypatch):
+def _force_linux(monkeypatch):
     monkeypatch.setattr(runtime_module.platform, "system", lambda: "Linux")
+
+
+def _force_unsupported(monkeypatch):
+    """Plataforma fuera del soporte v1 (Windows x64 + Linux x64, RT-14)."""
+    monkeypatch.setattr(runtime_module.platform, "system", lambda: "Darwin")
+
+
+def _force_cc(monkeypatch, cc):
+    """Fija la compute capability máxima detectada (RT-15). None simula sin
+    NVML / GPU ausente / driver sin NVML."""
+    monkeypatch.setattr(runtime_module, "_max_gpu_compute_capability", lambda: cc)
 
 
 def _patch_transport(monkeypatch, handler):
@@ -50,6 +64,27 @@ def _make_zip(tmp_path: Path, entries: dict[str, bytes]) -> Path:
         for name, data in entries.items():
             zf.writestr(name, data)
     return z
+
+
+def _make_targz(
+    tmp_path: Path,
+    entries: dict[str, tuple[bytes, int]],
+    symlinks: dict[str, str] | None = None,
+) -> Path:
+    p = tmp_path / "archive.tar.gz"
+    with tarfile.open(p, "w:gz") as tf:
+        for name, (data, mode) in entries.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mode = mode
+            tf.addfile(info, io.BytesIO(data))
+        for name, linkname in (symlinks or {}).items():
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.SYMTYPE
+            info.linkname = linkname
+            info.mode = 0o777
+            tf.addfile(info)
+    return p
 
 
 # --------------------------------------------------------------------------
@@ -149,28 +184,287 @@ def test_extract_zip_rejects_entry_outside_target(tmp_path):
     assert not (tmp_path / "evil.txt").exists()
 
 
+def test_extract_zip_rejects_sibling_dir_bypass(tmp_path):
+    # startswith de strings dejaría pasar un directorio hermano cuyo nombre
+    # empieza con el del target (out-evil vs out): la contención correcta es
+    # is_relative_to (SEC-1.b, F-b1).
+    z = _make_zip(tmp_path, {"good.txt": b"OK", "../out-evil/evil.txt": b"EVIL"})
+    target = tmp_path / "out"
+    target.mkdir()
+
+    with pytest.raises(RuntimeError, match="fuera del destino"):
+        runtime_module._extract_zip(z, target)
+
+    assert not (tmp_path / "out-evil").exists()
+
+
+# --------------------------------------------------------------------------
+# _extract_targz — raíz única, flat, tar-slip, bit executable (RT-14)
+# --------------------------------------------------------------------------
+
+
+def test_extract_targz_strips_single_root_folder_and_exec_bit(tmp_path):
+    a = _make_targz(tmp_path, {
+        "llama.cpp/llama-server": (b"BIN", 0o755),
+        "llama.cpp/libllama.so": (b"LIB", 0o644),
+        "llama.cpp/sub/deep.so": (b"DEEP", 0o644),
+    })
+    target = tmp_path / "out"
+    target.mkdir()
+
+    runtime_module._extract_targz(a, target)
+
+    assert (target / "llama-server").read_bytes() == b"BIN"
+    assert (target / "libllama.so").read_bytes() == b"LIB"
+    assert (target / "sub" / "deep.so").read_bytes() == b"DEEP"
+    assert not (target / "llama.cpp").exists()
+    # En Windows los mode bits no son significativos: se verifica solo en
+    # POSIX (el bit executable importa en Linux, no en NTFS).
+    if os.name != "nt":
+        assert (target / "llama-server").stat().st_mode & 0o100
+        assert not (target / "libllama.so").stat().st_mode & 0o100
+
+
+def test_extract_targz_flat_stays_in_place(tmp_path):
+    a = _make_targz(tmp_path, {
+        "llama-server": (b"BIN", 0o755),
+        "libllama.so": (b"LIB", 0o644),
+    })
+    target = tmp_path / "out"
+    target.mkdir()
+
+    runtime_module._extract_targz(a, target)
+
+    assert (target / "llama-server").read_bytes() == b"BIN"
+    assert (target / "libllama.so").read_bytes() == b"LIB"
+
+
+def test_extract_targz_rejects_entry_outside_target(tmp_path):
+    # Mismo caso límite que el zip: 2+ tops → sin prefix → la entrada
+    # relativa se resuelve fuera de target y el guard la rechaza.
+    a = _make_targz(tmp_path, {
+        "good.txt": (b"OK", 0o644),
+        "../evil.txt": (b"EVIL", 0o644),
+    })
+    target = tmp_path / "out"
+    target.mkdir()
+
+    with pytest.raises(RuntimeError, match="fuera del destino"):
+        runtime_module._extract_targz(a, target)
+
+    assert not (tmp_path / "evil.txt").exists()
+
+
+def test_extract_targz_preserves_symlinks(tmp_path):
+    # RT-14: los tarballs oficiales empaquetan los SONAME como symlinks
+    # (libllama-common.so.0 -> .so.0.5.0); sin ellos el loader dinámico
+    # falla con "cannot open shared object file" (exit 127).
+    a = _make_targz(
+        tmp_path,
+        {"llama.cpp/libllama-common.so.0.5.0": (b"REAL", 0o755)},
+        symlinks={
+            "llama.cpp/libllama-common.so.0": "libllama-common.so.0.5.0",
+            "llama.cpp/libllama-common.so": "libllama-common.so.0",
+        },
+    )
+    target = tmp_path / "out"
+    target.mkdir()
+
+    runtime_module._extract_targz(a, target)
+
+    assert (target / "libllama-common.so.0.5.0").read_bytes() == b"REAL"
+    link = target / "libllama-common.so.0"
+    assert link.is_symlink()
+    assert link.read_bytes() == b"REAL"
+    # Cadena de dos saltos (symlink -> symlink -> file) también resuelve.
+    assert (target / "libllama-common.so").is_symlink()
+    assert (target / "libllama-common.so").read_bytes() == b"REAL"
+
+
+def test_extract_targz_rejects_symlink_escaping_target(tmp_path):
+    # El linkname (no el nombre del entry) escaparía del destino: guard
+    # específico además del tar-slip sobre el nombre.
+    target = tmp_path / "out"
+    target.mkdir()
+    for linkname in ("../evil-link", "/etc/passwd"):
+        a = _make_targz(
+            tmp_path,
+            {"good.txt": (b"OK", 0o644), "other.txt": (b"OK2", 0o644)},
+            symlinks={"link-bad": linkname},
+        )
+        with pytest.raises(RuntimeError, match="Symlink de tarball fuera del destino"):
+            runtime_module._extract_targz(a, target)
+
+
+def test_extract_archive_dispatches_by_suffix(tmp_path, monkeypatch):
+    calls: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        runtime_module, "_extract_zip",
+        lambda a, t: calls.append(("zip", a)),
+    )
+    monkeypatch.setattr(
+        runtime_module, "_extract_targz",
+        lambda a, t: calls.append(("targz", a)),
+    )
+    z = tmp_path / "a.zip"
+    g = tmp_path / "b.tar.gz"
+
+    runtime_module._extract_archive(z, tmp_path)
+    runtime_module._extract_archive(g, tmp_path)
+
+    assert calls == [("zip", z), ("targz", g)]
+
+
 # --------------------------------------------------------------------------
 # _select_base_source / _select_accel_source / can_download (split RT-10)
 # --------------------------------------------------------------------------
 
 
-def test_select_base_source_official_b11349_verifiable():
+def test_select_base_source_official_b11349_verifiable(monkeypatch):
     # Bump b11349: la fuente es la build oficial de la release (los archives
     # propios "glyvex" eran específicos de b11009).
+    _force_windows(monkeypatch)
     source = runtime_module._select_base_source()
+    files = runtime_module._platform_files(source["files"])
     assert source is not None
     assert source["id"] == "official"
-    assert all(len(f["sha256"]) == 64 for f in source["files"])
-    assert all("b11349" in f["url"] for f in source["files"])
+    assert len(files) == 1
+    assert all(len(f["sha256"]) == 64 for f in files)
+    assert all("b11349" in f["url"] for f in files)
+    assert all(f["url"].endswith(".zip") for f in files)
 
 
-def test_select_accel_source_nvidia_official_b11349_verifiable():
+def test_select_accel_source_windows_default_cuda12(monkeypatch):
+    # RT-15: sin NVML (no se detecta la arch) Windows elige por defecto el
+    # bundle 12.x (win-cuda-12.4), que sí soporta Pascal; 13.x solo Blackwell.
+    _force_windows(monkeypatch)
     source = runtime_module._select_accel_source("nvidia")
+    files = runtime_module._platform_files(source["files"])
     assert source is not None
+    assert source["id"] == "official-cuda-12.4"
+    assert source["cuda_major"] == 12
+    assert all(len(f["sha256"]) == 64 for f in files)
+    assert len(files) == 2
+    assert all("b11349" in f["url"] for f in files)
+    assert all(f["url"].endswith(".zip") for f in files)
+    assert all("cuda-12.4" in f["url"] for f in files)
+
+
+def test_select_accel_source_pascal_uses_cuda12_windows(monkeypatch):
+    # 1080 Ti = Pascal sm_61: 12.x (win-cuda-12.4). CUDA 13.x la tiró.
+    _force_windows(monkeypatch)
+    _force_cc(monkeypatch, (6, 1))
+    assert runtime_module._select_accel_source("nvidia")["id"] == "official-cuda-12.4"
+
+
+def test_select_accel_source_maxwell_uses_cuda12_windows(monkeypatch):
+    # Maxwell sm_50 también → 12.x.
+    _force_windows(monkeypatch)
+    _force_cc(monkeypatch, (5, 2))
+    assert runtime_module._select_accel_source("nvidia")["id"] == "official-cuda-12.4"
+
+
+def test_select_accel_source_turing_uses_cuda12_windows(monkeypatch):
+    # Turing sm_75: sin Blackwell el default es 12.x (13.x también correría).
+    _force_windows(monkeypatch)
+    _force_cc(monkeypatch, (7, 5))
+    assert runtime_module._select_accel_source("nvidia")["id"] == "official-cuda-12.4"
+
+
+def test_select_accel_source_blackwell_uses_cuda13_windows(monkeypatch):
+    # Blackwell sm_120 (cc 12.0): solo 13.x la compila → "official" (win 13.4).
+    _force_windows(monkeypatch)
+    _force_cc(monkeypatch, (12, 0))
+    source = runtime_module._select_accel_source("nvidia")
     assert source["id"] == "official"
-    assert all(len(f["sha256"]) == 64 for f in source["files"])
-    assert len(source["files"]) == 2
-    assert all("b11349" in f["url"] for f in source["files"])
+    assert source["cuda_major"] == 13
+    assert all("cuda-13.4" in f["url"] for f in runtime_module._platform_files(source["files"]))
+
+
+def test_select_accel_source_blackwell_uses_cuda13_linux(monkeypatch):
+    # Blackwell en Linux → 13.x (los .tar.gz linux de "official").
+    _force_linux(monkeypatch)
+    _force_cc(monkeypatch, (10, 0))
+    source = runtime_module._select_accel_source("nvidia")
+    assert source["id"] == "official"
+    assert all("cuda-13.4" in f["url"] for f in runtime_module._platform_files(source["files"]))
+
+
+def test_required_cuda_major_by_architecture(monkeypatch):
+    # RT-15: 13 solo con Blackwell (cc major >= 10); 12 en el resto y sin NVML.
+    cases = {
+        None: 12,
+        (5, 2): 12,   # Maxwell
+        (6, 1): 12,   # Pascal
+        (7, 5): 12,   # Turing
+        (8, 9): 12,   # Ampere
+        (9, 0): 12,   # Hopper
+        (10, 0): 13,  # Blackwell sm_100
+        (12, 0): 13,  # Blackwell sm_120
+    }
+    for cc, expected in cases.items():
+        _force_cc(monkeypatch, cc)
+        assert runtime_module._required_cuda_major() == expected, cc
+
+
+def test_cuda_note_only_for_pre_turing_arch(monkeypatch):
+    # RT-15: el aviso solo se emite para Maxwell/Pascal/Volta (cc < 7.5).
+    for cc, expected in {
+        (6, 1): "6.1",   # Pascal
+        (5, 2): "5.2",   # Maxwell
+        (7, 0): "7.0",   # Volta
+        (7, 5): None,    # Turing (13.x sí la soporta)
+        (9, 0): None,    # Hopper
+        None: None,      # sin NVML
+    }.items():
+        _force_cc(monkeypatch, cc)
+        assert runtime_module._cuda_note() == expected, cc
+
+
+def test_select_accel_source_stub_without_cuda_major(monkeypatch):
+    # Fallback de 2ª pasada: fuente sin tag cuda_major (fixtures/legado)
+    # sigue siendo seleccionable cuando no hay fuente del major requerido.
+    _force_windows(monkeypatch)
+    _force_cc(monkeypatch, (6, 1))
+    monkeypatch.setattr(runtime_module, "ACCEL_SOURCES", {
+        "nvidia": [{"id": "stub", "files": [
+            {"url": "http://fake/b.zip", "sha256": "a" * 64, "platforms": ["win"]},
+        ]}],
+    })
+    assert runtime_module._select_accel_source("nvidia")["id"] == "stub"
+
+
+def test_platform_files_selects_current_platform(monkeypatch):
+    # RT-14: el catálogo es compartido win+linux; cada plataforma ve solo
+    # sus archives (.zip vs .tar.gz).
+    _force_linux(monkeypatch)
+    base_files = runtime_module._platform_files(
+        runtime_module._select_base_source()["files"]
+    )
+    assert [f["url"].rsplit("/", 1)[-1] for f in base_files] == [
+        "llama-b11349-bin-ubuntu-x64.tar.gz",
+    ]
+    accel = runtime_module._select_accel_source("nvidia")
+    # Linux elige 12.8 (primera fuente): CUDA 13.4 exige driver >=590.
+    assert accel["id"] == "official-cuda-12.8"
+    accel_files = runtime_module._platform_files(accel["files"])
+    assert [f["url"].rsplit("/", 1)[-1] for f in accel_files] == [
+        "llama-b11349-bin-ubuntu-cuda-12.8-x64.tar.gz",
+        "cudart-llama-b11349-bin-ubuntu-cuda-12.8-x64.tar.gz",
+    ]
+
+    _force_windows(monkeypatch)
+    base_files = runtime_module._platform_files(
+        runtime_module._select_base_source()["files"]
+    )
+    assert [f["url"].rsplit("/", 1)[-1] for f in base_files] == [
+        "llama-b11349-bin-win-cpu-x64.zip",
+    ]
+    accel_files = runtime_module._platform_files(
+        runtime_module._select_accel_source("nvidia")["files"]
+    )
+    assert len(accel_files) == 2
+    assert all(f["url"].endswith(".zip") for f in accel_files)
 
 
 def test_select_accel_source_none_for_family_without_package():
@@ -196,9 +490,29 @@ def test_can_download_windows_with_base(monkeypatch):
     assert runtime_module.can_download() is True
 
 
-def test_can_download_false_on_non_windows(monkeypatch):
-    _force_non_windows(monkeypatch)
+def test_can_download_false_on_unsupported_platform(monkeypatch):
+    _force_unsupported(monkeypatch)
     assert runtime_module.can_download() is False
+
+
+def test_can_download_linux_with_base(monkeypatch):
+    _force_linux(monkeypatch)
+    assert runtime_module.can_download() is True
+
+
+def test_platform_supported_matrix(monkeypatch):
+    def force(system, machine):
+        monkeypatch.setattr(runtime_module.platform, "system", lambda: system)
+        monkeypatch.setattr(runtime_module.platform, "machine", lambda: machine)
+
+    force("Windows", "AMD64")
+    assert runtime_module.platform_supported() is True
+    force("Linux", "x86_64")
+    assert runtime_module.platform_supported() is True
+    force("Linux", "aarch64")
+    assert runtime_module.platform_supported() is False
+    force("Darwin", "x86_64")
+    assert runtime_module.platform_supported() is False
 
 
 def test_can_download_false_without_base(monkeypatch):
@@ -250,9 +564,15 @@ def test_status_missing_on_windows(monkeypatch):
     assert st["build"] is None
 
 
-def test_status_unsupported_on_non_windows(monkeypatch):
-    _force_non_windows(monkeypatch)
+def test_status_unsupported_on_unsupported_platform(monkeypatch):
+    _force_unsupported(monkeypatch)
     assert runtime_module.runtime_status()["state"] == "unsupported"
+
+
+def test_status_missing_on_linux(monkeypatch):
+    _force_linux(monkeypatch)
+    st = runtime_module.runtime_status()
+    assert st["state"] == "missing"
 
 
 def test_status_downloading_when_flag_set(monkeypatch):
@@ -359,8 +679,8 @@ def test_resolve_binary_expert_path_wins():
     assert runtime_module.resolve_binary(expert) == expert
 
 
-def test_resolve_binary_none_on_non_windows(monkeypatch):
-    _force_non_windows(monkeypatch)
+def test_resolve_binary_none_on_unsupported_platform(monkeypatch):
+    _force_unsupported(monkeypatch)
     assert runtime_module.resolve_binary() is None
 
 
@@ -596,3 +916,38 @@ async def test_download_keep_previous_preserves_orphan(monkeypatch, tmp_path):
     assert st["state"] == "ready"
     assert old.exists()  # conservada para rollback
     assert (old / "llama-server.exe").read_bytes() == b"OLD"
+
+
+async def test_download_accel_stage_cancelled_error_propagates(monkeypatch, tmp_path):
+    # F-e3 (SEC-1.e): si el cliente corta la conexión en la etapa de
+    # aceleración, el CancelledError debe propagarse — el viejo
+    # `except BaseException` lo tragaba como "degradación a CPU" y dejaba
+    # la task viva contra la cancelación cooperativa.
+    _setup_download(monkeypatch, tmp_path, "nvidia")
+    # 2 entradas en el zip base: _extract_zip descarta la "raíz" cuando el
+    # archive tiene UNA sola entrada de tope (heurística de folder raíz).
+    bodies = _stub_sources(
+        monkeypatch, _zip_bytes({"llama-server.exe": b"EXE", "llama.dll": b"LIB"}),
+        _zip_bytes({"ggml-cuda.dll": b"CUDA"}), "nvidia",
+    )
+    _patch_transport(monkeypatch, lambda req: httpx.Response(200, content=bodies[req.url]))
+
+    real_stage = runtime_module._download_stage
+
+    async def stage_cancels_on_accel(files, work, on_progress, lo, hi):
+        if lo > 0:
+            raise asyncio.CancelledError()
+        await real_stage(files, work, on_progress, lo, hi)
+
+    monkeypatch.setattr(runtime_module, "_download_stage", stage_cancels_on_accel)
+
+    with pytest.raises(asyncio.CancelledError):
+        await runtime_module.download_runtime()
+
+    assert runtime_module._downloading is False
+    # La etapa base ya extrajo el binario ANTES de la de aceleración, así que
+    # el runtime queda instalable y usable en CPU: runtime_status prioriza la
+    # presencia del binario ("ready", accel=None) sobre el meta "error".
+    st = runtime_module.runtime_status()
+    assert st["state"] == "ready"
+    assert st["accel"] is None

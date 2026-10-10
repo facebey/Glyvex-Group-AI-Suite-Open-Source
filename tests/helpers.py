@@ -26,9 +26,15 @@ async def drain_sse(response) -> list[str]:
     return events
 
 
-async def scan_and_wait(client) -> list[str]:
-    """Dispara POST /api/models/scan y espera a que el stream SSE termine."""
-    async with client.stream("POST", "/api/models/scan") as res:
+async def scan_and_wait(client, model_dirs: list[str] | None = None) -> list[str]:
+    """Dispara POST /api/models/scan y espera a que el stream SSE termine.
+
+    `model_dirs` opcional: si se pasa, va en el body (escaneo de directorios
+    aún no guardados en config)."""
+    kwargs = {}
+    if model_dirs is not None:
+        kwargs["json"] = {"model_dirs": model_dirs}
+    async with client.stream("POST", "/api/models/scan", **kwargs) as res:
         return await drain_sse(res)
 
 

@@ -70,6 +70,16 @@ export function childrenOf(nodes, parentId) {
 export function getPath(nodes) {
   if (!Array.isArray(nodes) || nodes.length === 0) return [];
   const byId = indexBy(nodes);
+  // E3: índice hijos→padre construido una vez (O(n)); cada salto del camino
+  // pasa de rescanear el array (O(n) por salto, O(n×d) en árboles profundos)
+  // a O(1). El orden de creación se conserva, como en childrenOf.
+  const kidsOf = new Map();
+  for (const node of nodes) {
+    if (node.parent_id == null) continue;
+    const siblings = kidsOf.get(node.parent_id);
+    if (siblings) siblings.push(node);
+    else kidsOf.set(node.parent_id, [node]);
+  }
   const path = [];
 
   let current = byId.get(ROOT_ID);
@@ -86,8 +96,8 @@ export function getPath(nodes) {
     if (!next) {
       // Sin puntero válido se sigue por el último hijo creado, que es el
       // comportamiento correcto para una conversación recién cargada.
-      const kids = childrenOf(nodes, current.id);
-      next = kids.length > 0 ? kids[kids.length - 1] : null;
+      const kids = kidsOf.get(current.id);
+      next = kids && kids.length > 0 ? kids[kids.length - 1] : null;
     }
 
     if (!next) break;

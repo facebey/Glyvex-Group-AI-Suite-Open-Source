@@ -28,6 +28,7 @@ runtime._download_stage, sha256 por archivo y estado en meta local.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -105,7 +106,7 @@ KOKORO_SPEED_MAX = 2.0
 
 MODEL_META_FILE = ".kokoro-model-meta.json"
 
-_download_lock = threading.Lock()
+_download_lock = asyncio.Lock()
 _downloading = False
 
 _model_cache: dict[str, object] = {}
@@ -234,7 +235,7 @@ async def download_kokoro_model(on_progress: Callable[[float, str], None]) -> di
     piper_runtime.download_piper_voice). Devuelve el estado final del modelo.
     """
     global _downloading
-    with _download_lock:
+    async with _download_lock:
         if _downloading:
             raise RuntimeError("Ya hay una descarga del modelo Kokoro en curso")
         base = kokoro_voices_dir()

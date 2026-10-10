@@ -63,6 +63,13 @@ def _frozen_default_data_dir() -> Path:
     local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
     if local_appdata:
         return Path(local_appdata) / "Glyvex-AI-Suite" / "data"
+    if sys.platform == "linux":
+        # XDG: ~/.local/share (o $XDG_DATA_HOME). No BASE_DIR/"data": el
+        # bundle puede vivir en un mount de solo lectura (AppImage, L2).
+        xdg_data_home = os.environ.get("XDG_DATA_HOME", "").strip()
+        base = (Path(xdg_data_home).expanduser() if xdg_data_home
+                else Path.home() / ".local" / "share")
+        return base / "Glyvex-AI-Suite" / "data"
     return BASE_DIR / "data"
 
 
