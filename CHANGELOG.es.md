@@ -7,7 +7,34 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.8.0-beta] — 2026-10-10
+
+### Añadido
+- **Runtime: soporte para Linux x64** (RT-14): el runtime gestionado ahora
+  incluye un bundle nativo Linux x64 (sidecar PyInstaller construido por
+  `build-linux.sh`), con symlinks SONAME recreados en los tarballs y una
+  fuente CUDA 12.8 para Linux; el launcher confía en el estado del runtime del
+  backend en vez de la cadena de plataforma del navegador.
+- **Monitor: multi-GPU** (MON-1): una card por GPU con TDP por GPU y alertas
+  por índice, un `privilege_hint` por SO en el endpoint de límite de potencia,
+  lectura de fan por GPU con control 0–100% y verificación por lectura, y
+  control de fan en Windows vía NvAPI Direct; el multi-GPU también se muestra
+  en el navbar y la barra de alertas de Monitor.
+- **Runtime: bundle CUDA elegido según la arquitectura de la GPU** (RT-15):
+  el bundle de aceleración se elige por la compute capability de la GPU
+  (consultada vía NVML), de modo que las tarjetas Pascal (GTX 10-series) y
+  las más nuevas (Turing/Ampere/Ada) cargan cada una su build CUDA correcta.
+- **Modelos: el escaneo de directorios usa los model dirs actuales del panel**
+  sin necesidad de guardar la config antes.
+
 ### Corregido
+- **Seguridad (SEC-1 / SEC-5)**: extracción de zip contenida con
+  `is_relative_to`; los locks de descarga de Piper/Kokoro pasaron de
+  `threading.Lock` a `asyncio.Lock`; `CancelledError` re-lanzado en la etapa
+  de aceleración; el health polling degrada en cargas lentas en vez de dar
+  error a los 30s; los frames de error WS sin tipar se tratan como
+  terminales; el manejo de errores se endureció en Chat, Monitor, Launcher,
+  Benchmark, Reports, App y SpeakButton (nuevas keys i18n).
 - **Chat: la lista de modelos del endpoint ahora va por proxy del backend**
   (E4): el navegador no puede llamar `/v1/models` directo a un endpoint
   ajeno (CORS), así que Chat hace `GET /api/chat/endpoint-models?url=...`; el
@@ -28,14 +55,27 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 - **Arranque: silenciado el warning de deprecation de
   `WindowsProactorEventLoopPolicy`** (E11) y la llamada se salta en Python
   ≥3.15, donde el selector ya soporta subprocess.
+- **Monitor: la lluvia de matriz siempre se anima** — `prefers-reduced-motion`
+  ya no congela el efecto de fondo.
 
 ### Docs
+- **Auditoría de seguridad (SEC-1)**: reporte completo con secciones a–e
+  (red/telemetría, backend, secrets/SSRF, XSS de frontend, errores
+  funcionales).
 - **Checklist de release** (`docs/RELEASE-CHECKLIST.md` + `.es.md`): el
   procedimiento completo de release — bump de versión en 6 archivos juntos,
   tag/push, build (sidecar + NSIS desde la raíz del repo con override
   mínimo), `latest.json`, sync público, GitHub Release no-prerelease,
   verificación — más los gotchas aprendidos. Enlazado desde la sección de
   versionado del README.
+- **Export público OSS**: el reporte SEC-1 está redactado en el repo público
+  (nombres de ramas internas y detalle de errores funcionales movidos a un
+  anexo privado), la ruta del intérprete del checklist se generalizó y se
+  agregó una nota de arquitectura CUDA a los README públicos.
+
+### Build / dependencias
+- Tauri 2.12.0 → 2.12.1, tauri-build 2.7.0 → 2.7.1.
+- source-map-js 1.2.1 → 1.2.2 (GHSA-68fv-2mgg-jv7q).
 
 ## [0.7.7-beta] — 2026-10-05
 

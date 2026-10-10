@@ -1,7 +1,7 @@
 {
   "name": "glyvex-ai-suite-frontend",
   "private": true,
-  "version": "0.7.7-beta",
+  "version": "0.8.0-beta",
   "type": "module",
   "scripts": {
     "dev": "vite",
