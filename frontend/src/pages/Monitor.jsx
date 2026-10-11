@@ -903,13 +903,24 @@ export default function Monitor() {
     // benchmark.
     let retryTimer = null;
     let attempts = 0;
+    let watchdogTimer = null;
+    // Watchdog: tras un relaunch el WS puede quedar abierto pero en silencio
+    // (el backend aún no emite snapshots) sin disparar onclose, así que la
+    // reconexión por backoff nunca arranca. Sin datos en WATCHDOG_MS cerramos
+    // para forzar la reconexión (evita tener que apretar F5).
+    const WATCHDOG_MS = 10000;
+    function armWatchdog(ws) {
+      clearTimeout(watchdogTimer);
+      watchdogTimer = setTimeout(() => ws.close(), WATCHDOG_MS);
+    }
     function connect() {
       if (cancelled) return;
       const ws = new WebSocket(wsUrlFor("/api/metrics/stream"));
       wsRef.current = ws;
-      ws.onopen = () => { attempts = 0; setConnected(true); };
+      ws.onopen = () => { attempts = 0; setConnected(true); armWatchdog(ws); };
       ws.onclose = () => {
         setConnected(false);
+        clearTimeout(watchdogTimer);
         if (cancelled || wsRef.current !== ws) return;
         const delay = Math.min(1000 * 2 ** attempts, 15000);
         attempts += 1;
@@ -918,6 +929,7 @@ export default function Monitor() {
       ws.onmessage = (event) => {
         let snap;
         try { snap = JSON.parse(event.data); } catch { return; }
+        armWatchdog(ws);
         setSnapshot(snap);
         setHistory((prev) => {
           const next = [...prev, snapToSparkPoint(snap, prev.length)];
@@ -930,6 +942,7 @@ export default function Monitor() {
     return () => {
       cancelled = true;
       clearTimeout(retryTimer);
+      clearTimeout(watchdogTimer);
       wsRef.current?.close();
     };
   }, []);

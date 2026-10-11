@@ -61,8 +61,17 @@ export default function AboutModal({ onClose }) {
       stage = "stopSidecar";
       await stopSidecar();
       stage = "download";
-      await update.downloadAndInstall((downloaded, total) => {
-        if (total) setProgress(Math.round((downloaded / total) * 100));
+      let totalLen = 0;
+      let done = 0;
+      await update.downloadAndInstall((ev) => {
+        if (ev?.event === "Started" && ev.data?.contentLength) {
+          totalLen = ev.data.contentLength;
+        } else if (ev?.event === "Progress") {
+          done += ev.data?.chunkLength ?? 0;
+          if (totalLen) setProgress(Math.min(100, Math.round((done / totalLen) * 100)));
+        } else if (ev?.event === "Finished") {
+          setProgress(100);
+        }
       });
       stage = "relaunch";
       await relaunchApp();
