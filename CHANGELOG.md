@@ -15,6 +15,12 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
   AppImage on `v*` tags (skipped when the signing secret is absent, so the
   public mirror is unaffected).
 
+### Changed
+- **Brand font: Glyvex Sans v2.010 (full coverage)**: the latin-subset build
+  is replaced by the full-coverage variable font (235 glyphs, wght 100–900,
+  "C" option with clean `o`/`0`); the app and the brand kit now ship
+  `glyvex-sans-wght.woff2` (+ `.ttf` in the kit).
+
 ### Fixed
 - **Sidecar lookup on Linux**: the backend process was only searched as
   `glyvex-backend.exe`; it now resolves the platform-specific binary name.

@@ -16,6 +16,12 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
   salta si no hay secret de firma, de modo que el espejo público no se vea
   afectado).
 
+### Cambiado
+- **Fuente de marca: Glyvex Sans v2.010 (full coverage)**: la build de
+  subset latin se sustituye por la variable full coverage (235 glifos,
+  wght 100–900, opción C con `o`/`0` limpios); la app y el brand kit
+  distribuyen ahora `glyvex-sans-wght.woff2` (+ `.ttf` en el kit).
+
 ### Corregido
 - **Búsqueda del sidecar en Linux**: el proceso backend solo se buscaba como
   `glyvex-backend.exe`; ahora resuelve el nombre de binario según la

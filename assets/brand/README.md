@@ -14,7 +14,7 @@ Abrí `brand-guide.html` para ver el kit completo con colores, tipografía y reg
 | `splash/` | 3 splash HTML (A oscuro, B claro, C horizontal) + previews PNG |
 | `installer/nsis/` | Header 150×57 y sidebar 164×314, claro y oscuro (BMP 24-bit + PNG) |
 | `installer/msi/` | Banner 493×58 y diálogo 493×312 de WiX con la marca nueva (BMP + PNG) |
-| `fonts/` | Glyvex Sans variable (fuente de marca, WOFF2 subset latin) + Exo 2 y JetBrains Mono variables (WOFF2 subset latin) + Poppins Regular/Medium/Bold (TTF + WOFF2) + licencias OFL |
+| `fonts/` | Glyvex Sans variable (fuente de marca, WOFF2 full coverage v2.010 + TTF) + Exo 2 y JetBrains Mono variables (WOFF2 subset latin) + Poppins Regular/Medium/Bold (TTF + WOFF2) + licencias OFL |
 
 ## Colores
 
