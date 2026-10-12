@@ -91,6 +91,11 @@ fn health_ok(port: u16) -> bool {
 ///    (release NSIS: el bundler instala cada resource preservando su path
 ///    relativo a src-tauri — en Windows resource_dir es el dir del exe —,
 ///    y el bundle vive en `src-tauri/resources/` (junction a backend/dist)).
+/// Nombre del binario sidecar segun plataforma (sin .exe en Linux).
+fn sidecar_bin_name() -> &'static str {
+    if cfg!(windows) { "glyvex-backend.exe" } else { "glyvex-backend" }
+}
+
 fn resolve_backend_exe(app: &AppHandle) -> Option<PathBuf> {
     if let Ok(p) = std::env::var("GLYVEX_BACKEND_EXE") {
         let pb = PathBuf::from(p);
@@ -111,7 +116,7 @@ fn resolve_backend_exe(app: &AppHandle) -> Option<PathBuf> {
                     .join("backend")
                     .join("dist")
                     .join("glyvex-backend")
-                    .join("glyvex-backend.exe");
+                    .join(sidecar_bin_name());
                 if cand.exists() {
                     return Some(cand);
                 }
@@ -120,7 +125,7 @@ fn resolve_backend_exe(app: &AppHandle) -> Option<PathBuf> {
     }
     if let Ok(rd) = app.path().resource_dir() {
         for sub in ["glyvex-backend", "resources/glyvex-backend"] {
-            let cand = rd.join(sub).join("glyvex-backend.exe");
+            let cand = rd.join(sub).join(sidecar_bin_name());
             if cand.exists() {
                 return Some(cand);
             }
@@ -210,7 +215,7 @@ fn run_lifecycle(app: &AppHandle, state: &SidecarState) -> Result<(), String> {
                 "error",
                 0,
                 None,
-                Some("Sidecar no encontrado: backend/dist/glyvex-backend/glyvex-backend.exe".into()),
+                Some(format!("Sidecar no encontrado: backend/dist/glyvex-backend/{}", sidecar_bin_name())),
             );
             return Err("sidecar no encontrado".into());
         }

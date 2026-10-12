@@ -7,6 +7,18 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+### Added
+- **Runtime: Linux x64 AppImage + updater** (RT-14 L2): `build-linux-appimage.sh`
+  builds the signed Tauri AppImage on Linux (sidecar + webview bundle);
+  `latest.json` now uses the static `platforms` format so a single manifest
+  serves Windows and Linux updates; new `linux-appimage` workflow builds the
+  AppImage on `v*` tags (skipped when the signing secret is absent, so the
+  public mirror is unaffected).
+
+### Fixed
+- **Sidecar lookup on Linux**: the backend process was only searched as
+  `glyvex-backend.exe`; it now resolves the platform-specific binary name.
+
 ## [0.8.0-beta] — 2026-10-10
 
 ### Added

@@ -1,0 +1,72 @@
+name: Linux AppImage
+
+# RT-14 L2: build del AppImage + firma para el updater en tags v*.
+# Se SALTA (gris) si no existe el secret TAURI_SIGNING_PRIVATE_KEY: asi el
+# espejo public (sin secrets) no rompe al recibir tags.
+# GitHub no permite secrets.X en if: (doc oficial), por eso el job gate
+# expone un output y build-appimage condiciona contra needs.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  gate:
+    name: Gate (TAURI_SIGNING_PRIVATE_KEY presente?)
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: echo "enabled=${{ env.TAURI_SIGNING_PRIVATE_KEY != '' }}" >> "$GITHUB_OUTPUT"
+
+  build-appimage:
+    name: AppImage (Node 22)
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Dependencias del sistema (webkit2gtk para Tauri + fuse para AppImage)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libfuse2 libssl-dev pkg-config
+
+      - name: Dependencias del frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build (sidecar + AppImage firmado)
+        run: ./build-linux-appimage.sh
+
+      - name: Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: glyvex-appimage-${{ github.ref_name }}
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
+
+      - name: Nota de release
+        run: |
+          echo "::notice::Descarga el artifact, copialo a Windows y corre build-latest-json.ps1 -LinuxBundle <dir> para generar latest.json con linux-x86_64 (el updater lo exige)."

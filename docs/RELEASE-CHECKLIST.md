@@ -72,9 +72,41 @@ commits caused the 0.6.0 vs 0.7.1-beta and 0.7.1 vs 0.7.4 drifts):
   .\build-latest-json.ps1
   ```
 
-  Reads the version from `tauri.conf.json`, embeds the `.sig` content as the
-  signature, builds the download URL with **dots** (GitHub renames spaces to
-  dots in asset names) and the plugin versions from `Cargo.lock`.
+   Reads the version from `tauri.conf.json`, embeds the `.sig` content as the
+   signature, builds the download URL with **dots** (GitHub renames spaces to
+   dots in asset names) and the plugin versions from `Cargo.lock`.
+   Since v0.8.1 the manifest uses the static `platforms` format (one file
+   serves Windows + Linux); see step 3b.
+
+## 3b. Build (Linux server) — AppImage, optional
+
+- [ ] One-time setup on the server: the private key file must live at
+  `.tauri/glyvex.key` (same key as Windows; `.tauri/` is gitignored, so copy
+  it over manually once — e.g. `scp`).
+- [ ] On the Linux x64 server (same tag), one line:
+
+  ```bash
+  cd <repo> && git pull && TAURI_SIGNING_PRIVATE_KEY="$(cat .tauri/glyvex.key)" ./build-linux-appimage.sh
+  ```
+
+  Builds the sidecar, copies it into `src-tauri/resources/`, and runs
+  `tauri build --bundles appimage` signed (the env var lives only for that
+  command; the plaintext key never lands in shell history).
+- [ ] End users need nothing extra to run the AppImage (the webview libs are
+  bundled inside); the only OS requirement is `libfuse2` (present on most
+  Ubuntu 22.04+; `sudo apt install libfuse2` otherwise, or run with
+  `--appimage-extract-and-run`).
+- [ ] Artifacts in `src-tauri/target/release/bundle/appimage/`:
+  - `Glyvex AI Suite_X.Y.Z-beta_<arch>.AppImage`
+  - `Glyvex AI Suite_X.Y.Z-beta_<arch>.AppImage.sig`
+- [ ] Copy **both** files to Windows (`src-tauri\target\release\bundle\appimage\`)
+  and rerun `.\build-latest-json.ps1 -LinuxBundle <dir>` so `latest.json`
+  includes `linux-x86_64`. Without the AppImage, skip this step: the release
+  is Windows-only and Linux installs simply see no update.
+- [ ] Alternative: the `linux-appimage` workflow builds the same AppImage on
+  the tag (needs the `TAURI_SIGNING_PRIVATE_KEY` secret in the private repo);
+  download the artifact and follow the same copy → `build-latest-json.ps1`
+  steps.
 
 ## 4. Public sync
 
@@ -96,9 +128,10 @@ commits caused the 0.6.0 vs 0.7.1-beta and 0.7.1 vs 0.7.4 drifts):
   ```
 
   `--target` takes a **branch name** (a short SHA fails with HTTP 422).
-- [ ] Upload the three assets: `.exe`, `.sig`, `latest.json`
-  (`gh release upload --clobber` on re-releases; if you replace the exe,
-  update the SHA-256 table in the notes).
+- [ ] Upload the assets: `.exe`, `.sig`, `latest.json` (+ `.AppImage` and
+   `.AppImage.sig` when a Linux build was done — step 3b).
+   (`gh release upload --clobber` on re-releases; if you replace an asset,
+   update the SHA-256 table in the notes).
 - [ ] After creating or editing the notes, verify the accents survived:
   `gh release view vX.Y.Z-beta --json body --jq .body`
 
