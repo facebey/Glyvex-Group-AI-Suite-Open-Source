@@ -88,7 +88,7 @@ Since the NSIS installer is unsigned, Windows SmartScreen will show the
 | Platform | Status | Notes |
 |---|---|---|
 | **Windows** | ✅ Primary platform | The current version is optimized for Windows: `start.cmd` (CMD) and `start.ps1` (PowerShell) scripts, embedded llama.cpp runtime and NSIS installer (`-setup.exe`). |
-| **Linux** | ⏳ After the stable release | `start.sh` already exists; formal support (full testing and CI) starts once there is a stable release. |
+| **Linux** | 🟡 Beta (x86_64, since v0.8.1-beta) | Signed Tauri AppImage with auto-update, built in CI (`v*` tags); `start.sh` for dev/manual use. |
 | **macOS** | ⏳ In the future | Shares the `start.sh` path; it comes after Linux. |
 
 ## Installation
@@ -396,7 +396,7 @@ The chat exposes two tools to the model, invoked natively via `tool_calls`
 - [x] **M7** — SQLite database (conversations, benchmarks, templates, sets)
 - [x] **M8** — LLM server vitals (Prometheus `/metrics`, history in `metrics.db`)
 - [ ] GPU acceleration for AMD/Intel in the embedded runtime (Vulkan/ROCm, phase B — for now it runs on CPU)
-- [ ] Formal Linux support (after the stable release; macOS comes in the future): full testing and CI
+- [x] **Linux x86_64 (beta, since v0.8.1-beta)**: signed AppImage, CI and auto-update — macOS comes in the future
 
 ## Tests
 
