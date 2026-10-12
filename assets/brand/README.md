@@ -105,7 +105,7 @@ Para probarlo en el navegador: `splash-a-oscuro.html?v=0.5.0&p=0.6`
 
 Todo self-hosted, sin carga remota (la app es 100% offline):
 
-- **Glyvex Sans** (variable, wght 100–900, subset latin) — fuente primaria de la UI y marca. Derivada de Exo 2 (OFL) con el concepto DIAMANTE: rombos en `i`/`j` (punto) y `0`/`o`/`X` (contra/centro). `fonts/glyvex-sans-latin.woff2` + `fonts/glyvex-sans-OFL.txt`
+- **Glyvex Sans** (variable, wght 100–900, full coverage — versión C 2026-10-11) — fuente primaria de la UI y marca. Derivada de Exo 2 (OFL) con el concepto DIAMANTE: rombos en `i`/`j` (punto) y `0`/`o`/`X` (contra/centro). `fonts/glyvex-sans-wght.woff2` + `fonts/glyvex-sans-wght.ttf` + `fonts/glyvex-sans-OFL.txt`
 - **Exo 2** (variable, wght 100–900, subset latin) — base de Glyvex Sans, se conserva como referencia. `fonts/exo-2-latin.woff2` + `fonts/exo-2-OFL.txt`
 - **JetBrains Mono** (variable, wght 100–800, subset latin) — código y terminales. `fonts/jetbrains-mono-latin.woff2` + `fonts/jetbrains-mono-OFL.txt`
 - **Poppins** Regular/Medium/Bold — splash. `fonts/Poppins-*.woff2` + `fonts/OFL.txt`
