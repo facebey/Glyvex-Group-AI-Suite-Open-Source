@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./lib/i18n.js";
 import App from "./App.jsx";
+import { isTauri, onSidecarState, hasProvisionFlag } from "./lib/tauri.js";
 import "./index.css";
 
 // Shell Tauri en producción: la ventana carga la SPA desde el bundle
@@ -18,7 +19,6 @@ async function tauriBootstrapRedirect() {
   // nuevo (evita loop). El bundle Tauri es https://tauri.localhost o
   // tauri://..., nunca http: sobre 127.0.0.1.
   if (location.protocol === "http:" && location.hostname === "127.0.0.1") return null;
-  const { isTauri, onSidecarState, hasProvisionFlag } = await import("./lib/tauri.js");
   if (!isTauri()) return null;
   // T5.2: con --provision la app abre directo a la pantalla de provisión.
   const suffix = (await hasProvisionFlag().catch(() => false)) ? "/provision" : "/";
