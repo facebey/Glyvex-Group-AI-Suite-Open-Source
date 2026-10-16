@@ -96,9 +96,9 @@ export default function AttachmentChips({ attachments, onRemove }) {
               (STATUS_STYLES[attachment.status] || STATUS_STYLES.ready)
             }
           >
-            {attachment.kind === "image" && attachment.url ? (
+            {attachment.kind === "image" && (attachment.url || attachment.previewUrl) ? (
               <img
-                src={attachment.url}
+                src={attachment.url || attachment.previewUrl}
                 alt=""
                 className="w-5 h-5 rounded object-cover border border-glyvex-border-soft shrink-0"
               />

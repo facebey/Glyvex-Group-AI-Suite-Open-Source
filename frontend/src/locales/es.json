@@ -700,6 +700,26 @@
         "notSupported": "Esta GPU no permite fijar el ventilador manualmente.",
         "needsAdmin": "Ejecutá Glyvex como administrador para fijar el ventilador.",
         "needsRoot": "Ejecutá Glyvex con root (sudo) para fijar el ventilador.",
+        "auto": "Automático",
+        "autoSuccess": "Ventilador devuelto a control automático",
+        "autoError": "No se pudo volver a automático: {{error}}",
+        "autoUnsupported": "Volver a automático no está disponible con esta GPU.",
+        "curve": {
+          "title": "Curva por temperatura",
+          "enabled": "Activar",
+          "hint": "Mientras la app está abierta el ventilador sigue esta curva; al cerrar, vuelve a lo que tenía antes.",
+          "presets": {
+            "silent": "Silenciosa",
+            "balanced": "Equilibrada",
+            "aggressive": "Agresiva"
+          },
+          "add": "Agregar punto",
+          "remove": "Quitar",
+          "save": "Guardar curva",
+          "saved": "Curva guardada",
+          "invalid": "Revisá la curva: temperaturas entre 20 y 105 °C, crecientes, y porcentajes de 0 a 100.",
+          "unavailable": "El control automático de ventilador requiere Windows con driver NVIDIA."
+        },
         "loadError": "No se pudo comunicarse con el backend."
       },
       "power": "Consumo",
@@ -819,6 +839,11 @@
     "start": "INICIAR BENCHMARK",
     "progress": "Progreso: {{done}}/{{total}}",
     "cancel": "CANCELAR",
+    "categories": {
+      "title": "Categorías",
+      "all": "Todas",
+      "none": "Ninguna"
+    },
     "errors": {
       "startFailed": "No se pudo iniciar el benchmark",
       "startCatch": "Error al iniciar el benchmark.",

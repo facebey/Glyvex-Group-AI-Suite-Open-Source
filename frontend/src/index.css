@@ -580,6 +580,21 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* WebKitGTK (Linux) renderiza <select> con apariencia GTK nativa: el color de
+   texto del valor elegido viene del tema GTK del sistema, no del CSS, y con un
+   tema claro de GTK queda texto negro sobre el fondo oscuro de la app
+   (invisible). appearance:none fuerza renderizado CSS puro (igual que
+   Windows/WebView2) y la flecha la pinta el CSS. Fuera de capa para que gane
+   a las utilidades px-* y reserve margen derecho para la flecha. */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  padding-inline-end: 2.2rem;
+}
+
 /* JetBrains Mono para código, métricas y logs */
 code, pre, .font-mono {
   font-family: 'JetBrains Mono', ui-monospace, monospace;

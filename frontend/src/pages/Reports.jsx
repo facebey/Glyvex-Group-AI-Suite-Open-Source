@@ -48,6 +48,9 @@ function RunDetail({ run, onBack }) {
         <p className="text-sm"><span className="text-glyvex-muted">{t("reports.detail.model")}:</span> {run.config.model_name || "—"}</p>
         <p className="text-sm"><span className="text-glyvex-muted">Endpoint:</span> {run.config.endpoint}</p>
         <p className="text-sm"><span className="text-glyvex-muted">Sets:</span> {run.config.sets.join(", ")}</p>
+        {Array.isArray(run.config.categories) && run.config.categories.length > 0 && (
+          <p className="text-sm"><span className="text-glyvex-muted">{t("benchmark.categories.title")}:</span> {run.config.categories.join(", ")}</p>
+        )}
         <p className="text-sm"><span className="text-glyvex-muted">{t("reports.detail.started")}:</span> {fmtDate(run.started_at)}</p>
         <p className="text-sm"><span className="text-glyvex-muted">{t("reports.detail.finished")}:</span> {fmtDate(run.finished_at)}</p>
         <p className="text-sm"><span className="text-glyvex-muted">{t("reports.detail.status")}:</span> {run.status}</p>
@@ -238,7 +241,12 @@ export default function Reports() {
                   <td className="px-3 py-2"><input type="checkbox" checked={compareIds.includes(run.run_id)} onChange={() => toggleCompare(run.run_id)} className="accent-glyvex-accent w-4 h-4" /></td>
                   <td className="px-3 py-2 text-glyvex-muted">{fmtDate(run.started_at)}</td>
                   <td className="px-3 py-2">{run.model_name || "—"}</td>
-                  <td className="px-3 py-2 text-glyvex-muted">{(run.sets || []).join(", ")}</td>
+                  <td className="px-3 py-2 text-glyvex-muted">
+                    {(run.sets || []).join(", ")}
+                    {Array.isArray(run.categories) && run.categories.length > 0 && (
+                      <span className="block text-xs opacity-75">{t("benchmark.categories.title")}: {run.categories.join(", ")}</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-glyvex-muted">{run.summary?.total_prompts ?? "—"}</td>
                   <td className="px-3 py-2 text-glyvex-muted">{run.summary?.avg_tps ?? "—"}</td>
                   <td className="px-3 py-2 text-glyvex-muted">{run.summary?.avg_judge_score ? `${run.summary.avg_judge_score.toFixed(1)}/10` : "—"}</td>

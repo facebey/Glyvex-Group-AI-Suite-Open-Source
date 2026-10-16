@@ -225,8 +225,10 @@ class LaunchConfig(BaseModel):
     # en VRAM: la atención/KV sigue en GPU y los expertos corren en RAM.
     n_cpu_moe: int = Field(default=0, ge=0)
     gpu_mode: GpuMode = "gpu_only"
-    cache_type_k: CacheType | None = "q4_0"
-    cache_type_v: CacheType | None = "q4_0"
+    # q8_0 por default: casi calidad f16 a mitad de su VRAM; q4_0 queda
+    # disponible para perfiles de VRAM justa (el default de la build es f16).
+    cache_type_k: CacheType | None = "q8_0"
+    cache_type_v: CacheType | None = "q8_0"
     flash_attn: bool = True
     load_mode: LoadMode = "auto"
 
@@ -278,7 +280,7 @@ class LaunchConfig(BaseModel):
     # -- Sampling parameters (defaults del servidor) --------------------
     # Cuando se pasan como flags de arranque, llama-server los usa como
     # defaults para todos los clientes que no especifiquen sus propios valores.
-    sampling_preset: str = "instruct"   # "thinking" | "instruct" | "custom"
+    sampling_preset: str = "instruct"   # "auto" (general.sampling del GGUF) | "thinking" | "instruct" | "custom"
     temperature: float = 0.7
     top_p: float = 0.80
     top_k: int = 20

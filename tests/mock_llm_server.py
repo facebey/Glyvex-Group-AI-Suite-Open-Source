@@ -35,7 +35,20 @@ async def _health(request: Request) -> JSONResponse:
 
 
 async def _v1_models(request: Request) -> JSONResponse:
+    if MODELS_AUTH["token"]:
+        auth = request.headers.get("authorization", "")
+        if auth != f"Bearer {MODELS_AUTH['token']}":
+            return JSONResponse({"error": {"message": "invalid api key"}}, status_code=401)
     return JSONResponse({"data": [{"id": "test-model", "object": "model"}]})
+
+
+# Auth opcional para /v1/models (llama-server con --api-key): los tests lo
+# activan con set_models_auth("token") y lo dejan en None para el resto.
+MODELS_AUTH: dict = {"token": None}
+
+
+def set_models_auth(token: str | None) -> None:
+    MODELS_AUTH["token"] = token
 
 
 # URLs de POST /exit recibidos (el stop gracioso del launcher). Los tests lo

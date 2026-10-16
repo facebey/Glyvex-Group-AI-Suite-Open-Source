@@ -7,6 +7,63 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.9.0-beta] — 2026-10-16
+
+Feature release over v0.8.1-beta: controllable GPU fan curves with automatic
+restore on exit, system tray, new builtin templates and Chat/Launcher fixes.
+
+### Added
+- **Monitor: GPU fan temperature curves** (MON-3): per-GPU temperature→fan-%
+  curves applied through NvAPI, with a curve editor and an AUTO-fan button in
+  the GPU card (EN/ES). A Rust shutdown hook restores the fans to AUTO before
+  hard-killing the backend on app exit (graceful close, quit from the tray,
+  or SIGTERM), and `POST /api/metrics/gpu/fan/restore-all` restores all cards
+  from the API. Validated end-to-end on an RTX 3090.
+- **Desktop: system tray** (T5.4): tray icon with an open/minimize/quit menu;
+  closing the window minimizes to the tray instead of quitting.
+- **Launcher: builtin templates for 128K hybrid GPU and NUMA multi-socket**,
+  sized from the detected hardware.
+- **Models: an `auto` sampling preset** that reads the sampling values the
+  quantizer embedded in the GGUF (`general.sampling` metadata) and applies
+  them at launch.
+- **Benchmark: category filter** on runs — choose which prompt categories of
+  a set are executed.
+
+### Changed
+- **Launcher: the default KV cache is now `q8_0`** — better quality/VRAM
+  ratio on launched llama-server instances.
+- **Brand font: Glyvex Sans v2.010 (full coverage)**: the latin-subset build
+  is replaced by the full-coverage variable font (235 glyphs, wght 100–900,
+  "C" option with clean `o`/`0`); the app and the brand kit now ship
+  `glyvex-sans-wght.woff2` (+ `.ttf` in the kit).
+
+### Fixed
+- **Chat: model detection on protected endpoints** (CHAT-3): the configured
+  API key is forwarded as a Bearer header through the model-list proxy, so
+  llama-server started with `--api-key` no longer 401s and leaves the model
+  undetected; the detection request is debounced 300 ms.
+- **Chat: streaming survives navigation to other modules** (CHAT-2): the
+  fetch+SSE stream moved to a module-level store (`chatStreamStore.js`), so
+  unmounting Chat no longer aborts generation; returning reattaches to the
+  in-flight stream and partial answers are saved on unmount.
+- **Launcher: templates now persist MTP activation, draft floors and LoRA**.
+- **Chat: attachment chips show the thumbnail from the local preview**
+  (`previewUrl`) before the upload completes.
+- **Frontend on Linux: visible text in `<select>`s** — CSS rendering is
+  forced, fixing the invisible text on WebKitGTK.
+- **Frontend: `tauri.js` is imported statically in the bootstrap** (the
+  dynamic import had no effect in packaged builds).
+
+### Build
+- New `windows-nsis` CI workflow: builds the NSIS installer and the signed
+  updater manifest on a Windows runner (T7.4).
+
+## [0.8.1-beta] — 2026-10-11
+
+Maintenance release over v0.8.0-beta for the two post-update UX regressions.
+The Linux AppImage was added to this release after the first publication
+(built by CI; validated on Ubuntu 26.04, works on 22.04+ with `libfuse2`).
+
 ### Added
 - **Runtime: Linux x64 AppImage + updater** (RT-14 L2): `build-linux-appimage.sh`
   builds the signed Tauri AppImage on Linux (sidecar + webview bundle);
@@ -15,13 +72,13 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
   AppImage on `v*` tags (skipped when the signing secret is absent, so the
   public mirror is unaffected).
 
-### Changed
-- **Brand font: Glyvex Sans v2.010 (full coverage)**: the latin-subset build
-  is replaced by the full-coverage variable font (235 glyphs, wght 100–900,
-  "C" option with clean `o`/`0`); the app and the brand kit now ship
-  `glyvex-sans-wght.woff2` (+ `.ttf` in the kit).
-
 ### Fixed
+- **Updater progress bar**: the download bar now reflects real progress
+  (fixed the `DownloadEvent` callback shape for `@tauri-apps/plugin-updater`
+  2.13.1).
+- **Metrics WebSocket watchdog** (F5): a silent/zombie metrics WebSocket is
+  dropped after an in-app update relaunch, so fan control and GPU metrics
+  recover without a manual reload.
 - **Sidecar lookup on Linux**: the backend process was only searched as
   `glyvex-backend.exe`; it now resolves the platform-specific binary name.
 

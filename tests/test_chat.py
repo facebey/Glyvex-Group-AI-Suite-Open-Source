@@ -3,6 +3,7 @@
 import json
 
 from helpers import drain_sse
+from mock_llm_server import set_models_auth
 
 
 def _parse_events(raw_lines: list[str]) -> list[dict]:
@@ -138,6 +139,29 @@ async def test_endpoint_models_proxy(client, mock_llama_server):
     assert res.status_code == 200
     data = res.json()
     assert data["models"] == ["test-model"]
+
+
+async def test_endpoint_models_forwards_api_key(client, mock_llama_server):
+    # CHAT-3: endpoints protegidos (llama-server con --api-key) devuelven 401
+    # en /v1/models sin el Bearer; el proxy debe reenviar la key que el
+    # usuario cargó en la barra lateral, igual que _stream_chat.
+    set_models_auth("sekret-key")
+    try:
+        res = await client.get(f"/api/chat/endpoint-models?url={mock_llama_server}")
+        assert res.status_code == 502  # 401 upstream -> 502 al cliente
+
+        res = await client.get(
+            f"/api/chat/endpoint-models?url={mock_llama_server}&api_key=sekret-key"
+        )
+        assert res.status_code == 200
+        assert res.json()["models"] == ["test-model"]
+
+        res = await client.get(
+            f"/api/chat/endpoint-models?url={mock_llama_server}&api_key=otra-key"
+        )
+        assert res.status_code == 502
+    finally:
+        set_models_auth(None)
 
 
 async def test_endpoint_models_bad_scheme(client):

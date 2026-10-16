@@ -1,8 +1,12 @@
 """Tests de metrics.py — estructura del snapshot, degradación sin GPU, buffer circular."""
 
+import asyncio
+import json
+
 import pytest
 
 import metrics as metrics_module
+from config import Config
 
 
 async def test_snapshot_structure(client):
@@ -240,17 +244,39 @@ def _mock_nvml(monkeypatch, fake: _FakePynvml) -> None:
 
 class _FakeNvApi:
     """Sustituye el adapter NvAPI Direct sin cargar nvapi64.dll: `available`
-    decide si el collector toma la vía Windows o cae a NVML."""
+    decide si el collector toma la vía Windows o cae a NVML. `control` simula
+    los coolers como [(ControlMode, Level)]: `fan_control` lo lee y las
+    escrituras exitosas lo modifican, así las pruebas de MON-3 pueden verificar
+    qué se capturó como baseline y qué se restauró."""
 
     def __init__(self, available: bool = False,
-                 set_result: tuple[bool, str | None] = (False, "nvapi_no_disponible")):
+                 set_result: tuple[bool, str | None] = (False, "nvapi_no_disponible"),
+                 control: list[tuple[int, int]] | None = None):
         self.available = available
         self.set_result = set_result
+        self.control = [tuple(c) for c in (control if control is not None else [(0, 30)])]
         self.calls = []
+        self.auto_calls: list[int] = []
+        self.restored: list[tuple[int, list[tuple[int, int]]]] = []
 
     def set_manual(self, index, percent, tolerance=2, readback_s=1.0):
         self.calls.append((index, percent, tolerance, readback_s))
+        if self.set_result[0]:
+            self.control = [(1, percent)]
         return self.set_result
+
+    def fan_control(self, index):
+        return list(self.control)
+
+    def set_auto(self, index):
+        self.auto_calls.append(index)
+        self.control = [(0, self.control[0][1])]
+        return True, None
+
+    def restore(self, index, items, tolerance=2):
+        self.restored.append((index, [tuple(i) for i in items]))
+        self.control = [tuple(i) for i in items]
+        return True, None
 
 
 def _mock_nvapi(monkeypatch, fake: _FakeNvApi) -> None:
@@ -464,6 +490,236 @@ async def test_fan_set_windows_nvapi_no_soportado(client, monkeypatch):
     assert data["ok"] is False
     assert data["error"] == "fan_not_supported"
     assert fake.last_fan_set is None  # sin fallback a NVML: también fallaría
+
+
+# --------------------------------------------------------------------------
+# MON-3: fan automático, baseline+restore y curvas de temperatura. La vía
+# NvAPI es la única con baseline/restore (NVML no tiene forma documentada de
+# volver a "auto", verificado contra pynvml).
+# --------------------------------------------------------------------------
+
+
+def _isolated_config(monkeypatch, tmp_path) -> Config:
+    """Punta el config del módulo metrics a un tmp: las curvas se persisten
+    en config.json sin tocar el data/ real."""
+    cfg = Config(tmp_path / "config.json")
+    monkeypatch.setattr(metrics_module, "config", cfg)
+    return cfg
+
+
+def _reset_fan_state():
+    """El collector del manager es singleton: limpiar su estado de fan entre
+    tests para que no arrastren baselines o targets de la prueba anterior."""
+    collector = metrics_module.manager.collector
+    collector._fan_baselines.clear()
+    collector._fan_curve_state.clear()
+
+
+def _fake_gpu_snap(temp_c: int | None, index: int = 0):
+    return metrics_module.MetricsSnapshot(
+        timestamp="2026-10-16T12:00:00",
+        gpu=[metrics_module.GpuMetrics(
+            index=index, name="Fake GPU", vram_used_mb=1, vram_total_mb=2,
+            vram_free_mb=1, vram_percent=50, temperature_c=temp_c,
+            fan_speed_pct=30,
+        )],
+    )
+
+
+async def test_fan_auto_nvapi_ok(client, monkeypatch):
+    _mock_nvml(monkeypatch, _FakePynvml())
+    nv = _FakeNvApi(available=True, set_result=(True, None))
+    _mock_nvapi(monkeypatch, nv)
+    _reset_fan_state()
+    res = await client.post("/api/metrics/gpu/fan/auto", json={"index": 0})
+    data = res.json()
+    assert data["ok"] is True and data["error"] is None
+    assert nv.auto_calls == [0]
+
+
+async def test_fan_auto_sin_nvapi(client, monkeypatch):
+    _mock_nvml(monkeypatch, _FakePynvml())
+    _mock_nvapi(monkeypatch, _FakeNvApi(available=False))
+    _reset_fan_state()
+    res = await client.post("/api/metrics/gpu/fan/auto", json={"index": 0})
+    data = res.json()
+    assert data["ok"] is False
+    assert data["error"] == "fan_auto_unsupported"
+
+
+async def test_fan_baseline_se_captura_y_restore_devuelve(client, monkeypatch):
+    _mock_nvml(monkeypatch, _FakePynvml())
+    nv = _FakeNvApi(available=True, set_result=(True, None), control=[(0, 30)])
+    _mock_nvapi(monkeypatch, nv)
+    _reset_fan_state()
+
+    # Sin baseline capturado: restore responde vacío y no escribe nada.
+    res = await client.post("/api/metrics/gpu/fan/restore-all")
+    assert res.json() == {"ok": True, "restored": {}}
+    assert nv.calls == [] and nv.restored == []
+
+    # Fijar el fan captura lo que había antes de la escritura (auto, 30).
+    res = await client.post("/api/metrics/gpu/fan", json={"index": 0, "percent": 80})
+    assert res.json()["ok"] is True
+    assert nv.control == [(1, 80)]
+
+    # Restore: reescribe exactamente lo capturado y lo consume.
+    res = await client.post("/api/metrics/gpu/fan/restore-all")
+    assert res.json()["restored"]["0"]["ok"] is True
+    assert nv.restored == [(0, [(0, 30)])]
+
+    # Idempotente: una segunda llamada ya no tiene nada que restaurar.
+    res = await client.post("/api/metrics/gpu/fan/restore-all")
+    assert res.json() == {"ok": True, "restored": {}}
+
+
+async def test_fan_auto_explicit_descarta_el_baseline(client, monkeypatch):
+    _mock_nvml(monkeypatch, _FakePynvml())
+    nv = _FakeNvApi(available=True, set_result=(True, None), control=[(0, 30)])
+    _mock_nvapi(monkeypatch, nv)
+    _reset_fan_state()
+    await client.post("/api/metrics/gpu/fan", json={"index": 0, "percent": 80})
+    await client.post("/api/metrics/gpu/fan/auto", json={"index": 0})
+    # El usuario pidió automático explícitamente: eso es lo que debe quedar
+    # al cerrar, no el estado que había antes de tocarlo.
+    res = await client.post("/api/metrics/gpu/fan/restore-all")
+    assert res.json() == {"ok": True, "restored": {}}
+
+
+async def test_fan_curve_put_get_y_persistencia(client, monkeypatch, tmp_path):
+    _mock_nvapi(monkeypatch, _FakeNvApi(available=True, set_result=(True, None)))
+    cfg = _isolated_config(monkeypatch, tmp_path)
+    _reset_fan_state()
+
+    res = await client.put("/api/metrics/gpu/fan-curve", json={
+        "index": 0, "enabled": True,
+        "points": [{"temp_c": 45, "pct": 30}, {"temp_c": 70, "pct": 80}],
+    })
+    data = res.json()
+    assert data["ok"] is True
+
+    res = await client.get("/api/metrics/gpu/fan-curve", params={"index": 0})
+    data = res.json()
+    assert data["enabled"] is True
+    assert data["points"] == [{"temp_c": 45, "pct": 30}, {"temp_c": 70, "pct": 80}]
+    assert data["auto_available"] is True
+
+    # Queda en config.json en disco: el cierre de la app suele ser un kill
+    # duro y el save del lifespan no llegaría a correr.
+    saved = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+    assert saved["monitor"]["fan_curves"]["0"]["enabled"] is True
+
+    # El PUT con curvas activas prende el motor del manager.
+    assert metrics_module.manager._fan_curves_active is True
+
+    # Cleanup: este test levantó el broadcast loop solo por la curva. Se
+    # cancela aquí para que el loop del test cierre sin tareas colgando.
+    metrics_module.manager._fan_curves_active = False
+    task = metrics_module.manager._broadcast_task
+    if task is not None and not task.done():
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    metrics_module.manager._broadcast_task = None
+
+
+async def test_fan_curve_invalidas(client, monkeypatch, tmp_path):
+    _mock_nvapi(monkeypatch, _FakeNvApi(available=True, set_result=(True, None)))
+    _isolated_config(monkeypatch, tmp_path)
+    _reset_fan_state()
+
+    res = await client.put("/api/metrics/gpu/fan-curve", json={
+        "index": 0, "enabled": True,
+        "points": [{"temp_c": 70, "pct": 80}, {"temp_c": 45, "pct": 30}],
+    })
+    assert res.json()["error"] == "fan_curve_points_order"
+
+    res = await client.put("/api/metrics/gpu/fan-curve", json={
+        "index": 0, "enabled": True, "points": [],
+    })
+    assert res.json()["error"] == "fan_curve_points_count"
+
+    # Pydantic corta valores fuera de rango antes que la lógica de curva.
+    res = await client.put("/api/metrics/gpu/fan-curve", json={
+        "index": 0, "enabled": True, "points": [{"temp_c": 45, "pct": 130}],
+    })
+    assert res.status_code == 422
+
+
+async def test_fan_curve_sin_nvapi_no_se_habilita(client, monkeypatch, tmp_path):
+    # Sin NvAPI no hay garantía de devolver el fan a auto al cerrar: la
+    # curva queda bloqueada en el endpoint, no solo oculta en la UI.
+    _mock_nvapi(monkeypatch, _FakeNvApi(available=False))
+    cfg = _isolated_config(monkeypatch, tmp_path)
+    _reset_fan_state()
+    res = await client.put("/api/metrics/gpu/fan-curve", json={
+        "index": 0, "enabled": True,
+        "points": [{"temp_c": 45, "pct": 30}],
+    })
+    data = res.json()
+    assert data["ok"] is False
+    assert data["error"] == "fan_auto_unsupported"
+    res = await client.get("/api/metrics/gpu/fan-curve", params={"index": 0})
+    assert res.json()["auto_available"] is False
+    assert cfg.get("monitor.fan_curves", {}) == {}
+
+
+def test_apply_fan_curves_interpola_y_respeta_delta(monkeypatch, tmp_path):
+    cfg = _isolated_config(monkeypatch, tmp_path)
+    cfg.set("monitor.fan_curves", {"0": {"enabled": True, "points": [
+        {"temp_c": 45, "pct": 30}, {"temp_c": 70, "pct": 80}]}})
+    _reset_fan_state()
+    collector = metrics_module.manager.collector
+    nv = _FakeNvApi(available=True, set_result=(True, None), control=[(0, 30)])
+    monkeypatch.setattr(collector, "_nvapi_fan", nv)
+
+    # Bajo el primer punto: extremo 30%, y captura el baseline antes de escribir.
+    res = collector.apply_fan_curves(_fake_gpu_snap(40))
+    assert res["applied"] == [0]
+    assert nv.calls[-1] == (0, 30, 2, 0.0)  # readback_s=0: sin sleep en el ciclo
+    assert collector._fan_baselines[0] == [(0, 30)]
+
+    # Target casi igual al aplicado (30 vs 33): no reescribe (anti-oscilación).
+    res = collector.apply_fan_curves(_fake_gpu_snap(41))
+    assert res["applied"] == [] and len(nv.calls) == 1
+
+    # 58°C → interpolado 56%: delta >= 5, aplica.
+    res = collector.apply_fan_curves(_fake_gpu_snap(58))
+    assert res["applied"] == [0]
+    assert nv.calls[-1][1] == 56
+
+    # Sin curva habilitada para la GPU: no toca nada.
+    cfg.set("monitor.fan_curves", {})
+    res = collector.apply_fan_curves(_fake_gpu_snap(90))
+    assert res["applied"] == [] and len(nv.calls) == 2
+
+    # GPU sin temperatura leída: ciclo saltado (no se puede decidir).
+    cfg.set("monitor.fan_curves", {"0": {"enabled": True, "points": [
+        {"temp_c": 45, "pct": 30}]}})
+    res = collector.apply_fan_curves(_fake_gpu_snap(None))
+    assert res["applied"] == [] and len(nv.calls) == 2
+
+
+def test_apply_fan_curves_autodisable_tras_fallos(monkeypatch, tmp_path):
+    cfg = _isolated_config(monkeypatch, tmp_path)
+    cfg.set("monitor.fan_curves", {"0": {"enabled": True, "points": [
+        {"temp_c": 45, "pct": 30}]}})
+    _reset_fan_state()
+    collector = metrics_module.manager.collector
+    # Escritura siempre rechazada (p. ej. app sin admin): reintenta cada
+    # ciclo y se auto-deshabilita tras el máximo, pidiendo persistir la config.
+    nv = _FakeNvApi(available=True, set_result=(False, "fan_no_privilege"))
+    monkeypatch.setattr(collector, "_nvapi_fan", nv)
+
+    for _ in range(3):
+        res = collector.apply_fan_curves(_fake_gpu_snap(60))
+    assert res["disabled"] == [0]
+    assert cfg.get("monitor.fan_curves")["0"]["enabled"] is False
+    assert len(nv.calls) == 3
+
+    # Deshabilitada: ya no intenta escribir.
+    res = collector.apply_fan_curves(_fake_gpu_snap(60))
+    assert res == {"applied": [], "disabled": []} and len(nv.calls) == 3
 
 
 # --------------------------------------------------------------------------

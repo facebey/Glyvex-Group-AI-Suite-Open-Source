@@ -63,3 +63,4 @@ Thumbs.db
 # Documentacion local (solo en disco, no versionar)
 AGENTS.md
 src-tauri/tauri.release-build.conf.json
+src-tauri/tauri.dev-tray.conf.json

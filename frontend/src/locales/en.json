@@ -700,6 +700,26 @@
         "notSupported": "This GPU does not allow setting the fan manually.",
         "needsAdmin": "Run Glyvex as administrator to set the fan.",
         "needsRoot": "Run Glyvex as root (sudo) to set the fan.",
+        "auto": "Automatic",
+        "autoSuccess": "Fan returned to automatic control",
+        "autoError": "Could not return to automatic: {{error}}",
+        "autoUnsupported": "Returning to automatic is not available with this GPU.",
+        "curve": {
+          "title": "Temperature curve",
+          "enabled": "Enable",
+          "hint": "While the app is open the fan follows this curve; on close it goes back to what it had before.",
+          "presets": {
+            "silent": "Silent",
+            "balanced": "Balanced",
+            "aggressive": "Aggressive"
+          },
+          "add": "Add point",
+          "remove": "Remove",
+          "save": "Save curve",
+          "saved": "Curve saved",
+          "invalid": "Check the curve: temperatures between 20 and 105 °C, strictly increasing, and percentages from 0 to 100.",
+          "unavailable": "Automatic fan control requires Windows with an NVIDIA driver."
+        },
         "loadError": "Could not reach the backend."
       },
       "power": "Power",
@@ -819,6 +839,11 @@
     "start": "START BENCHMARK",
     "progress": "Progress: {{done}}/{{total}}",
     "cancel": "CANCEL",
+    "categories": {
+      "title": "Categories",
+      "all": "All",
+      "none": "None"
+    },
     "errors": {
       "startFailed": "Could not start the benchmark",
       "startCatch": "Error starting the benchmark.",

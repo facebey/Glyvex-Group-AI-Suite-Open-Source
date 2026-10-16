@@ -30,7 +30,7 @@ Two concepts that recur:
 | `n_gpu_layers` | `-ngl` | -1 (all) | `gpu_mode="cpu_only"` forces it to 0. |
 | `n_cpu_moe` | `--n-cpu-moe` | 0 (none) | Only emitted when > 0. Moves MoE expert layers to system RAM for models that don't fit in VRAM. |
 | `gpu_mode` | — | `gpu_only` | `gpu_only` \| `cpu_only` \| `hybrid`. `gpu_only` + `n_gpu_layers=0` is invalid (use `-1` or hybrid). |
-| `cache_type_k` / `cache_type_v` | `--cache-type-k/-v` | `q4_0` | With Flash Attention **symmetric pairs only**: `q4_0-q4_0`, `q8_0-q8_0`, `f16-f16`, `bf16-bf16`. Any other combination ends in a crash or a silent fallback to f16. |
+| `cache_type_k` / `cache_type_v` | `--cache-type-k/-v` | `q8_0` | With Flash Attention **symmetric pairs only**: `q4_0-q4_0`, `q8_0-q8_0`, `f16-f16`, `bf16-bf16`. Any other combination ends in a crash or a silent fallback to f16. |
 | `flash_attn` | `--flash-attn` | `on` | Accepts `on`/`off`/`auto` (not 1/0). |
 | `load_mode` | `--load-mode` | `auto` | `auto` \| `none` \| `mmap` \| `mlock` \| `mmap+mlock` \| `dio`. Replaces the old `--mlock`/`--no-mmap`. |
 | `mmproj_path` | `--mmproj` | — | Vision encoder (sidecar or embedded). |

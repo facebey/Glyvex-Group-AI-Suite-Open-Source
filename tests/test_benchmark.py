@@ -278,3 +278,84 @@ async def test_migration_imports_existing_json(tmp_path):
             assert row.status == "completed"
     finally:
         db_module.RUNS_DIR = original_runs_dir
+
+
+# --------------------------------------------------------------------------
+# K1 — selector de categorías: summaries, filtro en el run, historial
+# --------------------------------------------------------------------------
+
+
+async def test_set_summaries_include_categories(client):
+    res = await client.get("/api/benchmark/sets")
+    assert res.status_code == 200
+    for s in res.json():
+        assert isinstance(s["categories"], list)
+        assert len(s["categories"]) > 0
+        assert s["categories"] == sorted(s["categories"])
+    coder = next(s for s in res.json() if s["id"] == "coder")
+    assert "debug" in coder["categories"]
+
+
+def _inject_category_set():
+    """Set efímero de 2 prompts en categorías distintas (in-memory)."""
+    test_set = benchmark_module.PromptSet(
+        id="__cat_set__",
+        name="Cat Set",
+        description="Set efímero de 2 categorías para tests de K1",
+        icon="🎯",
+        prompts=[
+            benchmark_module.PromptItem(
+                id="c1", title="Prompt alpha", prompt="Decime hola",
+                expected_keywords=[], category="alpha", difficulty="easy",
+            ),
+            benchmark_module.PromptItem(
+                id="c2", title="Prompt beta", prompt="Decime hola",
+                expected_keywords=[], category="beta", difficulty="easy",
+            ),
+        ],
+    )
+    benchmark_module.prompt_sets._sets["__cat_set__"] = test_set
+    return "__cat_set__"
+
+
+async def test_run_filters_by_category(client, mock_llama_server, custom_prompt_set):
+    await benchmark_module.prompt_sets.ensure_loaded()
+    cat_set_id = _inject_category_set()
+    try:
+        final = await _run_and_wait_completed(
+            client, [cat_set_id], endpoint=mock_llama_server, categories=["alpha"],
+        )
+        assert final["status"] == "completed"
+        assert len(final["results"]) == 1
+        assert final["results"][0]["prompt_id"] == "c1"
+        assert final["summary"]["total_prompts"] == 1
+    finally:
+        benchmark_module.prompt_sets._sets.pop("__cat_set__", None)
+
+
+async def test_run_categories_no_match_errors(client, mock_llama_server, custom_prompt_set):
+    final = await _run_and_wait_completed(
+        client, [custom_prompt_set], endpoint=mock_llama_server, categories=["no-existe"],
+    )
+    assert final["status"] == "error"
+    assert "categor" in (final.get("error") or "").lower()
+    assert final["results"] == []
+
+
+async def test_history_includes_categories(client, mock_llama_server, custom_prompt_set):
+    final = await _run_and_wait_completed(
+        client, [custom_prompt_set], endpoint=mock_llama_server, categories=["test"],
+    )
+    assert final["status"] == "completed"
+
+    history = (await client.get("/api/benchmark/history")).json()
+    entry = next(e for e in history if e["run_id"] == final["run_id"])
+    assert entry["categories"] == ["test"]
+
+    sin_filtro = await _run_and_wait_completed(
+        client, [custom_prompt_set], endpoint=mock_llama_server,
+    )
+    assert sin_filtro["status"] == "completed"
+    history = (await client.get("/api/benchmark/history")).json()
+    entry2 = next(e for e in history if e["run_id"] == sin_filtro["run_id"])
+    assert entry2["categories"] is None

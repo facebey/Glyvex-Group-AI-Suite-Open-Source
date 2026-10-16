@@ -19,7 +19,7 @@ depende de lo que dejó un test anterior.
 
 Templates: desde la Conversación C viven en SQLite. La fixture siembra la DB
 de test con `database._sync_builtin_templates()`, que lee el JSON real
-`data/templates/hw_templates.json` en modo solo lectura — los 5 templates
+`data/templates/hw_templates.json` en modo solo lectura — los templates
 predefinidos quedan disponibles para los tests sin tocar nada en disco.
 
 La única excepción intencional es `benchmark.prompt_sets`: se deja apuntando
@@ -72,7 +72,7 @@ import kokoro_runtime as kokoro_runtime_module  # noqa: E402
 import runtime as runtime_module  # noqa: E402
 import tts as tts_module  # noqa: E402
 
-from mock_llm_server import build_mock_app  # noqa: E402
+from mock_llm_server import build_mock_app, set_models_auth  # noqa: E402
 
 MOCK_SERVER_PORT = 18080
 
@@ -518,6 +518,7 @@ def probeable_binary(make_probeable_binary):
 
 @pytest.fixture
 async def mock_llama_server():
+    set_models_auth(None)
     app_instance = build_mock_app()
     config = uvicorn.Config(
         app_instance, host="127.0.0.1", port=MOCK_SERVER_PORT, log_level="critical"

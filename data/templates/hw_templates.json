@@ -38,6 +38,25 @@
     }
   },
   {
+    "name": "RTX 3090 24GB — Híbrido 128K",
+    "builtin": true,
+    "params": {
+      "n_gpu_layers": -1,
+      "n_ctx": 131072,
+      "cache_type_k": "q8_0",
+      "cache_type_v": "q8_0",
+      "cache_type_k_draft": "q8_0",
+      "cache_type_v_draft": "q8_0",
+      "flash_attn": true,
+      "gpu_mode": "gpu_only",
+      "ctx_checkpoints": 6,
+      "checkpoint_min_step": 16384,
+      "cache_ram_mib": 16384,
+      "fit_target_mib": 2048,
+      "sampling_preset": "thinking"
+    }
+  },
+  {
     "name": "CPU only — 64GB RAM",
     "builtin": true,
     "params": {
@@ -48,6 +67,20 @@
       "flash_attn": false,
       "use_mlock": true,
       "gpu_mode": "cpu_only"
+    }
+  },
+  {
+    "name": "CPU only — multi-socket (NUMA)",
+    "builtin": true,
+    "params": {
+      "n_gpu_layers": 0,
+      "n_ctx": 32768,
+      "cache_type_k": "q8_0",
+      "cache_type_v": "q8_0",
+      "flash_attn": false,
+      "load_mode": "mlock",
+      "numa": true,
+      "gpu_mode": "hybrid"
     }
   },
   {

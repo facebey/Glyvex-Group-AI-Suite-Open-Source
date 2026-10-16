@@ -616,11 +616,25 @@ function GpuTdpControl({ index }) {
   );
 }
 
+// Curvas de fábrica del editor (MON-3): (°C → %) pensados para una 3090 —
+// el driver clamplea el mínimo de todos modos; son puntos de partida.
+const FAN_CURVE_PRESETS = {
+  silent: [[45, 30], [65, 50], [80, 70]],
+  balanced: [[40, 30], [60, 50], [75, 80], [85, 100]],
+  aggressive: [[35, 40], [55, 70], [70, 90], [80, 100]],
+};
+const FAN_CURVE_MAX_POINTS = 6;
+
 function GpuFanControl({ index, fanPct }) {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [value, setValue] = useState(fanPct);
   const [busy, setBusy] = useState(false);
+  // Curva de temperatura leída del backend: null hasta que responde;
+  // auto_available dice si la vía NvAPI existe (sin ella no hay Auto/curva).
+  const [curve, setCurve] = useState(null);
+  const [autoAvailable, setAutoAvailable] = useState(false);
+  const [curveBusy, setCurveBusy] = useState(false);
 
   // El slider sigue el fan real del snapshot live: tras aplicar un valor
   // fijo se actualiza, y con la curva automática el usuario ve dónde está
@@ -628,6 +642,24 @@ function GpuFanControl({ index, fanPct }) {
   useEffect(() => {
     if (fanPct != null && !busy) setValue(fanPct);
   }, [fanPct, busy]);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/metrics/gpu/fan-curve?index=${index}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!alive || !d) return;
+        setAutoAvailable(Boolean(d.auto_available));
+        setCurve({
+          enabled: Boolean(d.enabled),
+          points: (d.points || []).map((p) => ({ temp_c: p.temp_c, pct: p.pct })),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [index]);
 
   const apply = async () => {
     setBusy(true);
@@ -661,6 +693,110 @@ function GpuFanControl({ index, fanPct }) {
     }
   };
 
+  // MON-3: el fan vuelve al control automático del driver. Si había un
+  // baseline capturado por la app, el backend lo descarta: auto es lo que
+  // el usuario pidió explícitamente.
+  const setAuto = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/metrics/gpu/fan/auto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ index }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.ok) {
+        addToast(t("monitor.gpu.fan.autoSuccess"), "success");
+      } else if (data?.error === "fan_auto_unsupported") {
+        addToast(t("monitor.gpu.fan.autoUnsupported"), "error");
+      } else if (data?.error === "fan_no_privilege") {
+        addToast(
+          data?.privilege_hint === "root"
+            ? t("monitor.gpu.fan.needsRoot")
+            : t("monitor.gpu.fan.needsAdmin"),
+          "error"
+        );
+      } else {
+        addToast(t("monitor.gpu.fan.autoError", { error: data?.error || "?" }), "error");
+      }
+    } catch {
+      addToast(t("monitor.gpu.fan.loadError"), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // La curva se persiste solo al guardar (o al activar el checkbox): los
+  // presets y la edición tocan el estado local antes de viajar al backend.
+  const saveCurve = async (enabled) => {
+    if (!curve) return;
+    setCurveBusy(true);
+    try {
+      const res = await fetch("/api/metrics/gpu/fan-curve", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          index,
+          enabled,
+          points: curve.points.map((p) => ({
+            temp_c: Number(p.temp_c),
+            pct: Number(p.pct),
+          })),
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.ok) {
+        setCurve({ enabled: data.enabled, points: data.points });
+        addToast(t("monitor.gpu.fan.curve.saved"), "success");
+      } else if (data?.error === "fan_auto_unsupported") {
+        addToast(t("monitor.gpu.fan.autoUnsupported"), "error");
+      } else if (typeof data?.error === "string" && data.error.startsWith("fan_curve_")) {
+        addToast(t("monitor.gpu.fan.curve.invalid"), "error");
+      } else {
+        addToast(t("monitor.gpu.fan.applyError", { error: data?.error || "?" }), "error");
+      }
+    } catch {
+      addToast(t("monitor.gpu.fan.loadError"), "error");
+    } finally {
+      setCurveBusy(false);
+    }
+  };
+
+  const loadPreset = (key) => {
+    setCurve((c) => ({
+      ...c,
+      points: FAN_CURVE_PRESETS[key].map(([temp_c, pct]) => ({ temp_c, pct })),
+    }));
+  };
+
+  const updatePoint = (i, field, raw) => {
+    setCurve((c) => ({
+      ...c,
+      points: c.points.map((p, j) => (j === i ? { ...p, [field]: raw } : p)),
+    }));
+  };
+
+  const addPoint = () => {
+    setCurve((c) => {
+      if (!c || c.points.length >= FAN_CURVE_MAX_POINTS) return c;
+      const last = c.points[c.points.length - 1];
+      return {
+        ...c,
+        points: [
+          ...c.points,
+          {
+            temp_c: last ? Math.min(105, Number(last.temp_c) + 10) : 45,
+            pct: last ? Number(last.pct) : 30,
+          },
+        ],
+      };
+    });
+  };
+
+  const removePoint = (i) => {
+    setCurve((c) => (c.points.length <= 1 ? c : { ...c, points: c.points.filter((_, j) => j !== i) }));
+  };
+
   const pct = value ?? 0;
   return (
     <div className="gx-recess rounded-lg border border-glyvex-border-soft bg-glyvex-veil-faint p-3 space-y-3">
@@ -684,7 +820,17 @@ function GpuFanControl({ index, fanPct }) {
           className="gx-range w-full accent-glyvex-accent"
           style={{ "--gx-pct": `${pct}%` }}
         />
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          {autoAvailable && (
+            <button
+              type="button"
+              onClick={setAuto}
+              disabled={busy}
+              className="text-[11px] px-2.5 py-1 rounded-md border border-glyvex-border-soft bg-glyvex-veil text-glyvex-muted hover:bg-glyvex-veil-strong disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {t("monitor.gpu.fan.auto")}
+            </button>
+          )}
           <button
             type="button"
             onClick={apply}
@@ -695,6 +841,94 @@ function GpuFanControl({ index, fanPct }) {
           </button>
         </div>
       </div>
+
+      {!autoAvailable && (
+        <p className="text-[10px] text-glyvex-muted">{t("monitor.gpu.fan.curve.unavailable")}</p>
+      )}
+
+      {autoAvailable && curve && (
+        <div className="border-t border-glyvex-border-soft pt-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-glyvex-muted uppercase tracking-wide">
+              {t("monitor.gpu.fan.curve.title")}
+            </span>
+            <label className="flex items-center gap-1.5 text-[11px] text-glyvex-muted cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={curve.enabled}
+                onChange={(e) => saveCurve(e.target.checked)}
+                disabled={curveBusy}
+                className="accent-glyvex-accent"
+              />
+              {t("monitor.gpu.fan.curve.enabled")}
+            </label>
+          </div>
+          <p className="text-[10px] text-glyvex-muted">{t("monitor.gpu.fan.curve.hint")}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.keys(FAN_CURVE_PRESETS).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => loadPreset(key)}
+                className="text-[10px] px-2 py-0.5 rounded border border-glyvex-border-soft bg-glyvex-veil text-glyvex-muted hover:bg-glyvex-veil-strong"
+              >
+                {t(`monitor.gpu.fan.curve.presets.${key}`)}
+              </button>
+            ))}
+          </div>
+          <div className="space-y-1">
+            {curve.points.map((p, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min={20}
+                  max={105}
+                  value={p.temp_c}
+                  onChange={(e) => updatePoint(i, "temp_c", e.target.value)}
+                  className="w-16 text-[11px] px-1.5 py-0.5 rounded border border-glyvex-border-soft bg-glyvex-veil text-glyvex-text"
+                />
+                <span className="text-[10px] text-glyvex-muted">°C →</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={p.pct}
+                  onChange={(e) => updatePoint(i, "pct", e.target.value)}
+                  className="w-14 text-[11px] px-1.5 py-0.5 rounded border border-glyvex-border-soft bg-glyvex-veil text-glyvex-text"
+                />
+                <span className="text-[10px] text-glyvex-muted">%</span>
+                <button
+                  type="button"
+                  onClick={() => removePoint(i)}
+                  disabled={curve.points.length <= 1}
+                  aria-label={t("monitor.gpu.fan.curve.remove")}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-glyvex-border-soft text-glyvex-muted hover:bg-glyvex-veil-strong disabled:opacity-40"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={addPoint}
+              disabled={curve.points.length >= FAN_CURVE_MAX_POINTS}
+              className="text-[10px] px-2 py-0.5 rounded border border-glyvex-border-soft bg-glyvex-veil text-glyvex-muted hover:bg-glyvex-veil-strong disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {t("monitor.gpu.fan.curve.add")}
+            </button>
+            <button
+              type="button"
+              onClick={() => saveCurve(curve.enabled)}
+              disabled={curveBusy}
+              className="text-[11px] px-3 py-1 rounded-md bg-glyvex-accent text-white font-medium hover:bg-glyvex-accent/85 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {t("monitor.gpu.fan.curve.save")}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

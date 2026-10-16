@@ -1,0 +1,96 @@
+name: Windows NSIS
+
+# T-1 T7.4: build del instalador NSIS firmado + latest.json en tags v*.
+# Se SALTA (gris) si no existe el secret TAURI_SIGNING_PRIVATE_KEY: igual que
+# linux-appimage.yml, el espejo public (sin secrets) no rompe al recibir tags.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  gate:
+    name: Gate (TAURI_SIGNING_PRIVATE_KEY presente?)
+    runs-on: windows-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        shell: pwsh
+        run: |
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+            "enabled=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "enabled=false" >> $env:GITHUB_OUTPUT
+          }
+
+  build-nsis:
+    name: NSIS (Node 22)
+    needs: [gate]
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # PyInstaller analiza los imports del sidecar: necesita el app completo
+      # importable en el entorno del build (igual que el workflow Linux).
+      - name: Dependencias del backend (para el sidecar PyInstaller)
+        run: python -m pip install --quiet -r requirements.txt pyinstaller
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Dependencias del frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Sidecar + smoke (build.ps1)
+        shell: pwsh
+        run: .\build.ps1
+
+      - name: Build NSIS firmado
+        working-directory: frontend
+        shell: pwsh
+        run: >
+          npm run tauri -- build --ci --bundles nsis
+          --config '{"build":{"beforeBuildCommand":null}}'
+
+      # latest.json: solo la entrada windows-x86_64 (el runner no tiene el
+      # AppImage). Si la release lleva Linux, regenerar con
+      # build-latest-json.ps1 -LinuxBundle <dir> (ver linux-appimage.yml).
+      - name: latest.json
+        shell: pwsh
+        run: .\build-latest-json.ps1
+
+      - name: Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: glyvex-nsis-${{ github.ref_name }}
+          path: |
+            src-tauri/target/release/bundle/nsis/*_x64-setup.exe
+            src-tauri/target/release/bundle/nsis/*_x64-setup.exe.sig
+            src-tauri/target/release/bundle/nsis/latest.json
+
+      - name: Nota de release
+        shell: pwsh
+        run: >
+          Write-Host "::notice::Sube los artifacts (NSIS + .sig + latest.json)
+          como assets de la release v*. Si hay AppImage Linux, regenera
+          latest.json con build-latest-json.ps1 -LinuxBundle <dir> antes de
+          subir."

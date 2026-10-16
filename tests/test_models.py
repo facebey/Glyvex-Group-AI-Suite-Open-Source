@@ -179,10 +179,11 @@ async def test_compatible_backends_gguf(client, sample_model_dir):
 
 
 async def _metadata_for(client, tmp_path, filename: str, arch: str, template: str | None,
-                        kv: dict[str, int] | None = None) -> dict:
+                        kv: dict[str, int] | None = None,
+                        general_kv: dict[str, str] | None = None) -> dict:
     model_dir = tmp_path / "models"
     model_dir.mkdir()
-    write_gguf(model_dir / filename, arch, template, kv)
+    write_gguf(model_dir / filename, arch, template, kv, general_kv)
     await client.post("/api/config", json={"model_dirs": [str(model_dir)]})
     await scan_and_wait(client)
     model_id = (await client.get("/api/models")).json()[0]["id"]
@@ -226,6 +227,48 @@ async def test_metadata_think_only_template(client, tmp_path):
     assert data["thinking_support"] is True
     assert data["enable_thinking_kwarg"] is False
     assert data["suggested_preset"] == "thinking"
+
+
+# --------------------------------------------------------------------------
+# general.sampling del GGUF -> suggested_sampling (preset "auto")
+# --------------------------------------------------------------------------
+
+
+async def test_metadata_general_sampling_parsed(client, tmp_path):
+    data = await _metadata_for(
+        client, tmp_path,
+        "Sampler-8B-Q4_K_M.gguf", "llama",
+        '{{ messages | join(" ") }}',
+        general_kv={
+            "general.sampling": (
+                '[["temperature",0.8],["top_k",40],["top_p",0.95],'
+                '["min_p",0.05],["frequency_penalty",0.2]]'
+            ),
+        },
+    )
+    # frequency_penalty queda afuera: LaunchConfig no lo soporta.
+    assert data["suggested_sampling"] == {
+        "temperature": 0.8, "top_k": 40, "top_p": 0.95, "min_p": 0.05,
+    }
+
+
+async def test_metadata_without_general_sampling(client, tmp_path):
+    data = await _metadata_for(
+        client, tmp_path,
+        "NoSample-8B-Q4_K_M.gguf", "llama",
+        '{{ messages | join(" ") }}',
+    )
+    assert data["suggested_sampling"] is None
+
+
+async def test_metadata_general_sampling_invalid_json(client, tmp_path):
+    data = await _metadata_for(
+        client, tmp_path,
+        "BadSample-8B-Q4_K_M.gguf", "llama",
+        '{{ messages | join(" ") }}',
+        general_kv={"general.sampling": "esto no es json"},
+    )
+    assert data["suggested_sampling"] is None
 
 
 # --------------------------------------------------------------------------

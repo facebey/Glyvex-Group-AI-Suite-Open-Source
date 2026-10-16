@@ -176,6 +176,13 @@ export default function Benchmark() {
   const [setsError, setSetsError] = useState(false);
   const [selectedSetIds, setSelectedSetIds] = useLocalStorage("glyvex_benchmark_sets", []);
   const selectedSets = useMemo(() => new Set(selectedSetIds), [selectedSetIds]);
+  // Categorías DESMARCADAS (persistidas); marcadas = disponibles − desmarcadas.
+  const [uncheckedCats, setUncheckedCats] = useLocalStorage("glyvex_benchmark_categories_off", []);
+  const availableCats = useMemo(() => {
+    const sel = sets.filter((s) => selectedSets.has(s.id));
+    return [...new Set(sel.flatMap((s) => s.categories || []))].sort();
+  }, [sets, selectedSets]);
+  const activeCats = useMemo(() => availableCats.filter((c) => !uncheckedCats.includes(c)), [availableCats, uncheckedCats]);
   const [expandedSetId, setExpandedSetId] = useState(null);
   const [setDetails, setSetDetails] = useState({});
   const [temperature, setTemperature] = useState(0.0);
@@ -341,6 +348,10 @@ export default function Benchmark() {
     setSelectedSetIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   }
 
+  function toggleCat(cat) {
+    setUncheckedCats((prev) => prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]);
+  }
+
   function toggleExpandSet(id) {
     if (expandedSetId === id) { setExpandedSetId(null); return; }
     setExpandedSetId(id);
@@ -357,7 +368,7 @@ export default function Benchmark() {
     try {
       const res = await fetch("/api/benchmark/run", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ endpoint: endpointUrl, model_name: modelName, sets: [...selectedSets], thinking_enabled: thinkingEnabled, temperature, max_tokens: maxTokens, repetitions, timeout_s: timeoutS }),
+        body: JSON.stringify({ endpoint: endpointUrl, model_name: modelName, sets: [...selectedSets], categories: activeCats.length === availableCats.length ? null : activeCats, thinking_enabled: thinkingEnabled, temperature, max_tokens: maxTokens, repetitions, timeout_s: timeoutS }),
       });
       const run = await res.json();
       if (!res.ok) throw new Error(run.detail || t("benchmark.errors.startFailed"));
@@ -516,6 +527,25 @@ export default function Benchmark() {
             ))}
           </div>
         )}
+        {!setsError && availableCats.length > 0 && (
+          <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-medium text-glyvex-muted uppercase tracking-wide">{t("benchmark.categories.title")}</h3>
+              <div className="flex gap-3 text-xs">
+                <button type="button" onClick={() => setUncheckedCats([])} className="text-glyvex-accent hover:underline">{t("benchmark.categories.all")}</button>
+                <button type="button" onClick={() => setUncheckedCats(availableCats)} className="text-glyvex-accent hover:underline">{t("benchmark.categories.none")}</button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {availableCats.map((cat) => (
+                <label key={cat} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-glyvex-border-soft bg-glyvex-veil text-xs cursor-pointer hover:border-glyvex-accent/50">
+                  <input type="checkbox" checked={!uncheckedCats.includes(cat)} onChange={() => toggleCat(cat)} className="w-3.5 h-3.5 accent-glyvex-accent" />
+                  {cat}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-3">
@@ -535,7 +565,7 @@ export default function Benchmark() {
       {runError && <p className="text-sm text-red-400">{runError}</p>}
 
       {!running ? (
-        <button type="button" onClick={handleStart} disabled={selectedSets.size === 0}
+        <button type="button" onClick={handleStart} disabled={selectedSets.size === 0 || (availableCats.length > 0 && activeCats.length === 0)}
           className="flex items-center gap-2 px-5 py-2.5 rounded-md text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50">
           <Play size={16} />{t("benchmark.start")}
         </button>

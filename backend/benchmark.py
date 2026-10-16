@@ -104,6 +104,7 @@ class PromptSetSummary(BaseModel):
     icon: str
     version: str
     prompt_count: int
+    categories: list[str] = Field(default_factory=list)
 
 
 class BenchmarkConfig(BaseModel):
@@ -111,6 +112,8 @@ class BenchmarkConfig(BaseModel):
     api_key: str = ""
     model_name: str = ""
     sets: list[str]
+    # K1: filtro por categoría. None = todas (runs viejos y por compatibilidad).
+    categories: list[str] | None = None
     thinking_enabled: bool = False
     temperature: float = 0.0
     max_tokens: int = 2048
@@ -200,6 +203,21 @@ def _loads_list(raw: str | None) -> list[Any]:
     except json.JSONDecodeError:
         return []
     return data if isinstance(data, list) else []
+
+
+def _loads_config_categories(raw: str | None) -> list[str] | None:
+    """categories desde la columna config (JSON de BenchmarkConfig completo).
+
+    None = run sin filtro (config vieja sin el campo o todas las categorías).
+    """
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    value = data.get("categories") if isinstance(data, dict) else None
+    return value if isinstance(value, list) else None
 
 
 def _now_iso() -> str:
@@ -312,6 +330,7 @@ class PromptSetStore:
             PromptSetSummary(
                 id=s.id, name=s.name, description=s.description,
                 icon=s.icon, version=s.version, prompt_count=len(s.prompts),
+                categories=sorted({p.category for p in s.prompts}),
             )
             for s in self._sets.values()
         ]
@@ -906,6 +925,18 @@ class BenchmarkManager:
                 set_lookup[item.id] = set_id
                 prompt_items.append(item)
 
+        # Filtro por categoría: None/vacío = todas (runs viejos no traen el campo).
+        if cfg.categories:
+            allowed = set(cfg.categories)
+            prompt_items = [item for item in prompt_items if item.category in allowed]
+        if not prompt_items:
+            run.error = "Sin prompts: ninguna categoría seleccionada coincide con los sets elegidos"
+            run.finished_at = datetime.now(timezone.utc).isoformat()
+            await self._db_update_status(run_id, "error", run.finished_at)
+            run.status = "error"
+            self._publish(run_id, {"type": "error", "message": run.error})
+            return
+
         full_queue = prompt_items * max(cfg.repetitions, 1)
         total = len(full_queue)
         self._queue_totals[run_id] = total
@@ -1107,6 +1138,7 @@ class BenchmarkManager:
                 "status": run_row.status,
                 "model_name": run_row.model_name,
                 "sets": _loads_list(run_row.sets),
+                "categories": _loads_config_categories(run_row.config),
                 "summary": _summary_row_to_dict(summary_row) if summary_row else None,
             })
         return entries
@@ -1129,6 +1161,7 @@ class BenchmarkManager:
                     "status": data.get("status"),
                     "model_name": data.get("config", {}).get("model_name"),
                     "sets": data.get("config", {}).get("sets", []),
+                    "categories": data.get("config", {}).get("categories"),
                     "summary": data.get("summary"),
                 })
             except Exception:

@@ -7,6 +7,69 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.9.0-beta] — 2026-10-16
+
+Release de features sobre v0.8.1-beta: curvas de ventilador de GPU con
+restauración automática al salir, bandeja del sistema, nuevos templates
+builtin y fixes de Chat/Launcher.
+
+### Añadido
+- **Monitor: curvas de ventilador por temperatura** (MON-3): curvas
+  temperatura→ventilador % por GPU aplicadas vía NvAPI, con editor de curva
+  y botón AUTO del ventilador en la card de GPU (EN/ES). Un hook de parada en
+  Rust restaura los ventiladores a AUTO antes del kill duro del backend al
+  salir de la app (cierre ordenado, salir desde la bandeja o SIGTERM), y
+  `POST /api/metrics/gpu/fan/restore-all` restaura todas las placas desde la
+  API. Validado end-to-end en una RTX 3090.
+- **Escritorio: bandeja del sistema** (T5.4): ícono en la bandeja con menú
+  abrir/minimizar/salir; cerrar la ventana minimiza a la bandeja en vez de
+  salir.
+- **Launcher: templates builtin para 128K híbrido GPU y NUMA multi-socket**,
+  dimensionados según el hardware detectado.
+- **Modelos: un preset de sampling `auto`** que lee los valores de sampling
+  que el cuantizador embebió en el GGUF (metadata `general.sampling`) y los
+  aplica al lanzar.
+- **Benchmark: filtro de categorías** en los runs — se elige qué categorías
+  de prompts de un set se ejecutan.
+
+### Cambiado
+- **Launcher: el KV cache por defecto ahora es `q8_0`** — mejor relación
+  calidad/VRAM en las instancias llama-server lanzadas.
+- **Fuente de marca: Glyvex Sans v2.010 (full coverage)**: la build de
+  subset latin se sustituye por la variable full coverage (235 glifos,
+  wght 100–900, opción C con `o`/`0` limpios); la app y el brand kit
+  distribuyen ahora `glyvex-sans-wght.woff2` (+ `.ttf` en el kit).
+
+### Corregido
+- **Chat: detección de modelos en endpoints protegidos** (CHAT-3): la API
+  key configurada se reenvía como header Bearer por el proxy de listado de
+  modelos, así que los llama-server iniciados con `--api-key` ya no dan 401
+  ni dejan el modelo sin detectar; la petición de detección va con un
+  debounce de 300 ms.
+- **Chat: el streaming sobrevive a navegar a otros módulos** (CHAT-2): el
+  fetch+SSE pasó a un store de nivel de módulo (`chatStreamStore.js`), por lo
+  que desmontar Chat ya no aborta la generación; al volver se reattacha al
+  stream en curso y las respuestas parciales se guardan al desmontar.
+- **Launcher: los templates ahora persisten la activación de MTP, los floors
+  de draft y LoRA**.
+- **Chat: los chips de adjuntos muestran la miniatura desde el preview
+  local** (`previewUrl`) antes de que termine la subida.
+- **Frontend en Linux: texto visible en los `<select>`** — se fuerza el
+  renderizado CSS, corrigiendo el texto invisible en WebKitGTK.
+- **Frontend: `tauri.js` se importa estáticamente en el bootstrap** (el
+  import dinámico no tenía efecto en builds empaquetadas).
+
+### Build
+- Nuevo workflow CI `windows-nsis`: construye el instalador NSIS y el
+  manifest firmado del updater en un runner de Windows (T7.4).
+
+## [0.8.1-beta] — 2026-10-11
+
+Release de mantenimiento sobre v0.8.0-beta para las dos regresiones de UX
+post-actualización. El AppImage de Linux se añadió a esta release tras la
+primera publicación (construido por CI; validado en Ubuntu 26.04, funciona
+en 22.04+ con `libfuse2`).
+
 ### Añadido
 - **Runtime: AppImage Linux x64 + updater** (RT-14 L2): `build-linux-appimage.sh`
   construye el AppImage de Tauri firmado en Linux (sidecar + bundle de
@@ -16,13 +79,13 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
   salta si no hay secret de firma, de modo que el espejo público no se vea
   afectado).
 
-### Cambiado
-- **Fuente de marca: Glyvex Sans v2.010 (full coverage)**: la build de
-  subset latin se sustituye por la variable full coverage (235 glifos,
-  wght 100–900, opción C con `o`/`0` limpios); la app y el brand kit
-  distribuyen ahora `glyvex-sans-wght.woff2` (+ `.ttf` en el kit).
-
 ### Corregido
+- **Barra de progreso del actualizador**: ahora refleja el avance real
+  (corregida la forma del callback `DownloadEvent` de
+  `@tauri-apps/plugin-updater` 2.13.1).
+- **Watchdog de WebSocket de métricas** (F5): descarta la conexión
+  zombie/silenciosa tras el relanzamiento de una actualización in-app, para
+  que el control de ventilador y las métricas GPU vuelvan sin recargar.
 - **Búsqueda del sidecar en Linux**: el proceso backend solo se buscaba como
   `glyvex-backend.exe`; ahora resuelve el nombre de binario según la
   plataforma.

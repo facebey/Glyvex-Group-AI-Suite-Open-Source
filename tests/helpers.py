@@ -61,7 +61,8 @@ async def wait_until(
 
 
 def write_gguf(path, arch: str = "llama", chat_template: str | None = None,
-               kv: dict[str, int] | None = None):
+               kv: dict[str, int] | None = None,
+               general_kv: dict[str, str] | None = None):
     """Escribe un GGUF mínimo pero real (header legible por read_gguf_metadata).
 
     Los fixtures de sample_model_dir usan .touch() vacío (sirven para el
@@ -72,6 +73,9 @@ def write_gguf(path, arch: str = "llama", chat_template: str | None = None,
     (ej. {"attention.head_count_kv": 8} -> "<arch>.attention.head_count_kv").
     Números enteros (GGUFValueType.UINT32): suficiente para block_count,
     head_count(_kv), embedding_length, attention.head_size, ffn_expert_count…
+
+    `general_kv` agrega KVs de string con la clave COMPLETA ya escrita
+    (ej. {"general.sampling": '[["temperature",0.7]]'}).
     """
     from gguf import GGUFValueType, GGUFWriter
 
@@ -84,6 +88,8 @@ def write_gguf(path, arch: str = "llama", chat_template: str | None = None,
         writer.add_chat_template(chat_template)
     for key, value in (kv or {}).items():
         writer.add_key_value(f"{arch}.{key}", value, GGUFValueType.UINT32)
+    for key, value in (general_kv or {}).items():
+        writer.add_key_value(key, value, GGUFValueType.STRING)
     writer.write_header_to_file()
     writer.write_kv_data_to_file()
     writer.close()

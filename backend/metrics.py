@@ -38,6 +38,7 @@ from typing import Any
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+import fan_control
 import metrics_export
 import nvapi_fan
 from config import config
@@ -149,6 +150,22 @@ class FanSpeedSet(BaseModel):
     percent: int = Field(..., ge=0, le=100)
 
 
+class FanIndexSet(BaseModel):
+    index: int
+
+
+class FanCurvePoint(BaseModel):
+    temp_c: int = Field(..., ge=fan_control.FAN_CURVE_TEMP_MIN_C,
+                        le=fan_control.FAN_CURVE_TEMP_MAX_C)
+    pct: int = Field(..., ge=0, le=100)
+
+
+class FanCurveSet(BaseModel):
+    index: int
+    enabled: bool = False
+    points: list[FanCurvePoint] = Field(default_factory=list)
+
+
 # --------------------------------------------------------------------------
 # Recolección de métricas
 # --------------------------------------------------------------------------
@@ -167,6 +184,16 @@ class MetricsCollector:
         # Adapter NvAPI Direct para el set de fan en Windows (lazy: no toca
         # la DLL hasta que se consulta `available`).
         self._nvapi_fan = nvapi_fan.NvApiFan()
+        # MON-3: baseline de fan por índice = [(ControlMode, Level)] que la GPU
+        # tenía antes de la primera escritura de esta instancia. Al cerrar la
+        # app debe volver a eso (reporte de usuarios: el fan quedaba manual).
+        # Solo con adapter NvAPI: en la vía NVML no hay forma documentada de
+        # devolver a "auto" (verificado contra pynvml), así que no se captura
+        # baseline y el auto responde fan_auto_unsupported.
+        self._fan_baselines: dict[int, list[tuple[int, int]]] = {}
+        # Estado del engine de curvas por índice: último objetivo aplicado y
+        # fallos consecutivos (ver apply_fan_curves).
+        self._fan_curve_state: dict[int, dict[str, int | None]] = {}
 
         if PSUTIL_AVAILABLE:
             # cpu_percent (global y per-core) necesita una primera llamada
@@ -361,6 +388,7 @@ class MetricsCollector:
         if not self._nvml_ready:
             return False, "No se pudo inicializar NVML (¿hay una GPU NVIDIA?)"
         if self._nvapi_fan.available:
+            self._capture_fan_baseline(index)
             return self._nvapi_fan.set_manual(index, percent,
                                               tolerance=FAN_SET_TOLERANCE_PCT,
                                               readback_s=FAN_SET_READBACK_S)
@@ -385,6 +413,107 @@ class MetricsCollector:
         if "NO_PERMISSION" in exc or "Insufficient" in exc:
             return "fan_no_privilege"
         return exc
+
+    # -- fan: baseline, auto y curvas de temperatura (MON-3) ---------------
+
+    def fan_auto_available(self) -> bool:
+        """True si existe la vía NvAPI, única que puede devolver el fan a
+        automático y capturar baseline (Windows con driver NVIDIA)."""
+        return self._nvapi_fan.available
+
+    def _capture_fan_baseline(self, index: int) -> None:
+        """Guarda el (ControlMode, Level) actual una sola vez por índice,
+        antes de la primera escritura. Si falló la lectura, no hay baseline y
+        el restore de ese índice simplemente no ocurre (no hay nada seguro
+        que restaurar)."""
+        if index in self._fan_baselines:
+            return
+        items = self._nvapi_fan.fan_control(index)
+        if items:
+            self._fan_baselines[index] = items
+
+    def set_fan_auto(self, index: int) -> tuple[bool, str | None]:
+        """(ok, error). Devuelve el fan a control automático del driver. Con
+        elección explícita del usuario se descarta el baseline: "auto" es lo
+        que él quiere al cerrar, no el estado que había antes."""
+        if not PYNVML_AVAILABLE:
+            return False, "pynvml no está instalado"
+        if not self._nvml_ready:
+            return False, "No se pudo inicializar NVML (¿hay una GPU NVIDIA?)"
+        if not self._nvapi_fan.available:
+            return False, "fan_auto_unsupported"
+        ok, error = self._nvapi_fan.set_auto(index)
+        if ok:
+            self._fan_baselines.pop(index, None)
+            self._fan_curve_state.pop(index, None)
+        return ok, error
+
+    def restore_fan_baselines(self) -> dict[int, tuple[bool, str | None]]:
+        """Devuelve cada GPU con baseline capturado a lo que tenía antes de la
+        primera escritura. Entradas: manager.stop() (shutdown gracioso, cubre
+        el dev con Ctrl+C) y POST /gpu/fan/restore-all, que Tauri llama antes
+        de matar el sidecar — kill_sidecar es TerminateProcess y el lifespan
+        de FastAPI no llega a correr. Idempotente: cada baseline se consume."""
+        results: dict[int, tuple[bool, str | None]] = {}
+        for index, items in list(self._fan_baselines.items()):
+            ok, error = self._nvapi_fan.restore(index, items)
+            results[index] = (ok, error)
+            self._fan_baselines.pop(index, None)
+            self._fan_curve_state.pop(index, None)
+        return results
+
+    def apply_fan_curves(self, snap: MetricsSnapshot) -> dict[str, list]:
+        """Ciclo del engine de curvas (MON-3): con la temperatura recién leída
+        del snapshot, decide si el objetivo de cada GPU con curva habilitada
+        cambió lo suficiente y aplica el set manual. Sin read-back con sleep:
+        el siguiente snapshot mide el efecto real, y como last_target no se
+        actualiza en caso de error, el propio ciclo reintenta si el driver
+        ignoró la escritura. Tras FAN_CURVE_MAX_CONSECUTIVE_FAILURES fallos
+        seguidos la curva se auto-deshabilita (p. ej. sin admin).
+
+        Devuelve {"applied": [idx...], "disabled": [idx...]} — 'disabled' pide
+        al caller persistir la config."""
+        curves = config.get("monitor.fan_curves", {}) or {}
+        applied: list[int] = []
+        disabled: list[int] = []
+        for gpu in snap.gpu or []:
+            cfg = curves.get(str(gpu.index))
+            if not cfg or not cfg.get("enabled") or gpu.temperature_c is None:
+                continue
+            try:
+                points = [(int(p["temp_c"]), int(p["pct"])) for p in cfg.get("points", [])]
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not points:
+                continue
+            target = fan_control.curve_target_pct(gpu.temperature_c, points)
+            state = self._fan_curve_state.setdefault(
+                gpu.index, {"last": None, "fails": 0}
+            )
+            if not fan_control.should_apply_curve(state["last"], target):
+                continue
+            self._capture_fan_baseline(gpu.index)
+            ok, error = self._nvapi_fan.set_manual(
+                gpu.index, target,
+                tolerance=FAN_SET_TOLERANCE_PCT,
+                readback_s=0.0,
+            )
+            if ok:
+                state["last"] = target
+                state["fails"] = 0
+                applied.append(gpu.index)
+                logger.info("curva de fan: GPU %d -> %d%% a %d°C",
+                            gpu.index, target, gpu.temperature_c)
+            else:
+                state["fails"] = int(state["fails"] or 0) + 1
+                if state["fails"] >= fan_control.FAN_CURVE_MAX_CONSECUTIVE_FAILURES:
+                    cfg["enabled"] = False
+                    disabled.append(gpu.index)
+                    logger.warning(
+                        "curva de fan deshabilitada en GPU %d tras %d intentos fallidos: %s",
+                        gpu.index, state["fails"], error,
+                    )
+        return {"applied": applied, "disabled": disabled}
 
     # -- CPU / RAM ---------------------------------------------------------
 
@@ -603,6 +732,10 @@ class MetricsManager:
         self.store: MetricsStore | None = None
         self._aggregator = WindowAggregator()
         self._last_maintenance = 0.0
+        # True mientras hay curvas de fan habilitadas: el broadcast loop debe
+        # seguir vivo aunque no haya histórico ni clientes (el engine de
+        # curvas necesita leer temperatura y regular el fan todo el tiempo).
+        self._fan_curves_active = False
 
     # -- snapshot ---------------------------------------------------------------
 
@@ -627,7 +760,8 @@ class MetricsManager:
             return
         history = bool(config.get("monitor.history_enabled", True))
         exporting = metrics_export.exporter.enabled()
-        if not history and not exporting:
+        self._fan_curves_active = self._fan_curves_enabled()
+        if not history and not exporting and not self._fan_curves_active:
             logger.info("histórico de métricas deshabilitado (monitor.history_enabled=false)")
             return
         if history:
@@ -649,6 +783,15 @@ class MetricsManager:
 
     async def stop(self) -> None:
         self._running = False
+        # MON-3: devolver los fans a su baseline antes de cerrar NVML (el
+        # restore necesita el adapter vivo). En la app empaquetada esto no
+        # alcanza a correr porque Tauri mata el sidecar con TerminateProcess:
+        # Tauri llama a POST /gpu/fan/restore-all antes del kill, y esto
+        # cubre el apagado gracioso (Ctrl+C en dev).
+        try:
+            self.collector.restore_fan_baselines()
+        except Exception as exc:  # noqa: BLE001 — un restore fallido no debe trabar el shutdown
+            logger.warning("no se pudo restaurar el fan: %s", exc)
         # NVML se cierra antes de nada más: es el único recurso de proceso.
         self.collector.shutdown_nvml()
         task = self._broadcast_task
@@ -691,10 +834,20 @@ class MetricsManager:
 
     async def _broadcast_loop(self) -> None:
         try:
-            while self._running or self._clients:
+            while self._running or self._clients or self._fan_curves_active:
                 started = time.monotonic()
                 # psutil y NVML son llamadas bloqueantes: fuera del event loop.
                 snap = await asyncio.to_thread(self.record_snapshot)
+
+                # MON-3: el engine de curvas se apoya en este mismo ciclo:
+                # usa la temperatura recién leída y ajusta el fan si hace falta.
+                if self._fan_curves_active:
+                    try:
+                        result = await asyncio.to_thread(self.collector.apply_fan_curves, snap)
+                        if result["disabled"]:
+                            await config.save()
+                    except Exception as exc:  # noqa: BLE001 — regular el fan no puede cortar el Monitor
+                        logger.warning("no se pudieron aplicar las curvas de fan: %s", exc)
 
                 if self._clients:
                     payload = snap.model_dump_json()
@@ -721,6 +874,20 @@ class MetricsManager:
     def _ensure_loop(self) -> None:
         if self._broadcast_task is None or self._broadcast_task.done():
             self._broadcast_task = asyncio.create_task(self._broadcast_loop())
+
+    @staticmethod
+    def _fan_curves_enabled() -> bool:
+        curves = config.get("monitor.fan_curves", {}) or {}
+        return any(isinstance(c, dict) and c.get("enabled") for c in curves.values())
+
+    def refresh_fan_curves(self) -> bool:
+        """Relee monitor.fan_curves de la config (tras un PUT) y mantiene el
+        loop vivo si hay curvas que aplicar aunque nadie tenga el Monitor
+        abierto. Devuelve si hay curvas activas."""
+        self._fan_curves_active = self._fan_curves_enabled()
+        if self._fan_curves_active:
+            self._ensure_loop()
+        return self._fan_curves_active
 
     def add_client(self, websocket: WebSocket) -> None:
         self._clients.add(websocket)
@@ -781,6 +948,69 @@ async def set_gpu_fan(body: FanSpeedSet) -> dict[str, Any]:
     # mensaje correcto (root en POSIX, admin en Windows) sin conocer el SO.
     return {"ok": ok, "index": body.index, "percent": body.percent, "error": error,
             "privilege_hint": manager.collector.privilege_hint()}
+
+
+@router.post("/gpu/fan/auto")
+async def set_gpu_fan_auto(body: FanIndexSet) -> dict[str, Any]:
+    ok, error = await asyncio.to_thread(manager.collector.set_fan_auto, body.index)
+    return {"ok": ok, "index": body.index, "error": error,
+            "privilege_hint": manager.collector.privilege_hint()}
+
+
+@router.post("/gpu/fan/restore-all")
+async def restore_all_gpu_fans() -> dict[str, Any]:
+    """Lo llama Tauri antes de matar el sidecar (kill_sidecar es un kill duro:
+    el lifespan de FastAPI no corre). Manager.stop() usa el mismo camino en
+    el apagado gracioso. Idempotente: responde solo por las GPUs con baseline
+    capturado en esta ejecución."""
+    results = await asyncio.to_thread(manager.collector.restore_fan_baselines)
+    return {"ok": True,
+            "restored": {str(i): {"ok": ok, "error": err} for i, (ok, err) in results.items()}}
+
+
+def _fan_curve_entry(index: int) -> dict[str, Any]:
+    curves = config.get("monitor.fan_curves", {}) or {}
+    entry = curves.get(str(index))
+    if not isinstance(entry, dict):
+        entry = {}
+    return {"enabled": bool(entry.get("enabled")), "points": entry.get("points") or []}
+
+
+@router.get("/gpu/fan-curve")
+async def get_gpu_fan_curve(index: int) -> dict[str, Any]:
+    """Curva configurada para esta GPU + disponibilidad del control automático:
+    requiere la vía NvAPI, que es la única que puede devolver el fan a
+    automático al cerrar (con NVML el fan manual quedaría fijado)."""
+    data = _fan_curve_entry(index)
+    return {"index": index, **data,
+            "auto_available": manager.collector.fan_auto_available(),
+            "privilege_hint": manager.collector.privilege_hint()}
+
+
+@router.put("/gpu/fan-curve")
+async def set_gpu_fan_curve(body: FanCurveSet) -> dict[str, Any]:
+    if not manager.collector.fan_auto_available():
+        # Sin NvAPI la app no garantiza devolver el fan a automático al cerrar:
+        # en Linux (NVML) una curva dejaría el ventilador manual tras salir.
+        return {"ok": False, "index": body.index, "error": "fan_auto_unsupported"}
+    points = [(p.temp_c, p.pct) for p in body.points]
+    error = fan_control.curve_error(points)
+    if error:
+        return {"ok": False, "index": body.index, "error": error}
+    curves = dict(config.get("monitor.fan_curves", {}) or {})
+    curves[str(body.index)] = {
+        "enabled": body.enabled,
+        "points": [{"temp_c": t, "pct": p} for t, p in points],
+    }
+    config.set("monitor.fan_curves", curves)
+    # Se persiste ya: el cierre de la app suele ser un kill duro y el save
+    # del lifespan no llegaría a correr.
+    await config.save()
+    if not body.enabled:
+        manager.collector._fan_curve_state.pop(body.index, None)
+    manager.refresh_fan_curves()
+    return {"ok": True, "index": body.index, "enabled": body.enabled,
+            "points": curves[str(body.index)]["points"]}
 
 
 @router.get("/cpu")

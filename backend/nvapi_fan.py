@@ -265,3 +265,67 @@ class NvApiFan:
             if mode != FAN_MODE_MANUAL or abs(level - target) > tolerance:
                 return False, "fan_no_change"
         return True, None
+
+    def set_auto(self, index: int) -> tuple[bool, str | None]:
+        """(ok, error). Devuelve todos los coolers de la GPU a modo
+        automático. GetControl refleja el modo de inmediato, así que la
+        verificación no necesita sleep."""
+        if not self._ensure():
+            return False, "nvapi_no_disponible"
+        if index >= len(self._handles):
+            return False, f"GPU {index} no encontrada"
+        control = self._control_struct(index)
+        if control is None or control.Count == 0:
+            return False, "fan_not_supported"
+        for i in range(control.Count):
+            control.Items[i].ControlMode = FAN_MODE_AUTO
+        rc = self._fn[_FUNC_FAN_COOLERS_SET_CONTROL](self._handles[index], ctypes.byref(control))
+        if rc == NVAPI_ERROR_INVALID_USER_PRIVILEGE:
+            return False, "fan_no_privilege"
+        if rc == NVAPI_ERROR_NOT_SUPPORTED:
+            return False, "fan_not_supported"
+        if rc != NVAPI_OK:
+            return False, f"nvapi_error_{rc}"
+        readback = self.fan_control(index)
+        if readback is None or any(mode != FAN_MODE_AUTO for mode, _ in readback):
+            return False, "fan_no_change"
+        return True, None
+
+    def restore(self, index: int, items: list[tuple[int, int]],
+                tolerance: int = 2) -> tuple[bool, str | None]:
+        """(ok, error). Reescribe el (ControlMode, Level) exacto por cooler
+        capturado antes de la primera escritura de la app: la GPU vuelve a lo
+        que tenía antes de que la suite la tocara. El nivel se reescribe tal
+        cual (el driver aplica su propio clamp); la verificación exige el
+        mismo modo y, si es manual, el mismo nivel dentro de tolerancia."""
+        if not self._ensure():
+            return False, "nvapi_no_disponible"
+        if index >= len(self._handles):
+            return False, f"GPU {index} no encontrada"
+        control = self._control_struct(index)
+        if control is None or control.Count == 0:
+            return False, "fan_not_supported"
+        if control.Count != len(items):
+            # La configuración de coolers cambió desde la captura: no hay
+            # forma segura de reinterpretar el baseline.
+            return False, "fan_no_change"
+        for i, (mode, level) in enumerate(items):
+            control.Items[i].ControlMode = mode
+            control.Items[i].Level = level
+        rc = self._fn[_FUNC_FAN_COOLERS_SET_CONTROL](self._handles[index], ctypes.byref(control))
+        if rc == NVAPI_ERROR_INVALID_USER_PRIVILEGE:
+            return False, "fan_no_privilege"
+        if rc == NVAPI_ERROR_NOT_SUPPORTED:
+            return False, "fan_not_supported"
+        if rc != NVAPI_OK:
+            return False, f"nvapi_error_{rc}"
+        readback = self.fan_control(index)
+        if readback is None:
+            return False, "fan_no_change"
+        for i, (mode, level) in enumerate(items):
+            rmode, rlevel = readback[i]
+            if rmode != mode:
+                return False, "fan_no_change"
+            if mode == FAN_MODE_MANUAL and abs(rlevel - level) > tolerance:
+                return False, "fan_no_change"
+        return True, None

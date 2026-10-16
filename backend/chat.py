@@ -1278,16 +1278,22 @@ async def list_endpoints() -> list[EndpointInfo]:
 
 
 @router.get("/endpoint-models")
-async def endpoint_models(url: str) -> dict[str, Any]:
+async def endpoint_models(url: str, api_key: str | None = None) -> dict[str, Any]:
     """
     El navegador no puede llamar /v1/models directo al endpoint (CORS), así
     que el backend hace el fetch: mismo patrón que _ping de list_endpoints.
+    Los endpoints protegidos (llama-server con --api-key, etc.) devuelven 401
+    sin el Bearer, así que la key que el usuario cargó en la barra lateral
+    viaja acá igual que en _stream_chat.
     """
     if not url.lower().startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="La URL debe ser http o https")
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            res = await client.get(url.rstrip("/") + "/v1/models")
+            res = await client.get(url.rstrip("/") + "/v1/models", headers=headers)
             res.raise_for_status()
             data = res.json()
     except (httpx.HTTPError, ValueError):

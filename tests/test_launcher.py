@@ -341,10 +341,12 @@ async def test_templates_loaded(client):
     res = await client.get("/api/launcher/templates")
     assert res.status_code == 200
     data = res.json()
-    assert len(data) == 5
+    assert len(data) == 7
     names = {t["name"] for t in data}
     assert "RTX 3090 — Máximo rendimiento" in names
     assert "CPU only — 64GB RAM" in names
+    assert "RTX 3090 24GB — Híbrido 128K" in names
+    assert "CPU only — multi-socket (NUMA)" in names
 
 
 async def test_save_custom_template(client):
@@ -354,7 +356,7 @@ async def test_save_custom_template(client):
 
     listed = (await client.get("/api/launcher/templates")).json()
     assert any(t["name"] == "Mi template" for t in listed)
-    assert len(listed) == 6  # 5 default + 1 custom
+    assert len(listed) == 8  # 7 default + 1 custom
 
 
 async def test_delete_custom_template(client):
@@ -368,7 +370,7 @@ async def test_delete_custom_template(client):
 
     listed = (await client.get("/api/launcher/templates")).json()
     assert all(t["name"] != "Temporal" for t in listed)
-    assert len(listed) == 5
+    assert len(listed) == 7
 
 
 async def test_templates_in_db(client):
@@ -513,8 +515,8 @@ FRONTEND_LAUNCH_PAYLOAD = {
     "n_gpu_layers": -1,
     "n_cpu_moe": 0,
     "gpu_mode": "gpu_only",
-    "cache_type_k": "q4_0",
-    "cache_type_v": "q4_0",
+    "cache_type_k": "q8_0",
+    "cache_type_v": "q8_0",
     "flash_attn": True,
     "load_mode": "auto",
     "mtp_draft_model": None,
@@ -1077,11 +1079,16 @@ def test_fa_kv_whitelist_off_allows_asymmetric():
 def test_legacy_cache_types_migrated_in_silence():
     # Templates/configs guardados con tipos fuera del schema no rompen el
     # lanzamiento: se migran con warning en vez de 422.
-    cfg = launcher_module.LaunchConfig(
-        model_id="m", cache_type_k="q4_1", cache_type_v_draft="q5_0",
-    )
-    assert cfg.cache_type_k == "q4_0"
-    assert cfg.cache_type_v_draft == "q8_0"
+        # Ambos lados k/v llevan el tipo legacy: si uno quedara en el
+        # default (q8_0) y el otro migrara a q4_0, el par quedaría
+        # asimétrico y el validador de FA lo rechazaria.
+        cfg = launcher_module.LaunchConfig(
+            model_id="m", cache_type_k="q4_1", cache_type_v="q4_1",
+            cache_type_v_draft="q5_0",
+        )
+        assert cfg.cache_type_k == "q4_0"
+        assert cfg.cache_type_v == "q4_0"
+        assert cfg.cache_type_v_draft == "q8_0"
 
 
 @pytest.mark.parametrize(

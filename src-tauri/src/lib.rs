@@ -6,7 +6,11 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, RunEvent, State, WindowEvent,
+};
 
 const MAX_ATTEMPTS: u32 = 3;
 const HEALTH_DEADLINE: Duration = Duration::from_secs(120);
@@ -180,6 +184,23 @@ fn kill_sidecar(state: &SidecarState) {
         let _ = child.kill();
         let _ = child.wait();
     }
+}
+
+/// MON-3: antes de matar el sidecar, pedirle al backend que devuelva los
+/// ventiladores de GPU a su estado previo. `kill_sidecar` es un kill duro
+/// (TerminateProcess): el shutdown de FastAPI no llega a correr y el fan
+/// quedaría manual para siempre — el reporte de usuarios post-cierre que
+/// motivó el feature. Hay que llamarlo ANTES de kill_sidecar porque este
+/// borrea el puerto. Best-effort: backend muerto o sin respuesta no frena
+/// el cierre; del lado backend es idempotente (solo escribe si hay baseline).
+fn restore_fans_before_exit(state: &SidecarState) {
+    let port = match state.port.lock() {
+        Ok(guard) => *guard,
+        Err(_) => None,
+    };
+    let Some(port) = port else { return };
+    let url = format!("http://127.0.0.1:{port}/api/metrics/gpu/fan/restore-all");
+    let _ = ureq::post(&url).timeout(Duration::from_secs(3)).call();
 }
 
 /// Arranca el ciclo de vida del sidecar en su propio thread: spawn →
@@ -379,7 +400,19 @@ fn sidecar_restart(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn stop_sidecar(app: AppHandle) {
     let state = app.state::<SidecarState>();
+    // El auto-update mata la app y después mata al proceso: el fan debe
+    // volver a lo suyo antes de que el instalador tome el lock.
+    restore_fans_before_exit(&state);
     kill_sidecar(&state);
+}
+
+/// Muestra, des-minimiza y enfoca la ventana principal (label "main").
+fn focus_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -392,7 +425,63 @@ pub fn run() {
         .setup(|app| {
             app.manage(SidecarState::default());
             start_sidecar(app.handle().clone());
+
+            // T5.4: icono en bandeja + menu (Abrir / Minimizar / Salir).
+            let handle = app.handle();
+            let open_item =
+                MenuItem::with_id(handle, "tray-open", "Abrir GlyvexAI Suite", true, None::<&str>)?;
+            let minimize_item = MenuItem::with_id(
+                handle,
+                "tray-minimize",
+                "Minimizar a bandeja",
+                true,
+                None::<&str>,
+            )?;
+            let quit_item = MenuItem::with_id(handle, "tray-quit", "Salir", true, None::<&str>)?;
+            let menu = Menu::with_items(handle, &[&open_item, &minimize_item, &quit_item])?;
+
+            let _tray = TrayIconBuilder::with_id("main-tray")
+                .icon(app.default_window_icon().cloned().unwrap())
+                .menu(&menu)
+                .tooltip("GlyvexAI Suite")
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "tray-open" => focus_main_window(app),
+                    "tray-minimize" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.hide();
+                        }
+                    }
+                    "tray-quit" => {
+                        if let Some(state) = app.try_state::<SidecarState>() {
+                            restore_fans_before_exit(&state);
+                            kill_sidecar(&state);
+                        }
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        focus_main_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
             Ok(())
+        })
+        // Cerrar (X) no termina: minimiza a la bandeja. La salida real es
+        // "Salir" del menu de la bandeja (app.exit) o el auto-update.
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_backend_port,
@@ -406,6 +495,7 @@ pub fn run() {
     app.run(|app_handle, event| {
         if let RunEvent::Exit = event {
             if let Some(state) = app_handle.try_state::<SidecarState>() {
+                restore_fans_before_exit(&state);
                 kill_sidecar(&state);
             }
         }

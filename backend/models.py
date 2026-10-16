@@ -367,9 +367,11 @@ _GGUF_FAST_HEADER_FIRST = 8 * (1 << 20)
 # por capa); los más grandes solo se saltan.
 _GGUF_MAX_SCALAR_ARRAY = 4096
 # Unicos KVs STRING que se materializan; los demás (p. ej. tokenizer.hf_json,
-# de varios MB) se saltan sin decodificar.
+# de varios MB) se saltan sin decodificar. general.sampling es un JSON corto
+# (valores de sampling del autor del cuantizado) que alimenta el preset "auto".
 _FAST_STRING_KEYS = frozenset(
-    {"general.architecture", "general.name", "tokenizer.chat_template"}
+    {"general.architecture", "general.name", "tokenizer.chat_template",
+     "general.sampling"}
 )
 
 # Sentinel: el bloque termina a mitad del header (hacen falta más bytes).
@@ -545,6 +547,45 @@ def _as_int(value: Any) -> int | None:
     return None
 
 
+# Claves de general.sampling que la app sabe aplicar (espejo de LaunchConfig
+# de launcher.py). El KV puede traer más (frequency_penalty, mirostat,
+# penalty_last_n…): se ignoran porque el builder no tiene flag para ellas.
+_SAMPLING_KEY_TYPES = {
+    "temperature": float,
+    "top_p": float,
+    "top_k": int,
+    "min_p": float,
+    "presence_penalty": float,
+    "repeat_penalty": float,
+}
+
+
+def _parse_general_sampling(raw: Any) -> dict[str, float | int] | None:
+    """
+    general.sampling (JSON string, p. ej. '[["temperature",0.7],["top_k",20]]',
+    lo que escriben varios cuantizadores) -> dict de valores aplicables.
+    None si falta, no parsea, o no contiene ninguna clave útil.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        pairs = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(pairs, list):
+        return None
+    out: dict[str, float | int] = {}
+    for pair in pairs:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        name, value = pair
+        caster = _SAMPLING_KEY_TYPES.get(name)
+        if caster is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        out[name] = caster(value)
+    return out or None
+
+
 def _metadata_from_kv(header: dict[str, Any]) -> dict[str, Any]:
     """
     Arma el dict de metadata desde el header rápido (valores planos, ver
@@ -606,6 +647,7 @@ def _metadata_from_kv(header: dict[str, Any]) -> dict[str, Any]:
         "enable_thinking_kwarg": enable_thinking_kwarg,
         "instruct_mode": bool(chat_template),
         "suggested_preset": "thinking" if thinking_support else "instruct",
+        "suggested_sampling": _parse_general_sampling(kvs.get("general.sampling")),
         "tensor_count": header.get("tensor_count"),
         "kv_data": {
             # Todos los KVs escalares: se aprovecha que el scan es poco
@@ -694,6 +736,7 @@ def _metadata_from_reader(reader: Any) -> dict[str, Any]:
         "enable_thinking_kwarg": enable_thinking_kwarg,
         "instruct_mode": bool(chat_template),
         "suggested_preset": "thinking" if thinking_support else "instruct",
+        "suggested_sampling": _parse_general_sampling(_field_str(fields.get("general.sampling"))),
         "tensor_count": _field_int(fields.get("GGUF.tensor_count")),
         "kv_data": _reader_kv_data(fields),
         "error": None,

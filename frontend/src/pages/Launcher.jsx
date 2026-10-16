@@ -62,6 +62,7 @@ const SAMPLING_PRESETS = {
 const GGUF_FILTERS = [{ name: "GGUF", extensions: ["gguf"] }];
 
 const SAMPLING_PRESET_LABELS = {
+  auto: "🤖 Auto (modelo)",
   thinking: "🧠 Thinking",
   instruct: "💬 Instruct",
   custom: "⚙️ Custom",
@@ -79,8 +80,10 @@ const DEFAULT_LAUNCH_CONFIG = {
   // expertos a la CPU (modelos MoE que no caben en VRAM).
   n_cpu_moe: 0,
   gpu_mode: "gpu_only",
-  cache_type_k: "q4_0",
-  cache_type_v: "q4_0",
+  // q8_0 por default: casi calidad f16 a mitad de su VRAM; q4_0 queda
+  // disponible en el select para perfiles de VRAM justa.
+  cache_type_k: "q8_0",
+  cache_type_v: "q8_0",
   flash_attn: true,
   load_mode: "auto",
   mtp_draft_model: "",
@@ -202,6 +205,12 @@ const TEMPLATE_FIELDS = [
   "n_ctx", "n_batch", "n_ubatch", "n_gpu_layers", "n_cpu_moe", "gpu_mode",
   "cache_type_k", "cache_type_v", "flash_attn", "load_mode",
   "n_draft", "n_parallel", "cache_type_k_draft", "cache_type_v_draft",
+  // Especulación/MTP: sin mtp_embedded/mtp_draft_model el template guardaba
+  // los parámetros de draft pero no la activación (receta rota); los pisos
+  // de confianza n/p_draft_min se perdían al reaplicar.
+  "n_draft_min", "p_draft_min", "mtp_embedded", "mtp_draft_model",
+  // LoRA: sin lora_path la escala es inútil; juntos reproducen el launch.
+  "lora_path", "lora_scale",
   // Razonamiento
   "thinking_enabled", "budget_tokens", "no_reasoning_preserve", "reasoning_budget",
   // Sampling
@@ -216,6 +225,8 @@ const TEMPLATE_FIELDS = [
   "rope_freq_base", "rope_scaling_type", "yarn_ext_factor",
   "numa", "no_kv_offload", "cache_reuse", "defrag_thold",
   "grp_attn_n", "grp_attn_w", "jinja", "reasoning_effort",
+  // Fuera a propósito: mmproj_path (lo aporta el modelo seleccionado),
+  // api_key/log_file/backend (fijos, no son parte de la receta).
 ];
 
 const N_CTX_PRESETS = [4096, 8192, 16384, 32768, 65536, 131072, 262144];
@@ -1333,6 +1344,17 @@ export default function Launcher() {
         setModelMeta(meta);
         if (meta.error) return;
         if (samplingTouchedRef.current) return;
+        // El general.sampling del GGUF (valores del autor del cuantizado)
+        // gana sobre la heurística thinking/instruct.
+        const auto = meta.suggested_sampling;
+        if (auto && Object.keys(auto).length > 0) {
+          setLaunchConfig((prev) => ({
+            ...prev,
+            sampling_preset: "auto",
+            ...auto,
+          }));
+          return;
+        }
         const preset = meta.suggested_preset;
         if (preset && SAMPLING_PRESETS[preset]) {
           setLaunchConfig((prev) => ({
@@ -1419,9 +1441,13 @@ export default function Launcher() {
 
   function applySamplingPreset(preset) {
     samplingTouchedRef.current = true;
+    // "auto" no está en SAMPLING_PRESETS: sus valores son los del GGUF.
+    const values = preset === "auto"
+      ? (modelMeta?.suggested_sampling || {})
+      : SAMPLING_PRESETS[preset];
     updateConfig({
       sampling_preset: preset,
-      ...(preset !== "custom" ? SAMPLING_PRESETS[preset] : {}),
+      ...(preset !== "custom" ? values : {}),
     });
   }
 
@@ -1607,7 +1633,10 @@ export default function Launcher() {
   const samplingPanel = (
     <Panel icon={SlidersHorizontal} title="Sampling">
       <div className="flex gap-2">
-        {["thinking", "instruct", "custom"].map((preset) => (
+        {(modelMeta?.suggested_sampling
+          ? ["auto", "thinking", "instruct", "custom"]
+          : ["thinking", "instruct", "custom"]
+        ).map((preset) => (
           <button
             key={preset}
             type="button"

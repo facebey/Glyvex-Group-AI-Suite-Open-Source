@@ -448,7 +448,14 @@ def _gpu_via_video_controller() -> str | None:
 
 
 def detect_gpu() -> str:
-    """Cascada de detección de GPU: pynvml → video controller de Windows → "cpu"."""
+    """Cascada de detección de GPU: pynvml → video controller de Windows → "cpu".
+
+    Granularidad (verificación RT-10, fase A): en Windows distingue nvidia/amd/
+    intel/cpu por el nombre del video controller; en Linux solo detecta NVIDIA
+    (pynvml) — AMD/Intel sin NVIDIA caen a "cpu" (la accel AMD/Intel es fase B,
+    bloqueada por la prueba en hardware real). Multi-GPU devuelve el index 0,
+    suficiente para la oferta del runtime (MON-1 cubre el detalle por GPU).
+    """
     return _gpu_via_pynvml() or _gpu_via_video_controller() or "cpu"
 
 

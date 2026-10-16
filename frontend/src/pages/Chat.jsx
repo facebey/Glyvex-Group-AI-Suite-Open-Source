@@ -142,10 +142,16 @@ export default function Chat() {
   });
 
   const stream = useChatStream({
+    nodes,
     setNodes,
     onFinish: history.scheduleSave,
     onError: (message) => addToast(message, "error"),
   });
+
+  // Ref viva para el cleanup de unmount (un effect con deps [] solo ve la
+  // primera render; el store puede haber arrancado un stream después).
+  const streamRef = useRef(stream);
+  streamRef.current = stream;
 
   const { streaming } = stream;
   const visionReady = Boolean(capabilities?.vision);
@@ -186,23 +192,31 @@ export default function Chat() {
     if (!endpointUrl) return undefined;
     let cancelled = false;
     // E4: vía proxy del backend — el navegador no puede llamar /v1/models
-    // directo a un endpoint ajeno (CORS).
-    fetch(`/api/chat/endpoint-models?url=${encodeURIComponent(endpointUrl)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled) return;
-        const list = data?.models || [];
-        setModels(list);
-        if (list.length > 0 && !list.includes(selectedModel)) setSelectedModel(list[0]);
-      })
-      .catch(() => {
-        if (!cancelled) setModels([]);
-      });
+    // directo a un endpoint ajeno (CORS). La api_key acompaña para los
+    // endpoints protegidos (sin ella el upstream responde 401 y el modelo
+    // queda "(sin detectar)"). Debounce: la key se escribe tecla a tecla y
+    // sin pausa cada keystroke dispararía una request al upstream.
+    const timer = setTimeout(() => {
+      const qs = new URLSearchParams({ url: endpointUrl });
+      if (apiKey) qs.set("api_key", apiKey);
+      fetch(`/api/chat/endpoint-models?${qs.toString()}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (cancelled) return;
+          const list = data?.models || [];
+          setModels(list);
+          if (list.length > 0 && !list.includes(selectedModel)) setSelectedModel(list[0]);
+        })
+        .catch(() => {
+          if (!cancelled) setModels([]);
+        });
+    }, 300);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endpointUrl]);
+  }, [endpointUrl, apiKey]);
 
   // -- capacidades reales del endpoint ---------------------------------------
   // Reemplaza la heurística sobre el nombre del modelo: /props de llama-server
@@ -343,10 +357,17 @@ export default function Chat() {
     if (!saved) return;
     try {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) setNodes(toTree(parsed));
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setNodes(toTree(parsed));
+        // Si hay stream en vuelo o terminado sin comprometer, la rehidratación
+        // restaura el árbol con el contenido viejo: re-sincronizar para que
+        // gane lo que acumuló el store mientras no estaba montado.
+        if (stream.active) stream.sync();
+      }
     } catch {
       sessionStorage.removeItem(SESSION_KEY);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -358,8 +379,20 @@ export default function Chat() {
     }
   }, [nodes, path.length, streaming]);
 
+  // Al irse con un stream en vuelo NO se aborta (la generación sigue en el
+  // store). Se guarda el parcial tal como está: sessionStorage para
+  // rehidratar al volver, y flush a la DB para no regalar nada si el app
+  // se cierra sin volver al chat.
   useEffect(() => {
-    return () => stream.stop();
+    return () => {
+      if (!streamRef.current.active || stateRef.current.path.length === 0) return;
+      try {
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(stateRef.current.nodes));
+      } catch {
+        // cuota llena — la conversación sigue viva en memoria y en la DB.
+      }
+      history.flushSave();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -417,10 +450,10 @@ export default function Chat() {
   }, [history, resetConversation]);
 
   const handleClear = useCallback(async () => {
-    // Detener ANTES de vaciar: sin esto el fetch del stream sigue en
-    // background, `streaming` queda true y el composer se bloquea sobre una
+    // Descartar ANTES de vaciar: aborta la generación y limpia el store; sin
+    // esto `streaming` queda true y el composer se bloquea sobre una
     // conversación vacía hasta que el stream termine solo.
-    stream.stop();
+    stream.discard();
     const { path: visible, currentConvId: convId } = stateRef.current;
     if (visible.length > 0 && !convId) {
       if (window.confirm(t("chat.saveBeforeClearConfirm"))) {
