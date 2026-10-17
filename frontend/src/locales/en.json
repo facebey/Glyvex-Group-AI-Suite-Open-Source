@@ -83,6 +83,7 @@
     "updateAvailable": "New version {{v}} available",
     "updateInstall": "Download and install",
     "updateDownloading": "Downloading… {{pct}}%",
+    "updateDownloadingUnknown": "Downloading…",
     "updateError": "Couldn't check for updates"
   },
   "language": {

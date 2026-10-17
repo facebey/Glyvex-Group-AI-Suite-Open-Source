@@ -644,20 +644,38 @@ function GpuFanControl({ index, fanPct }) {
   }, [fanPct, busy]);
 
   useEffect(() => {
+    // La probe puede correr con el backend aún levantando (arranque tras un
+    // update): backoff limitado mientras el panel esté montado, como el WS de
+    // métricas. Un 4xx es respuesta final (la función no existe en ese
+    // backend); errores de conexión y 5xx se reintentan.
     let alive = true;
-    fetch(`/api/metrics/gpu/fan-curve?index=${index}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (!alive || !d) return;
-        setAutoAvailable(Boolean(d.auto_available));
-        setCurve({
-          enabled: Boolean(d.enabled),
-          points: (d.points || []).map((p) => ({ temp_c: p.temp_c, pct: p.pct })),
+    let retryTimer = null;
+    let attempt = 0;
+    const MAX_ATTEMPTS = 6; // 1s, 2s, 4s, 8s, 15s, 15s
+    function load() {
+      fetch(`/api/metrics/gpu/fan-curve?index=${index}`)
+        .then((r) => {
+          if (r.status >= 500) throw new Error(`fan_curve_${r.status}`);
+          return r.json();
+        })
+        .then((d) => {
+          if (!alive || !d) return;
+          setAutoAvailable(Boolean(d.auto_available));
+          setCurve({
+            enabled: Boolean(d.enabled),
+            points: (d.points || []).map((p) => ({ temp_c: p.temp_c, pct: p.pct })),
+          });
+        })
+        .catch(() => {
+          if (!alive || attempt >= MAX_ATTEMPTS) return;
+          retryTimer = setTimeout(load, Math.min(1000 * 2 ** attempt, 15000));
+          attempt += 1;
         });
-      })
-      .catch(() => {});
+    }
+    load();
     return () => {
       alive = false;
+      clearTimeout(retryTimer);
     };
   }, [index]);
 

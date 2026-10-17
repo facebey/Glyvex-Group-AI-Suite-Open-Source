@@ -374,6 +374,44 @@ function ChunkReloadError({ error }) {
   );
 }
 
+// Guard de obsolesencia al arrancar: si el backend está sirviendo una
+// construcción distinta a la que corre en memoria, la webview muestra un
+// bundle cacheado de la instalación anterior (caché de WebView2 sobre el
+// origen fijo del backend). Se compara el sello /gx-version.json del dist en
+// disco con la versión embebida en esta construcción (vite define); si
+// difieren, se recarga UNA vez. Comparte el guard de 30 s de ChunkReloadError
+// para que dos detecciones no encadenen un loop de reloads. En dev no existe
+// el endpoint: el guard queda dormido.
+function useStaleBundleGuard() {
+  useEffect(() => {
+    if (typeof fetch !== "function" || typeof __GX_APP_VERSION__ !== "string") return;
+    let cancelled = false;
+    fetch("/gx-version.json", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d || typeof d.version !== "string") return;
+        if (d.version === __GX_APP_VERSION__) return; // construcción vigente: nada que hacer
+        let last = 0;
+        try {
+          last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) || 0);
+        } catch {
+          /* sin sessionStorage: se intenta el reload de todos modos */
+        }
+        if (Date.now() - last < CHUNK_RELOAD_GUARD_MS) return;
+        try {
+          sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+        } catch {
+          /* guard no disponible: el reload sigue siendo idempotente */
+        }
+        window.location.reload();
+      })
+      .catch(() => {}); // sin sello (dev, backend viejo): guard inactivo
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+}
+
 function Layout() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
@@ -384,6 +422,8 @@ function Layout() {
   const [dismissed, setDismissed] = useState(false);
   const [theme, setTheme] = useState(getStoredTheme());
   const [aboutOpen, setAboutOpen] = useState(false);
+
+  useStaleBundleGuard();
 
   useEffect(() => {
     const onThemeChanged = (e) => setTheme(e.detail);

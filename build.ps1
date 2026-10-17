@@ -93,7 +93,9 @@ try {
         } catch {}
     }
     if ($ok) {
-        $spa = (Invoke-WebRequest "http://127.0.0.1:7981/" -TimeoutSec 5).Content
+        # -UseBasicParsing: sin él, Invoke-WebRequest exige el motor IE/COM y
+        # falla en shell no-interactivo (runner CI, sesión sin consola).
+        $spa = (Invoke-WebRequest "http://127.0.0.1:7981/" -TimeoutSec 5 -UseBasicParsing).Content
         if ($spa.Length -lt 100) { throw "SPA no servida ($($spa.Length) bytes)" }
         Write-Host "    health OK en $([math]::Round(((Get-Date) - $t0).TotalSeconds, 1))s, SPA $($spa.Length) bytes"
     }

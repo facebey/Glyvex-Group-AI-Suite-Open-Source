@@ -7,6 +7,34 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.9.1-beta] — 2026-10-16
+
+Release de parche sobre v0.9.0-beta: las actualizaciones internas muestran la
+UI nueva de inmediato (sin recargar a mano), la barra de descarga siempre
+muestra progreso y la app instalada sirve sus propias fuentes empaquetadas.
+
+### Corregido
+- **Actualizaciones: la UI nueva aparece justo después de un update interno.**
+  Los assets embebidos ahora llevan cabeceras de caché correctas — los assets
+  con hash se cachean un año, `index.html` y los archivos sin hash siempre se
+  revalidan — y la app compara su propia construcción contra la que sirve el
+  backend: si aún queda un bundle cacheado de una instalación anterior, se
+  recarga una vez en vez de quedarse con la UI vieja hasta un F5 manual.
+- **Actualizaciones: la barra de descarga nunca queda clavada.** Cuando el
+  servidor de actualización no informa el tamaño del archivo, la barra anima un
+  estado indeterminado en vez de congelarse en 0%.
+- **Monitor: el panel de curvas de ventilador GPU carga incluso con el backend
+  aún levantando** (justo tras un update/rearranque): la probe ahora reintenta
+  con un backoff acotado mientras el panel está abierto.
+- **Escritorio: la app instalada usa de verdad sus fuentes empaquetadas.**
+  Glyvex Sans, JetBrains Mono y Poppins nunca eran servidas por el backend
+  embebido (caían en el shell de la app y la webview las descartaba por tipo
+  de contenido); ahora se sirven con el tipo correcto.
+- **CI: el job `windows-nsis` de release vuelve a construir y firmar el
+  instalador en los tags** (el override `--config` de build debe pasarse como
+  archivo; nombres de artifact endurecidos para refs con barra). Sin impacto
+  en los assets de la ya publicada v0.9.0-beta.
+
 ## [0.9.0-beta] — 2026-10-16
 
 Release de features sobre v0.8.1-beta: curvas de ventilador de GPU con

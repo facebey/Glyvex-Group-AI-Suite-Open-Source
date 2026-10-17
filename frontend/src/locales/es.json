@@ -83,6 +83,7 @@
     "updateAvailable": "Nueva versión {{v}} disponible",
     "updateInstall": "Descargar e instalar",
     "updateDownloading": "Descargando… {{pct}}%",
+    "updateDownloadingUnknown": "Descargando…",
     "updateError": "No se pudo comprobar actualizaciones"
   },
   "language": {

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,6 +8,13 @@ import tailwindcss from "@tailwindcss/vite";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ENVIRONMENTS_DIR = resolve(HERE, "..", "environments");
+
+// Versión de esta construcción del frontend: viaja embebida en el bundle
+// (__GX_APP_VERSION__) y como sello dist/gx-version.json. El backend sirve el
+// sello y la app corriendo compara ambos: si difieren, la webview está con un
+// bundle cacheado de una instalación anterior (guard en App.jsx; endpoint
+// /gx-version.json en backend/main.py).
+const PKG = JSON.parse(readFileSync(resolve(HERE, "package.json"), "utf8"));
 
 /**
  * Parser mínimo de los environments/<modo>.env del backend.
@@ -69,7 +76,24 @@ export default defineConfig(({ mode }) => {
     viteEnv.VITE_API_PROXY_TARGET || `http://${backendHost}:${backendPort}`;
 
   return {
-    plugins: [react(), tailwindcss()],
+    define: {
+      __GX_APP_VERSION__: JSON.stringify(PKG.version),
+    },
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: "gx-version-stamp",
+        apply: "build",
+        closeBundle() {
+          // El sello debe reflejar exactamente lo recién escrito en dist.
+          writeFileSync(
+            resolve(HERE, "dist", "gx-version.json"),
+            JSON.stringify({ version: PKG.version }) + "\n",
+          );
+        },
+      },
+    ],
     server: {
       port: devPort,
       // Bind IPv4 explícito: Vite 8 escucha por defecto en "localhost" que en

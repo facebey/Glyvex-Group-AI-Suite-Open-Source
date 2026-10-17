@@ -7,6 +7,34 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.9.1-beta] — 2026-10-16
+
+Patch release over v0.9.0-beta: in-app updates land with the new UI right
+away (no manual reload needed), the download progress bar always shows
+progress, and the installed app now serves its own bundled fonts.
+
+### Fixed
+- **Updates: the new UI shows up right after an in-app update.** The embedded
+  web assets now carry proper cache headers — hashed assets are cached for a
+  year, `index.html` and unhashed files are always revalidated — and the app
+  compares its own build against the one the backend serves: if a bundle from
+  a previous install is still cached, it reloads once instead of keeping the
+  old UI until a manual F5.
+- **Updates: the download progress bar is never stuck.** When the update
+  server doesn't report the file size, the bar animates an indeterminate
+  state instead of freezing at 0%.
+- **Monitor: the GPU fan-curve panel loads even when the backend is still
+  starting** (right after an update/relaunch): the probe now retries with a
+  bounded backoff while the panel is open.
+- **Desktop: the installed app actually uses its bundled fonts.** Glyvex Sans,
+  JetBrains Mono and Poppins were never served by the embedded backend (they
+  fell through to the app shell and the webview discarded them by content
+  type); they are now served with the correct type.
+- **CI: the `windows-nsis` release job builds and signs the installer on tags
+  again** (the `--config` build override must be passed as a file; artifact
+  names hardened for refs containing slashes). No impact on the assets of the
+  already-published v0.9.0-beta.
+
 ## [0.9.0-beta] — 2026-10-16
 
 Feature release over v0.8.1-beta: controllable GPU fan curves with automatic

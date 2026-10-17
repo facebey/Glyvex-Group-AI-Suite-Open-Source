@@ -30,7 +30,9 @@ export default function AboutModal({ onClose }) {
 
   const [update, setUpdate] = useState(null);
   const [updateState, setUpdateState] = useState("idle");
-  const [progress, setProgress] = useState(0);
+  // -1: progreso indeterminado (aún sin Started o sin Content-Length en la
+  // respuesta); 0..100: porcentaje real una vez conocido el total.
+  const [progress, setProgress] = useState(-1);
   const [updateError, setUpdateError] = useState(null);
 
   const handleCheck = async () => {
@@ -51,7 +53,7 @@ export default function AboutModal({ onClose }) {
 
   const handleInstall = async () => {
     setUpdateState("downloading");
-    setProgress(0);
+    setProgress(-1); // indeterminado hasta que el plugin reporte el total
     let stage = "inicio";
     try {
       // El instalador NSIS no puede sobrescribir _internal/ del backend con
@@ -190,9 +192,17 @@ export default function AboutModal({ onClose }) {
             )}
             {updateState === "downloading" && (
               <div className="flex flex-col gap-2">
-                <div className="text-sm text-glyvex-muted-2">{t("about.updateDownloading", { pct: progress })}</div>
+                <div className="text-sm text-glyvex-muted-2">
+                  {progress >= 0
+                    ? t("about.updateDownloading", { pct: progress })
+                    : t("about.updateDownloadingUnknown")}
+                </div>
                 <div className="w-full h-1.5 rounded-full bg-glyvex-card-hi overflow-hidden">
-                  <div className="h-full bg-glyvex-accent transition-all" style={{ width: `${progress}%` }} />
+                  {progress >= 0 ? (
+                    <div className="h-full bg-glyvex-accent transition-all" style={{ width: `${progress}%` }} />
+                  ) : (
+                    <div className="h-full w-full bg-glyvex-accent/50 animate-pulse" />
+                  )}
                 </div>
               </div>
             )}

@@ -64,12 +64,16 @@ jobs:
         shell: pwsh
         run: .\build.ps1
 
+      # El override de config DEBE ser un archivo: tauri-cli no acepta JSON
+      # inline para localizar el proyecto (panico "Couldn't recognize the
+      # current folder as a Tauri project" en el tag v0.9.0-beta, run
+      # 38958676070). Se corre desde la raiz con el binario de frontend/,
+      # igual que el build local validado en docs/RELEASE-CHECKLIST.md.
       - name: Build NSIS firmado
-        working-directory: frontend
         shell: pwsh
-        run: >
-          npm run tauri -- build --ci --bundles nsis
-          --config '{"build":{"beforeBuildCommand":null}}'
+        run: |
+          Set-Content -Path ci-tauri-override.json -Value '{"build":{"beforeBuildCommand":null}}'
+          frontend\node_modules\.bin\tauri.cmd build --ci --bundles nsis --config ci-tauri-override.json
 
       # latest.json: solo la entrada windows-x86_64 (el runner no tiene el
       # AppImage). Si la release lleva Linux, regenerar con
@@ -81,7 +85,9 @@ jobs:
       - name: Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: glyvex-nsis-${{ github.ref_name }}
+          # github.ref_name con "/" (dispatch a rama feature/...) rompe la
+          # validación del nombre de artifact; en dispatch usamos run_id.
+          name: glyvex-nsis-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref_name }}
           path: |
             src-tauri/target/release/bundle/nsis/*_x64-setup.exe
             src-tauri/target/release/bundle/nsis/*_x64-setup.exe.sig

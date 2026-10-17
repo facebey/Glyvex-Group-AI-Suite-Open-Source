@@ -57,7 +57,7 @@ if sys.platform == "win32":
 # (glyvex.spec, datas → _internal/frontend/dist).
 FRONTEND_DIST = BUNDLE_DIR / "frontend" / "dist"
 
-APP_VERSION = "0.9.0-beta"
+APP_VERSION = "0.9.1-beta"
 APP_NAME = "Glyvex-AI-Suite"
 APP_START_MONOTONIC = time.monotonic()
 
@@ -252,15 +252,67 @@ api_router.include_router(runtime_api.router, prefix="/runtime", tags=["runtime"
 
 app.include_router(api_router)
 
-if FRONTEND_DIST.exists():
-    # T5.2: las rutas de la SPA viven en react-router (/launcher, /monitor,
-    # ...). El fallback sirve index.html para CUALQUIER ruta GET que no sea
-    # API ni un archivo real; sin esto, refrescar el empaquetado (F5 o el
-    # "Actualizar" del menú de contexto de WebView2) en un módulo distinto
-    # del Chat caía en 404 {"detail":"Not Found"}. La API se registra antes
-    # y gana el matching; /assets pasa por StaticFiles (sanitiza el path).
-    if (FRONTEND_DIST / "assets").is_dir():
-        app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+# Caché del empaquetado: la webview carga la SPA desde el origen del backend
+# (http://127.0.0.1:<puerto>, puerto fijo por diseño — PERS-1). WebView2
+# persiste su caché de disco entre arranques POR ORIGEN y, sin cabeceras
+# explícitas, aplica frescura heurística: tras un update in-app el siguiente
+# arranque sirve el index.html y los chunks de la versión anterior, y la UI
+# nueva no aparece hasta recargar a mano (F5). Estas cabeceras cierran esa
+# puerta: index.html y los archivos sin hash de public/ se revalidan siempre;
+# los assets de Vite (/assets) llevan hash de contenido en el nombre y son
+# inmutables por construcción.
+_CACHE_IMMUTABLE = "public, max-age=31536000, immutable"
+_CACHE_REVALIDATE = "no-cache"
+
+# public/ trae archivos sin hash (fuentes, licencias). El media type se fija
+# acá porque el SO no siempre tiene registrado el MIME de .woff2.
+_STATIC_MEDIA_TYPES = {
+    ".woff2": "font/woff2",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".txt": "text/plain",
+}
+
+
+class ImmutableStaticFiles(StaticFiles):
+    """Todo lo que vive en /assets lleva hash de contenido de Vite en el
+    nombre: si el nombre cambió, el contenido cambió; si no, es seguro
+    servirlo de caché por un año sin preguntar."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code in (200, 206, 304):
+            response.headers["Cache-Control"] = _CACHE_IMMUTABLE
+        return response
+
+
+def mount_frontend(app: FastAPI, dist: Path) -> None:
+    """Serve la SPA construida. Recibe el dir de dist para poder probarse
+    con un dist de juguete.
+
+    T5.2: las rutas de la SPA viven en react-router (/launcher, /monitor,
+    ...). El fallback sirve index.html para CUALQUIER ruta GET que no sea
+    API ni un archivo real; sin esto, refrescar el empaquetado (F5 o el
+    "Actualizar" del menú de contexto de WebView2) en un módulo distinto
+    del Chat caía en 404 {"detail":"Not Found"}. La API se registra antes
+    y gana el matching; /assets pasa por StaticFiles (sanitiza el path).
+    """
+    if (dist / "assets").is_dir():
+        app.mount("/assets", ImmutableStaticFiles(directory=str(dist / "assets")), name="assets")
+
+    @app.get("/gx-version.json", include_in_schema=False)
+    async def gx_version():
+        # Sello de la construcción actualmente en disco (lo escribe el build;
+        # ver frontend/vite.config.js): el frontend que corre en la webview
+        # compara esta versión con la suya. Si difieren, la webview está
+        # mostrando un bundle cacheado de una instalación anterior y fuerza
+        # un reload antes de seguir con la UI vieja.
+        stamp = dist / "gx-version.json"
+        if not stamp.is_file():
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        return FileResponse(
+            stamp, media_type="application/json", headers={"Cache-Control": "no-store"}
+        )
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
@@ -268,7 +320,33 @@ if FRONTEND_DIST.exists():
         # fallback de SPA no tapa a la API; el frontend espera JSON).
         if full_path == "api" or full_path.startswith("api/"):
             return JSONResponse({"detail": "Not Found"}, status_code=404)
-        return FileResponse(FRONTEND_DIST / "index.html")
+        # Archivos reales en la raíz de dist (public/: fuentes, licencias):
+        # hoy caían en el fallback de index.html y el navegador las descartaba
+        # por tipo. Se sirven; no llevan hash en el nombre, así que revalidan.
+        if full_path:
+            candidate = (dist / full_path).resolve()
+            try:
+                candidate.relative_to(dist.resolve())
+            except ValueError:
+                pass  # fuera de dist (path traversal): se trata como ruta SPA
+            else:
+                if candidate.is_file():
+                    media = _STATIC_MEDIA_TYPES.get(candidate.suffix.lower())
+                    return FileResponse(
+                        candidate,
+                        media_type=media,
+                        headers={"Cache-Control": _CACHE_REVALIDATE},
+                    )
+        # index.html: apunta a chunks con hash, así que debe revalidarse en
+        # cada carga; si la webview reusa un index viejo, la UI del update
+        # no aparece hasta F5 (causa raíz del staleness post-update).
+        return FileResponse(
+            dist / "index.html", headers={"Cache-Control": _CACHE_REVALIDATE}
+        )
+
+
+if FRONTEND_DIST.exists():
+    mount_frontend(app, FRONTEND_DIST)
 
 
 def _bind_with_fallback(host: str, preferred: int) -> tuple[socket, int]:
