@@ -17,7 +17,7 @@
     "@tauri-apps/plugin-shell": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.13.1",
     "highlight.js": "^11.9.0",
-    "i18next": "^26.4.2",
+    "i18next": "^26.4.7",
     "lucide-react": "^1.48.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
