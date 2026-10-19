@@ -78,6 +78,10 @@ class StreamMetrics:
         self._prompt_s = 0.0
         self._source: MetricsSource | None = None
         self._context_tokens: int | None = None
+        # Totales crudos de usage de rondas cerradas (MON-2, costo de sesión).
+        self._usage_prompt = 0
+        self._usage_completion = 0
+        self._usage_cached = 0
 
         self._reset_round()
 
@@ -208,6 +212,17 @@ class StreamMetrics:
         elif prompt_total is not None and completion is not None:
             self._context_tokens = int(prompt_total + completion)
 
+        # Totales crudos de usage para la sesión (MON-2): la suma de rondas
+        # es el consumo real de un turno multi-ronda (tool-calling).
+        if prompt_total is not None:
+            self._usage_prompt += int(prompt_total)
+        if completion is not None:
+            self._usage_completion += int(completion)
+        details = usage.get("prompt_tokens_details")
+        cached = _num(details.get("cached_tokens")) if isinstance(details, dict) else None
+        if cached is not None:
+            self._usage_cached += int(cached)
+
         self._reset_round()
 
     # -- lectura ---------------------------------------------------------------
@@ -243,6 +258,9 @@ class StreamMetrics:
             "tokens_total": self._tokens + live_tokens,
             "tokens_thinking": self._thinking + live_thinking,
             "context_tokens": self._context_tokens,
+            "usage_prompt_tokens": self._usage_prompt,
+            "usage_completion_tokens": self._usage_completion,
+            "usage_cached_tokens": self._usage_cached,
             "metrics_source": self._source or "chunks",
             "duration_s": round(now - self.start, 2),
         }

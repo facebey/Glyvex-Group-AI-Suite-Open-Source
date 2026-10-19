@@ -164,3 +164,67 @@ def test_reasoning_from_delta():
     assert reasoning_from_delta({"reasoning": "b"}) == "b"
     assert reasoning_from_delta({"content": "c"}) == ""
     assert reasoning_from_delta({"reasoning_content": None}) == ""
+
+
+# --------------------------------------------------------------------------
+# Totales crudos de usage por sesión (MON-2)
+# --------------------------------------------------------------------------
+
+
+def test_totales_de_usage_se_suman_en_multi_ronda():
+    clock = FakeClock()
+    m = StreamMetrics(clock=clock)
+
+    m.begin_round()
+    m.mark_token(thinking=False)
+    m.observe_chunk({"choices": [], "usage": {
+        "prompt_tokens": 1000, "completion_tokens": 10,
+        "prompt_tokens_details": {"cached_tokens": 700},
+    }})
+    m.end_round()
+
+    m.begin_round()
+    m.mark_token(thinking=False)
+    m.observe_chunk({"choices": [], "usage": {
+        "prompt_tokens": 1500, "completion_tokens": 20,
+        "prompt_tokens_details": {"cached_tokens": 900},
+    }})
+    m.end_round()
+
+    # La suma de rondas es el consumo real de un turno con tools.
+    snap = m.snapshot()
+    assert snap["usage_prompt_tokens"] == 2500
+    assert snap["usage_completion_tokens"] == 30
+    assert snap["usage_cached_tokens"] == 1600
+
+
+def test_totales_de_usage_sin_cached():
+    clock = FakeClock()
+    m = StreamMetrics(clock=clock)
+    m.begin_round()
+    m.mark_token(thinking=False)
+    m.observe_chunk({"choices": [], "usage": {"prompt_tokens": 50, "completion_tokens": 5}})
+    m.end_round()
+    snap = m.snapshot()
+    assert snap["usage_prompt_tokens"] == 50
+    assert snap["usage_completion_tokens"] == 5
+    assert snap["usage_cached_tokens"] == 0
+
+
+def test_ronda_descartada_no_suma_usage_de_sesion():
+    # El usage de la ronda descartada no llega a la sesión (edge case de
+    # restart de respuesta: se acepta perderlo, ver docstring del item).
+    clock = FakeClock()
+    m = StreamMetrics(clock=clock)
+    m.begin_round()
+    m.mark_token(thinking=False)
+    m.observe_chunk({"choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 10}})
+    m.discard_round()
+    m.begin_round()
+    m.mark_token(thinking=False)
+    m.observe_chunk({"choices": [], "usage": {"prompt_tokens": 200, "completion_tokens": 20}})
+    m.end_round()
+    snap = m.snapshot()
+    assert snap["usage_prompt_tokens"] == 200
+    assert snap["usage_completion_tokens"] == 20
+    assert snap["usage_cached_tokens"] == 0

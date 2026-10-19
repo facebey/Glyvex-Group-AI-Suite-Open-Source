@@ -134,6 +134,7 @@
           "live_charts": "LLM Server · 5 min charts",
           "history": "LLM Server · history"
         },
+        "sessionCost": "Session cost",
         "processes": "Active processes",
         "processesHint": "When hidden, the backend also stops scanning system processes."
       },
@@ -536,6 +537,8 @@
     "runtimeDownloading": "Runtime: downloading…",
     "runtimeMissing": "no runtime — download",
     "runtimeMissingTitle": "Open Config → Runtime to download the tested version",
+    "runtimeOutdated": "Runtime: outdated — update",
+    "runtimeOutdatedTitle": "A previous build is on disk. Open Config → Runtime to update it",
     "configuringFor": "Configuring launch for",
     "loadingModels": "Loading models…",
     "auto": "Auto",
@@ -630,12 +633,14 @@
     "kvParallelWarning": "⚠ With n_parallel > 1 and kv_unified off, each slot reserves its own full KV cache (x{{n}} the context VRAM).",
     "apiKeyLabel": "API key (optional)",
     "apiKeyPlaceholder": "Leave empty to not require auth",
-    "advancedParams": "Advanced parameters",
+    "advRopeGroup": "RoPE / Scaling",
+    "advMemoryGroup": "Memory / Attention",
+    "advCheckpointsCard": "Checkpoints",
+    "advKvSessionCard": "KV memory & session",
     "cacheReuseDisabled": "0 (disabled)",
     "defragDisabled": "-1 (disabled)",
     "defragDeprecatedHint": "Marked DEPRECATED in the binary's --help; the backend still sends it for now.",
     "oneDisabled": "1 = disabled",
-    "checkpointsMemory": "Checkpoints and memory",
     "ctxCheckpointsHint": "Max context checkpoints per slot (~150 MiB of VRAM each). Build default: 32.",
     "checkpointMinStepHint": "Minimum spacing between checkpoints (tokens). Build default: 8192.",
     "cacheRamHint": "Limit of the prompt cache in system RAM (0 = disabled).",
@@ -794,6 +799,20 @@
       "title": "Active processes",
       "empty": "No llama-server/ollama processes running.",
       "colName": "Name"
+    },
+    "sessionCost": {
+      "title": "Session cost",
+      "noUsage": "No usage yet: chat with a model and the session accumulates here.",
+      "input": "Input tokens",
+      "output": "Generated tokens",
+      "cached": "Cached tokens",
+      "turns": "Turns",
+      "providerLabel": "Reference provider",
+      "cloudCost": "Cost on {{name}}: {{cost}}",
+      "savings": "Saved this session (local, no cloud): {{cost}}",
+      "noPricing": "No pricing providers: edit the table in Config → Cloud pricing.",
+      "reset": "Reset session",
+      "resetConfirm": "Reset this session's totals? The comparison for what was already chatted is lost."
     }
   },
   "benchmark": {
@@ -843,7 +862,59 @@
     "categories": {
       "title": "Categories",
       "all": "All",
-      "none": "None"
+      "none": "None",
+      "items": {
+        "algorithm": "algorithm",
+        "algebra": "algebra",
+        "analogy": "analogy",
+        "arithmetic": "arithmetic",
+        "calculation": "calculation",
+        "calculus": "calculus",
+        "chemistry": "chemistry",
+        "comprehension": "comprehension",
+        "configuration": "configuration",
+        "conjugation": "conjugation",
+        "datastructure": "datastructure",
+        "debug": "debug",
+        "deduction": "deduction",
+        "decorator": "decorator",
+        "description": "description",
+        "geometry": "geometry",
+        "generation": "generation",
+        "grammar": "grammar",
+        "kinematics": "kinematics",
+        "monitoring": "monitoring",
+        "networking": "networking",
+        "parsing": "parsing",
+        "paradox": "paradox",
+        "percentage": "percentage",
+        "physics": "physics",
+        "probability": "probability",
+        "puzzle": "puzzle",
+        "qos": "qos",
+        "query": "query",
+        "refactor": "refactor",
+        "register": "register",
+        "regex": "regex",
+        "sequence": "sequence",
+        "spatial": "spatial",
+        "statistics": "statistics",
+        "syllogism": "syllogism",
+        "summary": "summary",
+        "usage": "usage",
+        "vocabulary": "vocabulary",
+        "writing": "writing"
+      }
+    },
+    "difficulty": {
+      "easy": "easy",
+      "medium": "medium",
+      "hard": "hard"
+    },
+    "prompts": {
+      "title": "Prompts",
+      "all": "All",
+      "hint": "Unchecked prompts will not run."
     },
     "errors": {
       "startFailed": "Could not start the benchmark",
@@ -923,7 +994,10 @@
       "themeLight": "Light",
       "themeCarbon": "Carbon",
       "themeMetallic": "Metallic",
-      "themeMatrix": "Matrix"
+      "themeMatrix": "Matrix",
+      "themeExternalGroup": "External themes",
+      "themeExternalNone": "(none — create a folder in data/themes/)",
+      "themeExternalHint": "Each folder in data/themes/ with at least one .css file shows up here automatically, no restart needed. The CSS defines the --color-glyvex-* variables (optional textures in the same folder)."
     },
     "export": {
       "section": "Export metrics",
@@ -950,6 +1024,14 @@
       "testNoBackend": "could not contact the backend",
       "influxNote": "If you enable InfluxDB with the history turned off, restart the backend so it starts measuring."
     },
+    "cloudPricing": {
+      "section": "Cloud pricing (reference)",
+      "hint": "Used by the Monitor's comparison (Session cost). Reference values for the demo: edit the JSON with each provider's current prices. If the structure becomes invalid, the app falls back to the defaults.",
+      "restore": "Restore defaults",
+      "restored": "Prices restored. Save to keep them.",
+      "restoreError": "Could not retrieve the default prices.",
+      "invalidJson": "Invalid JSON: {{error}} (the last valid values are still in use)"
+    },
     "runtime": {
       "section": "Runtime",
       "loading": "Checking runtime status…",
@@ -972,6 +1054,7 @@
       "cudaNote": "GPU with compute capability {{cc}} — CUDA 12.x bundle (CUDA 13.x does not support this architecture).",
       "outdated": "Runtime outdated — {{pin}} not installed yet",
       "outdatedSub": "Previous build {{prev}} ({{prevSize}} MB) is on disk. Estimated download: ~{{size}} MB.",
+      "outdatedDelta": "Size delta: {{delta}} MB",
       "update": "Update runtime",
       "keepPrevious": "Keep previous build (rollback)",
       "uninstall": "Uninstall",

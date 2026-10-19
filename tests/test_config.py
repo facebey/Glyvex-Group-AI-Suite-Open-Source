@@ -113,3 +113,49 @@ def test_redaccion_de_secretos_en_el_log():
     assert red["exports"]["prometheus_token"] == "<redactado>"
     assert red["exports"]["influx"] == {"token": "<redactado>", "password": "<redactado>", "url": "http://x"}
     assert red["tools"] == {"brave_api_key": "<redactado>", "tavily_api_key": ""}
+
+
+# --------------------------------------------------------------------------
+# Precios de nube (MON-2)
+# --------------------------------------------------------------------------
+
+
+def test_cloud_pricing_default_del_esquema():
+    import config as config_module
+
+    pricing = config_module.Config().defaults()["cloud_pricing"]
+    assert pricing["currency"] == "USD"
+    assert pricing["default_provider_id"] in [p["id"] for p in pricing["providers"]]
+    for provider in pricing["providers"]:
+        assert provider["input_per_mtok"] >= 0
+        assert provider["output_per_mtok"] >= 0
+        assert provider["id"] and provider["name"]
+
+
+def test_get_cloud_pricing_valida_edicion_valida():
+    import config as config_module
+
+    config_module.config.set("cloud_pricing", {
+        "default_provider_id": "mi-proveedor",
+        "providers": [
+            {"id": "mi-proveedor", "name": "El mío", "input_per_mtok": 1, "output_per_mtok": 2},
+        ],
+    })
+    pricing = config_module.get_cloud_pricing()
+    assert len(pricing.providers) == 1
+    assert pricing.providers[0].cache_read_per_mtok is None  # ausente → None
+    assert pricing.default_provider_id == "mi-proveedor"
+
+
+def test_get_cloud_pricing_falla_con_seccion_rota():
+    import config as config_module
+
+    # providers mal tipado: el deep-merge de POST /api/config no lo impide.
+    config_module.config.set("cloud_pricing", {"providers": "roto"})
+    pricing = config_module.get_cloud_pricing()
+    assert pricing.providers  # vuelve al esquema completo por defecto
+    assert pricing.default_provider_id in [p.id for p in pricing.providers]
+
+    # null guardado: también cae a defaults.
+    config_module.config.set("cloud_pricing", None)
+    assert config_module.get_cloud_pricing().providers

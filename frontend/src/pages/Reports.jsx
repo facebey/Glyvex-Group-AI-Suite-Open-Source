@@ -51,6 +51,9 @@ function RunDetail({ run, onBack }) {
         {Array.isArray(run.config.categories) && run.config.categories.length > 0 && (
           <p className="text-sm"><span className="text-glyvex-muted">{t("benchmark.categories.title")}:</span> {run.config.categories.join(", ")}</p>
         )}
+        {Array.isArray(run.config.prompts) && run.config.prompts.length > 0 && (
+          <p className="text-sm"><span className="text-glyvex-muted">{t("benchmark.prompts.title")}:</span> {run.config.prompts.join(", ")}</p>
+        )}
         <p className="text-sm"><span className="text-glyvex-muted">{t("reports.detail.started")}:</span> {fmtDate(run.started_at)}</p>
         <p className="text-sm"><span className="text-glyvex-muted">{t("reports.detail.finished")}:</span> {fmtDate(run.finished_at)}</p>
         <p className="text-sm"><span className="text-glyvex-muted">{t("reports.detail.status")}:</span> {run.status}</p>
@@ -245,6 +248,9 @@ export default function Reports() {
                     {(run.sets || []).join(", ")}
                     {Array.isArray(run.categories) && run.categories.length > 0 && (
                       <span className="block text-xs opacity-75">{t("benchmark.categories.title")}: {run.categories.join(", ")}</span>
+                    )}
+                    {Array.isArray(run.prompts) && run.prompts.length > 0 && (
+                      <span className="block text-xs opacity-75">{t("benchmark.prompts.title")}: {run.prompts.length}</span>
                     )}
                   </td>
                   <td className="px-3 py-2 text-glyvex-muted">{run.summary?.total_prompts ?? "—"}</td>

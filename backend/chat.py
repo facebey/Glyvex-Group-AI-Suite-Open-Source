@@ -60,6 +60,7 @@ import attachments as attachments_module
 import tools as tools_module
 from config import config
 from stream_metrics import StreamMetrics, reasoning_from_delta
+from session_tokens import session_tokens
 
 logger = logging.getLogger("glyvex.chat")
 from database import (
@@ -863,6 +864,14 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
                     yield _sse({"type": "tool_result", **entry})
 
         final = turn.snapshot()
+        # Costo de sesión (MON-2): solo el chat suma; el benchmark es prueba
+        # deliberada, no uso. Un turno que muere a mitad de stream (error
+        # upstream) no llega hasta acá y no cuenta.
+        await session_tokens.record_turn(
+            prompt_tokens=final["usage_prompt_tokens"],
+            completion_tokens=final["usage_completion_tokens"],
+            cached_tokens=final["usage_cached_tokens"],
+        )
         logger.info(
             "turno fin: model=%s tokens=%d thinking=%d tps=%s pp_tps=%s ttft_ms=%s "
             "ttft_respuesta_ms=%s contexto=%s fuente=%s tools=%d duracion_s=%.1f",

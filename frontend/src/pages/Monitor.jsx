@@ -6,6 +6,7 @@ import { useLlmStream } from "../hooks/useLlmStream.js";
 import { useDisplay } from "../lib/metricsDisplay.js";
 import { useToast } from "../components/ToastNotification.jsx";
 import CollapsiblePanel from "../components/ui/CollapsiblePanel.jsx";
+import SessionCostPanel from "../components/SessionCostPanel.jsx";
 
 const GPU_KEYS = ["monitor.gpu.vram", "monitor.gpu.util", "monitor.gpu.temp", "monitor.gpu.power_clocks", "monitor.gpu.power_limit", "monitor.gpu.fan", "monitor.gpu.chart"];
 const CPU_KEYS = ["monitor.cpu.total", "monitor.cpu.cores", "monitor.cpu.freq", "monitor.cpu.chart"];
@@ -1691,6 +1692,9 @@ export default function Monitor() {
         )}
       </CollapsiblePanel>
       )}
+
+      {/* Costo de sesión (MON-2): totales del chat local vs precios de nube */}
+      {show("monitor.sessionCost") && <SessionCostPanel />}
 
       {/* Card procesos */}
       {show("monitor.processes") && (

@@ -70,6 +70,8 @@ import models as models_module  # noqa: E402
 import piper_runtime as piper_runtime_module  # noqa: E402
 import kokoro_runtime as kokoro_runtime_module  # noqa: E402
 import runtime as runtime_module  # noqa: E402
+import session_tokens as session_tokens_module  # noqa: E402
+import themes as themes_module  # noqa: E402
 import tts as tts_module  # noqa: E402
 
 from mock_llm_server import build_mock_app, set_models_auth  # noqa: E402
@@ -252,6 +254,17 @@ async def _isolated_state(tmp_path):
     llm_metrics_module.manager._slots_status.clear()
     llm_metrics_module.manager._first_seen.clear()
     llm_metrics_module.manager._last_seen.clear()
+
+    # -- session_tokens.py: totales de chat por sesión (MON-2) -------------
+    # El singleton apunta al DATA_DIR real; sin este redirect un turno
+    # registrado en un test colaría su total (y su JSON) al siguiente.
+    session_tokens_module.session_tokens.path = tmp_path / "session_tokens.json"
+    session_tokens_module.session_tokens.reset_state()
+
+    # -- themes.py: temas externos en <DATA_DIR>/themes (TH-2) ------------
+    # Misma razón que session_tokens: sin redirect un test escanearía (o
+    # crearía carpetas en) la data/ real del proyecto.
+    themes_module.THEMES_DIR = tmp_path / "themes"
 
     yield
 

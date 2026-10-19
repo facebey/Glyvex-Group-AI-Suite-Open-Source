@@ -32,6 +32,8 @@ import metrics
 import metrics_export
 import models
 import runtime_api
+import session_tokens
+import themes
 import attachments
 import piper_runtime_api
 import kokoro_runtime_api
@@ -57,7 +59,7 @@ if sys.platform == "win32":
 # (glyvex.spec, datas → _internal/frontend/dist).
 FRONTEND_DIST = BUNDLE_DIR / "frontend" / "dist"
 
-APP_VERSION = "0.9.1-beta"
+APP_VERSION = "0.10.0-beta"
 APP_NAME = "Glyvex-AI-Suite"
 APP_START_MONOTONIC = time.monotonic()
 
@@ -90,6 +92,8 @@ def _redact_secrets(value: Any) -> Any:
 async def lifespan(app: FastAPI):
     logs_dir = logsetup.setup()
     await config.load()
+    # Costo de sesión (MON-2): el total del chat sobrevive reinicios.
+    await session_tokens.session_tokens.load()
     await init_db()
     # Exportador a InfluxDB antes que los pollers: ellos le encolan ventanas.
     await metrics_export.exporter.start()
@@ -209,6 +213,14 @@ async def reset_config() -> dict[str, Any]:
     return data
 
 
+@api_router.get("/config/pricing-defaults")
+async def get_pricing_defaults() -> dict[str, Any]:
+    """Precios de nube por defecto (defaults de config.py): el botón
+    "Restaurar valores por defecto" de Config los trae de acá para que la
+    fuente de verdad sea una sola."""
+    return config.defaults()["cloud_pricing"]
+
+
 @api_router.get("/info")
 async def get_info() -> dict[str, Any]:
     active_models = [
@@ -242,6 +254,7 @@ api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(benchmark.router, prefix="/benchmark", tags=["benchmark"])
 api_router.include_router(metrics.router, prefix="/metrics", tags=["metrics"])
 api_router.include_router(metrics_export.router, prefix="/metrics", tags=["metrics-export"])
+api_router.include_router(session_tokens.router, prefix="/metrics", tags=["session-tokens"])
 api_router.include_router(llm_metrics.router, prefix="/llm-metrics", tags=["llm-metrics"])
 api_router.include_router(stt.router, prefix="/stt", tags=["stt"])
 api_router.include_router(stt_runtime_api.router, prefix="/stt/runtime", tags=["stt-runtime"])
@@ -249,6 +262,7 @@ api_router.include_router(tts.router, prefix="/tts", tags=["tts"])
 api_router.include_router(piper_runtime_api.router, prefix="/tts/piper", tags=["tts-piper"])
 api_router.include_router(kokoro_runtime_api.router, prefix="/tts/kokoro", tags=["tts-kokoro"])
 api_router.include_router(runtime_api.router, prefix="/runtime", tags=["runtime"])
+api_router.include_router(themes.router, prefix="/themes", tags=["themes"])
 
 app.include_router(api_router)
 

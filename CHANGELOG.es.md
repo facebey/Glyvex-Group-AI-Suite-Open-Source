@@ -7,6 +7,53 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.10.0-beta] — 2026-10-19
+
+Release de features sobre v0.9.1-beta: seguimiento del costo de sesión con
+comparativa contra la nube, temas externos cargados desde carpetas, selección
+de prompts individuales en Benchmark, un flujo de actualización del runtime
+pulido, un panel de parámetros avanzados reorganizado y un fix de caché
+post-actualización.
+
+### Añadido
+- **Monitor: costo de sesión** (MON-2): un panel en el Monitor lleva el
+  conteo de tokens de prompt/completado/caché usados por los chats de la
+  propia suite y estima el ahorro contra siete proveedores de nube (OpenAI,
+  Anthropic, Google, DeepSeek). Las tarifas se editan en una nueva sección
+  "Precios de nube" de Configuración (ES/EN).
+- **Temas: temas externos desde carpetas** (TH-2): cada tema es una carpeta
+  con uno o más archivos `.css` (más texturas opcionales) bajo el directorio
+  `themes/` de la carpeta de datos. Los temas se autodetectan y aparecen en
+  el selector junto a los cinco integrados, se aplican en vivo sin
+  reinstalar ni reiniciar, y el botón de ciclo del header los incluye. El CSS
+  de un tema solo necesita redefinir las variables de color de la app — lo que
+  no se redefine hereda del tema base.
+- **Benchmark: selección por prompt** (K3): se pueden activar/desactivar
+  prompts individuales dentro de cada set (antes solo se filtraban categorías
+  completas); los chips de categoría ahora actúan como interruptores de grupo
+  de sus propios prompts, cada set tiene un checkbox maestro "Todos", y las
+  categorías de prompts y las etiquetas de dificultad están totalmente
+  localizadas (ES/EN).
+- **Runtime: flujo actualizar / reinstalar / desinstalar** (RT-12): cuando
+  hay una build más nueva de llama.cpp disponible, el panel de runtime muestra
+  una vista "desactualizado" — Actualizar como acción primaria con opción de
+  conservar la build anterior, una línea explícita de delta de tamaño que
+  reacciona a esa opción, y acciones de reinstalar / desinstalar; el Launcher
+  muestra un chip "Runtime: desactualizado".
+
+### Cambiado
+- **Launcher: "Parámetros avanzados" reorganizado** (E10): el panel plano de
+  ~30 controles se divide en tres grupos colapsables (RoPE/Escalado,
+  Memoria/Atención, Checkpoints y memoria); la apertura de cada grupo
+  persiste. Sin cambios de comportamiento — mismos campos, toggles y
+  deshabilitaciones por probe.
+
+### Corregido
+- **Actualizaciones: se acabó el F5 manual después de un update interno**
+  (PUB-13): el redirigido de arranque de la app ahora lleva la versión
+  instalada como parámetro de consulta, así que la caché de disco de WebView2
+  no puede servir nunca un `index.html` viejo de una versión anterior.
+
 ## [0.9.1-beta] — 2026-10-16
 
 Release de parche sobre v0.9.0-beta: las actualizaciones internas muestran la

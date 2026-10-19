@@ -359,3 +359,68 @@ async def test_history_includes_categories(client, mock_llama_server, custom_pro
     history = (await client.get("/api/benchmark/history")).json()
     entry2 = next(e for e in history if e["run_id"] == sin_filtro["run_id"])
     assert entry2["categories"] is None
+
+
+async def test_run_filters_by_prompts(client, mock_llama_server, custom_prompt_set):
+    cat_set_id = _inject_category_set()
+    try:
+        final = await _run_and_wait_completed(
+            client, [cat_set_id], endpoint=mock_llama_server, prompts=["c1"],
+        )
+        assert final["status"] == "completed"
+        assert len(final["results"]) == 1
+        assert final["results"][0]["prompt_id"] == "c1"
+        assert final["summary"]["total_prompts"] == 1
+    finally:
+        benchmark_module.prompt_sets._sets.pop("__cat_set__", None)
+
+
+async def test_run_prompts_empty_list_errors(client, mock_llama_server, custom_prompt_set):
+    final = await _run_and_wait_completed(
+        client, [custom_prompt_set], endpoint=mock_llama_server, prompts=[],
+    )
+    assert final["status"] == "error"
+    assert "prompts" in (final.get("error") or "").lower()
+    assert final["results"] == []
+
+
+async def test_run_prompts_combined_with_categories(client, mock_llama_server, custom_prompt_set):
+    cat_set_id = _inject_category_set()
+    try:
+        # c1 es categoría alpha, c2 beta: la intersección deja solo c1.
+        final = await _run_and_wait_completed(
+            client, [cat_set_id], endpoint=mock_llama_server,
+            categories=["alpha"], prompts=["c1", "c2"],
+        )
+        assert final["status"] == "completed"
+        assert [r["prompt_id"] for r in final["results"]] == ["c1"]
+    finally:
+        benchmark_module.prompt_sets._sets.pop("__cat_set__", None)
+
+
+async def test_run_prompts_no_match_errors(client, mock_llama_server, custom_prompt_set):
+    final = await _run_and_wait_completed(
+        client, [custom_prompt_set], endpoint=mock_llama_server, prompts=["no-existe"],
+    )
+    assert final["status"] == "error"
+    assert "prompts" in (final.get("error") or "").lower()
+    assert final["results"] == []
+
+
+async def test_history_includes_prompts(client, mock_llama_server, custom_prompt_set):
+    final = await _run_and_wait_completed(
+        client, [custom_prompt_set], endpoint=mock_llama_server, prompts=["t1"],
+    )
+    assert final["status"] == "completed"
+
+    history = (await client.get("/api/benchmark/history")).json()
+    entry = next(e for e in history if e["run_id"] == final["run_id"])
+    assert entry["prompts"] == ["t1"]
+
+    sin_filtro = await _run_and_wait_completed(
+        client, [custom_prompt_set], endpoint=mock_llama_server,
+    )
+    assert sin_filtro["status"] == "completed"
+    history = (await client.get("/api/benchmark/history")).json()
+    entry2 = next(e for e in history if e["run_id"] == sin_filtro["run_id"])
+    assert entry2["prompts"] is None

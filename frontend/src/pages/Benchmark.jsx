@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, Play, Square, Download, Check, X, Info } from "lucide-react";
 import { useLocalStorage } from "../hooks/useLocalStorage.js";
 import { useTranslation } from "react-i18next";
+import { groupAllOn, toggleGroup, turnGroupOn, turnGroupOff } from "../lib/benchmarkSelection.js";
 import {
   BarChart, Bar, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -93,7 +94,7 @@ function liveRowFromResult(r) {
   };
 }
 
-function SetCard({ set, checked, onToggle, expanded, onToggleExpand, detail }) {
+function SetCard({ set, checked, onToggle, expanded, onToggleExpand, detail, offPrompts = [], onTogglePrompt, onToggleAll, allOn = false }) {
   const { t } = useTranslation();
   const setName = t(`benchmark.sets.items.${set.id}.name`, { defaultValue: set.name });
   const setDesc = t(`benchmark.sets.items.${set.id}.description`, { defaultValue: set.description });
@@ -112,12 +113,24 @@ function SetCard({ set, checked, onToggle, expanded, onToggleExpand, detail }) {
       </div>
       {expanded && (
         <div className="border-t border-glyvex-border-soft px-4 py-3 space-y-2 max-h-56 overflow-y-auto">
-          {!detail ? <p className="text-xs text-glyvex-muted">{t("benchmark.sets.loading")}</p> : detail.prompts.map((p) => (
-            <div key={p.id} className="text-xs">
-              <span className="text-glyvex-text font-medium">{p.title}</span>
-              <span className="text-glyvex-muted"> — {p.difficulty}</span>
-            </div>
-          ))}
+          {!detail ? <p className="text-xs text-glyvex-muted">{t("benchmark.sets.loading")}</p> : (
+            <>
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-medium">
+                <input type="checkbox" checked={allOn} onChange={onToggleAll}
+                  className="h-3.5 w-3.5 shrink-0 accent-glyvex-accent" />
+                <span>{t("benchmark.prompts.all")}</span>
+              </label>
+              {detail.prompts.map((p) => (
+                <label key={p.id} className="flex cursor-pointer items-center gap-2 text-xs">
+                  <input type="checkbox" checked={!offPrompts.includes(p.id)} onChange={() => onTogglePrompt?.(p.id)}
+                    className="h-3.5 w-3.5 shrink-0 accent-glyvex-accent" />
+                  <span className="text-glyvex-text font-medium">{p.title}</span>
+                  <span className="text-glyvex-muted"> — {t(`benchmark.difficulty.${p.difficulty}`, { defaultValue: p.difficulty })}</span>
+                </label>
+              ))}
+              <p className="text-[11px] text-glyvex-muted">{t("benchmark.prompts.hint")}</p>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -176,15 +189,34 @@ export default function Benchmark() {
   const [setsError, setSetsError] = useState(false);
   const [selectedSetIds, setSelectedSetIds] = useLocalStorage("glyvex_benchmark_sets", []);
   const selectedSets = useMemo(() => new Set(selectedSetIds), [selectedSetIds]);
-  // Categorías DESMARCADAS (persistidas); marcadas = disponibles − desmarcadas.
-  const [uncheckedCats, setUncheckedCats] = useLocalStorage("glyvex_benchmark_categories_off", []);
+  // Categorías de los sets seleccionados (chips de la sección Categorías).
+  // El estado de cada chip se DERIVA de offPrompts (fuente única de verdad):
+  // un chip está marcado cuando todos sus prompts están marcados.
   const availableCats = useMemo(() => {
     const sel = sets.filter((s) => selectedSets.has(s.id));
     return [...new Set(sel.flatMap((s) => s.categories || []))].sort();
   }, [sets, selectedSets]);
-  const activeCats = useMemo(() => availableCats.filter((c) => !uncheckedCats.includes(c)), [availableCats, uncheckedCats]);
+  // K3: prompts individuales DESMARCADOS (persistidos); activos = disponibles − desmarcados.
+  const [offPrompts, setOffPrompts] = useLocalStorage("glyvex_benchmark_prompts_off", []);
   const [expandedSetId, setExpandedSetId] = useState(null);
   const [setDetails, setSetDetails] = useState({});
+  // K3: la cola de prompts individuales necesita el detalle de TODOS los sets
+  // seleccionados, no solo el expandido (se carga al expandir).
+  useEffect(() => {
+    sets.forEach((s) => {
+      if (selectedSets.has(s.id) && !setDetails[s.id]) {
+        fetch(`/api/benchmark/sets/${s.id}`).then((r) => r.json()).then((detail) => setSetDetails((prev) => ({ ...prev, [s.id]: detail }))).catch(() => {});
+      }
+    });
+  }, [sets, selectedSets, setDetails]);
+  // Objetos de prompt de los sets seleccionados (los interruptores de grupo
+  // por categoría y "Todos" necesitan id + category, no solo ids).
+  const availablePromptObjs = useMemo(
+    () => sets.filter((s) => selectedSets.has(s.id)).flatMap((s) => setDetails[s.id]?.prompts || []),
+    [sets, selectedSets, setDetails],
+  );
+  const availablePrompts = useMemo(() => availablePromptObjs.map((p) => p.id), [availablePromptObjs]);
+  const activePromptIds = useMemo(() => availablePrompts.filter((id) => !offPrompts.includes(id)), [availablePrompts, offPrompts]);
   const [temperature, setTemperature] = useState(0.0);
   const [maxTokens, setMaxTokens] = useState(2048);
   const [repetitions, setRepetitions] = useState(1);
@@ -348,8 +380,16 @@ export default function Benchmark() {
     setSelectedSetIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   }
 
+  // Una categoría es un interruptor de grupo de sus prompts: marcarla activa
+  // todos los de esa categoría y desmarcarla los desactiva todos (el estado
+  // visible de los checkboxes individuales es el mismo offPrompts).
   function toggleCat(cat) {
-    setUncheckedCats((prev) => prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]);
+    const catIds = availablePromptObjs.filter((p) => p.category === cat).map((p) => p.id);
+    setOffPrompts((prev) => toggleGroup(catIds, prev));
+  }
+
+  function togglePrompt(id) {
+    setOffPrompts((prev) => prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]);
   }
 
   function toggleExpandSet(id) {
@@ -362,13 +402,17 @@ export default function Benchmark() {
 
   async function handleStart() {
     if (selectedSets.size === 0) return;
+    // K3: la cola queda vacía si desmarcaron todos los prompts disponibles.
+    if (availablePrompts.length > 0 && activePromptIds.length === 0) return;
     setRunError(null); setFinishedRun(null); setLiveResults([]); setProgress({ completed: 0, total: 0 });
     setJudgeAvgScore(null); setJudgeError(null);
     setJudgeProgress({ evaluated: 0, total: 0, currentPrompt: null, currentScore: null });
     try {
       const res = await fetch("/api/benchmark/run", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ endpoint: endpointUrl, model_name: modelName, sets: [...selectedSets], categories: activeCats.length === availableCats.length ? null : activeCats, thinking_enabled: thinkingEnabled, temperature, max_tokens: maxTokens, repetitions, timeout_s: timeoutS }),
+        // La selección por prompts define la cola completa: las categorías ya
+        // son interruptores de grupo de esos prompts (sin filtro AND aparte).
+        body: JSON.stringify({ endpoint: endpointUrl, model_name: modelName, sets: [...selectedSets], prompts: activePromptIds.length === availablePrompts.length ? null : activePromptIds, thinking_enabled: thinkingEnabled, temperature, max_tokens: maxTokens, repetitions, timeout_s: timeoutS }),
       });
       const run = await res.json();
       if (!res.ok) throw new Error(run.detail || t("benchmark.errors.startFailed"));
@@ -521,10 +565,16 @@ export default function Benchmark() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {sets.map((s) => (
-              <SetCard key={s.id} set={s} checked={selectedSets.has(s.id)} onToggle={() => toggleSet(s.id)}
-                expanded={expandedSetId === s.id} onToggleExpand={() => toggleExpandSet(s.id)} detail={setDetails[s.id]} />
-            ))}
+            {sets.map((s) => {
+              const setPromptIds = (setDetails[s.id]?.prompts || []).map((p) => p.id);
+              return (
+                <SetCard key={s.id} set={s} checked={selectedSets.has(s.id)} onToggle={() => toggleSet(s.id)}
+                  expanded={expandedSetId === s.id} onToggleExpand={() => toggleExpandSet(s.id)} detail={setDetails[s.id]}
+                  offPrompts={offPrompts} onTogglePrompt={togglePrompt}
+                  allOn={groupAllOn(setPromptIds, offPrompts)}
+                  onToggleAll={() => setOffPrompts((prev) => toggleGroup(setPromptIds, prev))} />
+              );
+            })}
           </div>
         )}
         {!setsError && availableCats.length > 0 && (
@@ -532,17 +582,20 @@ export default function Benchmark() {
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-medium text-glyvex-muted uppercase tracking-wide">{t("benchmark.categories.title")}</h3>
               <div className="flex gap-3 text-xs">
-                <button type="button" onClick={() => setUncheckedCats([])} className="text-glyvex-accent hover:underline">{t("benchmark.categories.all")}</button>
-                <button type="button" onClick={() => setUncheckedCats(availableCats)} className="text-glyvex-accent hover:underline">{t("benchmark.categories.none")}</button>
+                <button type="button" onClick={() => setOffPrompts((prev) => turnGroupOn(availablePrompts, prev))} className="text-glyvex-accent hover:underline">{t("benchmark.categories.all")}</button>
+                <button type="button" onClick={() => setOffPrompts((prev) => turnGroupOff(availablePrompts, prev))} className="text-glyvex-accent hover:underline">{t("benchmark.categories.none")}</button>
               </div>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {availableCats.map((cat) => (
-                <label key={cat} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-glyvex-border-soft bg-glyvex-veil text-xs cursor-pointer hover:border-glyvex-accent/50">
-                  <input type="checkbox" checked={!uncheckedCats.includes(cat)} onChange={() => toggleCat(cat)} className="w-3.5 h-3.5 accent-glyvex-accent" />
-                  {cat}
-                </label>
-              ))}
+              {availableCats.map((cat) => {
+                const catIds = availablePromptObjs.filter((p) => p.category === cat).map((p) => p.id);
+                return (
+                  <label key={cat} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-glyvex-border-soft bg-glyvex-veil text-xs cursor-pointer hover:border-glyvex-accent/50">
+                    <input type="checkbox" checked={groupAllOn(catIds, offPrompts)} onChange={() => toggleCat(cat)} className="w-3.5 h-3.5 accent-glyvex-accent" />
+                    {t(`benchmark.categories.items.${cat}`, { defaultValue: cat })}
+                  </label>
+                );
+              })}
             </div>
           </div>
         )}
@@ -565,7 +618,7 @@ export default function Benchmark() {
       {runError && <p className="text-sm text-red-400">{runError}</p>}
 
       {!running ? (
-        <button type="button" onClick={handleStart} disabled={selectedSets.size === 0 || (availableCats.length > 0 && activeCats.length === 0)}
+        <button type="button" onClick={handleStart} disabled={selectedSets.size === 0 || (availablePrompts.length > 0 && activePromptIds.length === 0)}
           className="flex items-center gap-2 px-5 py-2.5 rounded-md text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50">
           <Play size={16} />{t("benchmark.start")}
         </button>

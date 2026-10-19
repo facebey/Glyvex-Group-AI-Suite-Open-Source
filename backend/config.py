@@ -14,7 +14,7 @@ from paths import DATA_DIR
 from typing import Any
 
 import aiofiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 # Ruta del archivo de configuración: <DATA_DIR>/config.json
 # DATA_DIR sale de paths.py (respeta GLYVEX_DATA_DIR), así que cada instancia
@@ -216,6 +216,54 @@ class ExportsConfig(BaseModel):
     influx: InfluxExportConfig = Field(default_factory=InfluxExportConfig)
 
 
+class CloudPricingProvider(BaseModel):
+    """Precios de referencia de un proveedor cloud (moneda por millón de tokens)."""
+
+    id: str
+    name: str
+    input_per_mtok: float = 0.0
+    output_per_mtok: float = 0.0
+    # None = el proveedor no diferencia la lectura de caché: los tokens
+    # cacheados se facturan a la tarifa normal de entrada.
+    cache_read_per_mtok: float | None = None
+
+
+def _default_cloud_pricing_providers() -> list[CloudPricingProvider]:
+    # Valores de referencia (USD/Mtok, verificados 2026-10). Cambian seguido,
+    # así que son editables desde Config → "Precios de nube" sin tocar código.
+    return [
+        CloudPricingProvider(id="openai-gpt-4o", name="OpenAI GPT-4o",
+                             input_per_mtok=2.50, output_per_mtok=10.00, cache_read_per_mtok=1.25),
+        CloudPricingProvider(id="openai-gpt-4.1", name="OpenAI GPT-4.1",
+                             input_per_mtok=2.00, output_per_mtok=8.00, cache_read_per_mtok=0.50),
+        CloudPricingProvider(id="anthropic-claude-opus-4.8", name="Anthropic Claude Opus 4.8",
+                             input_per_mtok=5.00, output_per_mtok=25.00, cache_read_per_mtok=0.50),
+        CloudPricingProvider(id="anthropic-claude-sonnet-4.6", name="Anthropic Claude Sonnet 4.6",
+                             input_per_mtok=3.00, output_per_mtok=15.00, cache_read_per_mtok=0.30),
+        CloudPricingProvider(id="google-gemini-2.5-pro", name="Google Gemini 2.5 Pro",
+                             input_per_mtok=1.25, output_per_mtok=10.00, cache_read_per_mtok=0.125),
+        CloudPricingProvider(id="google-gemini-2.5-flash", name="Google Gemini 2.5 Flash",
+                             input_per_mtok=0.30, output_per_mtok=2.50, cache_read_per_mtok=0.03),
+        CloudPricingProvider(id="deepseek-v4.1-flash", name="DeepSeek V4.1 Flash",
+                             input_per_mtok=0.30, output_per_mtok=1.20, cache_read_per_mtok=0.006),
+    ]
+
+
+class CloudPricingConfig(BaseModel):
+    """
+    Precios de nube para la comparativa "Costo de sesión" del Monitor (MON-2).
+
+    Son valores de referencia para la demo (¿cuánto habría costado esta
+    sesión en la nube?), no facturación: la app no hace billing.
+    """
+
+    currency: str = "USD"
+    default_provider_id: str = "openai-gpt-4o"
+    providers: list[CloudPricingProvider] = Field(
+        default_factory=_default_cloud_pricing_providers
+    )
+
+
 class ConfigSchema(BaseModel):
     """Esquema completo de config.json, usado solo para validar/generar defaults."""
 
@@ -229,6 +277,7 @@ class ConfigSchema(BaseModel):
     monitor: MonitorConfig = Field(default_factory=MonitorConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     exports: ExportsConfig = Field(default_factory=ExportsConfig)
+    cloud_pricing: CloudPricingConfig = Field(default_factory=CloudPricingConfig)
     model_dirs: list[str] = Field(default_factory=list)
     last_used_model: str | None = None
     auto_start_last: bool = False
@@ -329,3 +378,16 @@ class Config:
 
 # Instancia única compartida por toda la app (importada por main.py y routers)
 config = Config()
+
+
+def get_cloud_pricing() -> CloudPricingConfig:
+    """
+    Los precios de nube validados. POST /api/config no valida el patch
+    (deep-merge abierto), así que la garantía vive en la lectura: cualquier
+    consumidor recibe el esquema completo, o los defaults si la sección quedó
+    rota o incompleta.
+    """
+    try:
+        return CloudPricingConfig.model_validate(config.get("cloud_pricing") or {})
+    except (ValidationError, TypeError):
+        return CloudPricingConfig()

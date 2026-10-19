@@ -26,9 +26,14 @@ import {
   Copy,
   Check,
   Loader2,
+  Waves,
+  MemoryStick,
+  Flag,
+  Database,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useLlmStream } from "../hooks/useLlmStream.js";
+import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useDisplay } from "../lib/metricsDisplay.js";
 import { useTranslation } from "react-i18next";
 import CollapsiblePanel from "../components/ui/CollapsiblePanel.jsx";
@@ -268,12 +273,13 @@ function wsUrlFor(path) {
   return `${protocol}//${window.location.host}${path}`;
 }
 
-function Panel({ icon: Icon, title, children }) {
+function Panel({ icon: Icon, title, defaultOpen = true, children }) {
   return (
     <CollapsiblePanel
       icon={Icon}
       title={title}
       storageKey={`launcher_panel_${String(title).toLowerCase().replace(/[^a-z0-9]+/g, "_")}`}
+      defaultOpen={defaultOpen}
     >
       {children}
     </CollapsiblePanel>
@@ -1811,6 +1817,15 @@ export default function Launcher() {
                 <Loader2 size={12} className="animate-spin" />
                 {t("launcher.runtimeDownloading")}
               </span>
+            ) : runtimeStatus.state === "outdated" ? (
+              <button
+                type="button"
+                onClick={() => navigate("/config")}
+                className="text-xs px-2 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
+                title={t("launcher.runtimeOutdatedTitle")}
+              >
+                {t("launcher.runtimeOutdated")}
+              </button>
             ) : (
               <button
                 type="button"
@@ -2291,7 +2306,7 @@ export default function Launcher() {
                   <Field label={t("launcher.apiKeyLabel")}><input className={inputClasses} value={launchConfig.api_key} onChange={(e) => updateConfig({ api_key: e.target.value })} placeholder={t("launcher.apiKeyPlaceholder")} /></Field>
                 </Panel>
 
-                <Panel icon={Settings} title={t("launcher.advancedParams")}>
+                <Panel icon={Waves} title={t("launcher.advRopeGroup")}>
                   <Toggle label="RoPE (--rope-scaling, grupo)" checked={toggles.rope}
                     onChange={(v) => setToggle("rope", v)}
                     disabled={isToggleUnavailable("rope")} title={toggleTitle("rope")} />
@@ -2319,9 +2334,10 @@ export default function Launcher() {
                         onChange={(e) => updateConfig({ yarn_ext_factor: Number(e.target.value) })} />
                     </Field>
                   )}
+                </Panel>
+                <Panel icon={MemoryStick} title={t("launcher.advMemoryGroup")} defaultOpen={false}>
                   <Toggle label="numa" checked={launchConfig.numa} onChange={(v) => updateConfig({ numa: v })} help={probeHelp("--numa")} />
                   <Toggle label="no_kv_offload" checked={launchConfig.no_kv_offload} onChange={(v) => updateConfig({ no_kv_offload: v })} help={probeHelp("--no-kv-offload")} />
-
                   <Toggle label="cache_reuse (--cache-reuse)" checked={toggles.cache_reuse}
                     onChange={(v) => setToggle("cache_reuse", v)}
                     disabled={isToggleUnavailable("cache_reuse")} title={toggleTitle("cache_reuse")} />
@@ -2342,12 +2358,11 @@ export default function Launcher() {
                       onChange={(e) => updateConfig({ defrag_thold: Number(e.target.value) })}
                       className="w-full accent-glyvex-accent" />
                   </Field>
-
                   <Toggle label="grp_attn (--grp-attn-n/w, grupo)" checked={toggles.grp_attn}
                     onChange={(v) => setToggle("grp_attn", v)}
                     disabled={isToggleUnavailable("grp_attn")} title={toggleTitle("grp_attn")} />
                   <div className="grid grid-cols-2 gap-4">
-                      <Field label="grp_attn_n" hint={t("launcher.oneDisabled")} flagHelp={probeHelp("--grp-attn-n")}>
+                    <Field label="grp_attn_n" hint={t("launcher.oneDisabled")} flagHelp={probeHelp("--grp-attn-n")}>
                       <input type="number" min={1} className={inputClasses} value={launchConfig.grp_attn_n}
                         disabled={!toggles.grp_attn || isToggleUnavailable("grp_attn")}
                         onChange={(e) => updateConfig({ grp_attn_n: Number(e.target.value) })} />
@@ -2360,67 +2375,70 @@ export default function Launcher() {
                       </Field>
                     )}
                   </div>
-                  <div className="border-t border-glyvex-border-soft pt-4 space-y-4">
-                    <p className="text-xs text-glyvex-muted uppercase tracking-wide">
-                      {t("launcher.checkpointsMemory")}
-                    </p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Toggle label="ctx_checkpoints" checked={toggles.ctx_checkpoints}
-                        onChange={(v) => setToggle("ctx_checkpoints", v)}
-                        disabled={isToggleUnavailable("ctx_checkpoints")} title={toggleTitle("ctx_checkpoints")} />
-                      <Toggle label="checkpoint_min_step" checked={toggles.checkpoint_min_step}
-                        onChange={(v) => setToggle("checkpoint_min_step", v)}
-                        disabled={isToggleUnavailable("checkpoint_min_step")} title={toggleTitle("checkpoint_min_step")} />
-                      <Toggle label="cache_ram (--cache-ram)" checked={toggles.cache_ram}
-                        onChange={(v) => setToggle("cache_ram", v)}
-                        disabled={isToggleUnavailable("cache_ram")} title={toggleTitle("cache_ram")} />
-                      <Toggle label="fit_target (--fit-target)" checked={toggles.fit_target}
-                        onChange={(v) => setToggle("fit_target", v)}
-                        disabled={isToggleUnavailable("fit_target")} title={toggleTitle("fit_target")} />
-                      <Toggle label="fit (--fit)" checked={toggles.fit}
-                        onChange={(v) => setToggle("fit", v)}
-                        disabled={isToggleUnavailable("fit")} title={toggleTitle("fit")} help={probeHelp("--fit")} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <Field label="ctx_checkpoints" hint={t("launcher.ctxCheckpointsHint")} flagHelp={probeHelp("--ctx-checkpoints")}>
-                        <input type="number" min={0} className={inputClasses} value={launchConfig.ctx_checkpoints}
-                          disabled={!toggles.ctx_checkpoints || isToggleUnavailable("ctx_checkpoints")}
-                          onChange={(e) => updateConfig({ ctx_checkpoints: Number(e.target.value) })} />
-                      </Field>
-                      <Field label="checkpoint_min_step" hint={t("launcher.checkpointMinStepHint")} flagHelp={probeHelp("--checkpoint-min-step")}>
-                        <input type="number" min={512} step={512} className={inputClasses} value={launchConfig.checkpoint_min_step}
-                          disabled={!toggles.checkpoint_min_step || isToggleUnavailable("checkpoint_min_step")}
-                          onChange={(e) => updateConfig({ checkpoint_min_step: Number(e.target.value) })} />
-                      </Field>
-                      <Field label="cache_ram_mib" hint={t("launcher.cacheRamHint")} flagHelp={probeHelp("--cache-ram")}>
-                        <input type="number" min={0} step={1024} className={inputClasses} value={launchConfig.cache_ram_mib}
-                          disabled={!toggles.cache_ram || isToggleUnavailable("cache_ram")}
-                          onChange={(e) => updateConfig({ cache_ram_mib: Number(e.target.value) })} />
-                      </Field>
-                      <Field label="fit_target_mib" hint={t("launcher.fitTargetHint")} flagHelp={probeHelp("--fit-target")}>
-                        <input type="number" min={0} step={512} className={inputClasses} value={launchConfig.fit_target_mib}
-                          disabled={!toggles.fit_target || isToggleUnavailable("fit_target")}
-                          onChange={(e) => updateConfig({ fit_target_mib: Number(e.target.value) })} />
-                      </Field>
-                    </div>
-                    <Toggle label={t("launcher.kvUnifiedLabel")} checked={launchConfig.kv_unified}
-                      onChange={(v) => updateConfig({ kv_unified: v })} help={probeHelp("--kv-unified")} />
-                    <Field label="kv_unified_per_slot" hint={t("launcher.kvUnifiedPerSlotHint")} flagHelp={probeHelp("--kv-unified-per-slot")}>
-                      <input type="number" min={0} step={4096} className={inputClasses} value={launchConfig.kv_unified_per_slot}
-                        onChange={(e) => updateConfig({ kv_unified_per_slot: Number(e.target.value) })} />
+                </Panel>
+                <Panel icon={Flag} title={t("launcher.advCheckpointsCard")} defaultOpen={false}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Toggle label="ctx_checkpoints" checked={toggles.ctx_checkpoints}
+                      onChange={(v) => setToggle("ctx_checkpoints", v)}
+                      disabled={isToggleUnavailable("ctx_checkpoints")} title={toggleTitle("ctx_checkpoints")} />
+                    <Toggle label="checkpoint_min_step" checked={toggles.checkpoint_min_step}
+                      onChange={(v) => setToggle("checkpoint_min_step", v)}
+                      disabled={isToggleUnavailable("checkpoint_min_step")} title={toggleTitle("checkpoint_min_step")} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="ctx_checkpoints" hint={t("launcher.ctxCheckpointsHint")} flagHelp={probeHelp("--ctx-checkpoints")}>
+                      <input type="number" min={0} className={inputClasses} value={launchConfig.ctx_checkpoints}
+                        disabled={!toggles.ctx_checkpoints || isToggleUnavailable("ctx_checkpoints")}
+                        onChange={(e) => updateConfig({ ctx_checkpoints: Number(e.target.value) })} />
                     </Field>
-                    <Field label="sleep_idle_seconds" hint={t("launcher.sleepIdleHint")} flagHelp={probeHelp("--sleep-idle-seconds")}>
-                      <input type="number" min={0} step={60} className={inputClasses} value={launchConfig.sleep_idle_seconds}
-                        onChange={(e) => updateConfig({ sleep_idle_seconds: Number(e.target.value) })} />
-                    </Field>
-                    <Toggle label={t("launcher.warmupLabel")} checked={launchConfig.warmup}
-                      onChange={(v) => updateConfig({ warmup: v })} help={probeHelp("--warmup")} />
-                    <Field label="lazy_mode" hint={t("launcher.lazyModeHint")} flagHelp={probeHelp("--lazy-mode")}>
-                      <select className={selectClasses} value={launchConfig.lazy_mode} onChange={(e) => updateConfig({ lazy_mode: e.target.value })}>
-                        {["auto", "on", "off"].map((m) => <option key={m} value={m}>{m}</option>)}
-                      </select>
+                    <Field label="checkpoint_min_step" hint={t("launcher.checkpointMinStepHint")} flagHelp={probeHelp("--checkpoint-min-step")}>
+                      <input type="number" min={512} step={512} className={inputClasses} value={launchConfig.checkpoint_min_step}
+                        disabled={!toggles.checkpoint_min_step || isToggleUnavailable("checkpoint_min_step")}
+                        onChange={(e) => updateConfig({ checkpoint_min_step: Number(e.target.value) })} />
                     </Field>
                   </div>
+                </Panel>
+                <Panel icon={Database} title={t("launcher.advKvSessionCard")} defaultOpen={false}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Toggle label="cache_ram (--cache-ram)" checked={toggles.cache_ram}
+                      onChange={(v) => setToggle("cache_ram", v)}
+                      disabled={isToggleUnavailable("cache_ram")} title={toggleTitle("cache_ram")} />
+                    <Toggle label="fit_target (--fit-target)" checked={toggles.fit_target}
+                      onChange={(v) => setToggle("fit_target", v)}
+                      disabled={isToggleUnavailable("fit_target")} title={toggleTitle("fit_target")} />
+                    <Toggle label="fit (--fit)" checked={toggles.fit}
+                      onChange={(v) => setToggle("fit", v)}
+                      disabled={isToggleUnavailable("fit")} title={toggleTitle("fit")} help={probeHelp("--fit")} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="cache_ram_mib" hint={t("launcher.cacheRamHint")} flagHelp={probeHelp("--cache-ram")}>
+                      <input type="number" min={0} step={1024} className={inputClasses} value={launchConfig.cache_ram_mib}
+                        disabled={!toggles.cache_ram || isToggleUnavailable("cache_ram")}
+                        onChange={(e) => updateConfig({ cache_ram_mib: Number(e.target.value) })} />
+                    </Field>
+                    <Field label="fit_target_mib" hint={t("launcher.fitTargetHint")} flagHelp={probeHelp("--fit-target")}>
+                      <input type="number" min={0} step={512} className={inputClasses} value={launchConfig.fit_target_mib}
+                        disabled={!toggles.fit_target || isToggleUnavailable("fit_target")}
+                        onChange={(e) => updateConfig({ fit_target_mib: Number(e.target.value) })} />
+                    </Field>
+                  </div>
+                  <Toggle label={t("launcher.kvUnifiedLabel")} checked={launchConfig.kv_unified}
+                    onChange={(v) => updateConfig({ kv_unified: v })} help={probeHelp("--kv-unified")} />
+                  <Field label="kv_unified_per_slot" hint={t("launcher.kvUnifiedPerSlotHint")} flagHelp={probeHelp("--kv-unified-per-slot")}>
+                    <input type="number" min={0} step={4096} className={inputClasses} value={launchConfig.kv_unified_per_slot}
+                      onChange={(e) => updateConfig({ kv_unified_per_slot: Number(e.target.value) })} />
+                  </Field>
+                  <Field label="sleep_idle_seconds" hint={t("launcher.sleepIdleHint")} flagHelp={probeHelp("--sleep-idle-seconds")}>
+                    <input type="number" min={0} step={60} className={inputClasses} value={launchConfig.sleep_idle_seconds}
+                      onChange={(e) => updateConfig({ sleep_idle_seconds: Number(e.target.value) })} />
+                  </Field>
+                  <Toggle label={t("launcher.warmupLabel")} checked={launchConfig.warmup}
+                    onChange={(v) => updateConfig({ warmup: v })} help={probeHelp("--warmup")} />
+                  <Field label="lazy_mode" hint={t("launcher.lazyModeHint")} flagHelp={probeHelp("--lazy-mode")}>
+                    <select className={selectClasses} value={launchConfig.lazy_mode} onChange={(e) => updateConfig({ lazy_mode: e.target.value })}>
+                      {["auto", "on", "off"].map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </Field>
                 </Panel>
               </>
             )}

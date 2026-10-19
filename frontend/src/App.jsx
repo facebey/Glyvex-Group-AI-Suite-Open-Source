@@ -8,7 +8,7 @@ import {
 import { ToastProvider } from "./components/ToastNotification.jsx";
 import { isTauri } from "./lib/tauri.js";
 import ExternalLink from "./components/ExternalLink.jsx";
-import { getStoredTheme, cycleTheme, nextTheme, THEMES, THEME_META, THEME_CHANGED_EVENT } from "./lib/theme.js";
+import { getStoredTheme, applyTheme, nextInList, isExternalThemeName, syncThemeLinks, THEMES, THEME_META, THEME_CHANGED_EVENT } from "./lib/theme.js";
 import MatrixRain from "./components/MatrixRain.jsx";
 import { consumeSSE } from "./lib/sse.js";
 import StatusWidget from "./components/StatusWidget.jsx";
@@ -421,6 +421,10 @@ function Layout() {
   const [shouldShowOnboarding, setShouldShowOnboarding] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [theme, setTheme] = useState(getStoredTheme());
+  // Temas externos detectados (carpetas con .css en data/themes/): el
+  // listado define el ciclo, los swatches y el <link> del tema activo.
+  const [externalThemes, setExternalThemes] = useState([]);
+  const [themesLoaded, setThemesLoaded] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
 
   useStaleBundleGuard();
@@ -432,12 +436,59 @@ function Layout() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    fetch("/api/themes")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setExternalThemes(d.themes ?? []);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setThemesLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const root = document.documentElement;
     THEMES.forEach((t) => root.classList.remove(t));
-    root.classList.add(theme);
-  }, [theme]);
+    if (THEMES.includes(theme)) {
+      root.classList.add(theme);
+      syncThemeLinks(null);
+    } else if (isExternalThemeName(theme)) {
+      // Con el listado aún en vuelo la meta es null: al llegar, el efecto
+      // vuelve a correr (depende de externalThemes) y inyecta los <link>.
+      const meta = externalThemes.find((x) => x.name === theme) ?? null;
+      syncThemeLinks(meta);
+    }
+  }, [theme, externalThemes]);
+
+  // Tema externo persistido cuya carpeta ya no existe: volver a dark.
+  useEffect(() => {
+    if (
+      themesLoaded &&
+      isExternalThemeName(theme) &&
+      !externalThemes.some((x) => x.name === theme)
+    ) {
+      applyTheme("dark");
+    }
+  }, [themesLoaded, externalThemes, theme]);
 
   const navLinkClasses = useMemo(() => makeNavLinkClasses(theme), [theme]);
+
+  // Ciclo del header: internos primero, luego los externos detectados.
+  const cycleList = useMemo(
+    () => [...THEMES, ...externalThemes.map((x) => x.name)],
+    [externalThemes]
+  );
+  const themeLabel = (name) =>
+    THEMES.includes(name) ? t(THEME_META[name].labelKey) : name;
+  const themeSwatch = (name) =>
+    THEMES.includes(name)
+      ? THEME_META[name].swatch
+      : (externalThemes.find((x) => x.name === name)?.swatch ?? "#64748b");
 
   useEffect(() => {
     let cancelled = false;
@@ -478,14 +529,14 @@ function Layout() {
             <LanguageSelector />
             <button
               type="button"
-              onClick={() => cycleTheme(theme)}
+              onClick={() => applyTheme(nextInList(cycleList, theme))}
               title={t("common.themeCycle", {
-                current: t(THEME_META[theme].labelKey),
-                next: t(THEME_META[nextTheme(theme)].labelKey),
+                current: themeLabel(theme),
+                next: themeLabel(nextInList(cycleList, theme)),
               })}
               aria-label={t("common.themeCycle", {
-                current: t(THEME_META[theme].labelKey),
-                next: t(THEME_META[nextTheme(theme)].labelKey),
+                current: themeLabel(theme),
+                next: themeLabel(nextInList(cycleList, theme)),
               })}
               className="relative p-1.5 rounded-md text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card transition-colors"
             >
@@ -494,7 +545,7 @@ function Layout() {
               <span
                 aria-hidden="true"
                 className="absolute bottom-0.5 right-0.5 w-2 h-2 rounded-full ring-1 ring-black/40"
-                style={{ backgroundColor: THEME_META[theme].swatch }}
+                style={{ backgroundColor: themeSwatch(theme) }}
               />
             </button>
           </div>

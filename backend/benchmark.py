@@ -114,6 +114,9 @@ class BenchmarkConfig(BaseModel):
     sets: list[str]
     # K1: filtro por categoría. None = todas (runs viejos y por compatibilidad).
     categories: list[str] | None = None
+    # K3: filtro por prompt individual (IDs globalmente únicos).
+    # None = todos (runs viejos); [] = nada seleccionado (el run termina en error).
+    prompts: list[str] | None = None
     thinking_enabled: bool = False
     temperature: float = 0.0
     max_tokens: int = 2048
@@ -217,6 +220,21 @@ def _loads_config_categories(raw: str | None) -> list[str] | None:
     except json.JSONDecodeError:
         return None
     value = data.get("categories") if isinstance(data, dict) else None
+    return value if isinstance(value, list) else None
+
+
+def _loads_config_prompts(raw: str | None) -> list[str] | None:
+    """K3: prompts desde la columna config (JSON de BenchmarkConfig completo).
+
+    None = run sin filtro (config vieja sin el campo o todos los prompts).
+    """
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    value = data.get("prompts") if isinstance(data, dict) else None
     return value if isinstance(value, list) else None
 
 
@@ -929,8 +947,12 @@ class BenchmarkManager:
         if cfg.categories:
             allowed = set(cfg.categories)
             prompt_items = [item for item in prompt_items if item.category in allowed]
+        # K3: filtro por prompt individual (IDs únicos). None = todos; [] = nada.
+        if cfg.prompts is not None:
+            allowed_ids = set(cfg.prompts)
+            prompt_items = [item for item in prompt_items if item.id in allowed_ids]
         if not prompt_items:
-            run.error = "Sin prompts: ninguna categoría seleccionada coincide con los sets elegidos"
+            run.error = "Sin prompts: ninguna categoría ni prompt seleccionados coinciden con los sets elegidos"
             run.finished_at = datetime.now(timezone.utc).isoformat()
             await self._db_update_status(run_id, "error", run.finished_at)
             run.status = "error"
@@ -1139,6 +1161,7 @@ class BenchmarkManager:
                 "model_name": run_row.model_name,
                 "sets": _loads_list(run_row.sets),
                 "categories": _loads_config_categories(run_row.config),
+                "prompts": _loads_config_prompts(run_row.config),
                 "summary": _summary_row_to_dict(summary_row) if summary_row else None,
             })
         return entries
@@ -1162,6 +1185,7 @@ class BenchmarkManager:
                     "model_name": data.get("config", {}).get("model_name"),
                     "sets": data.get("config", {}).get("sets", []),
                     "categories": data.get("config", {}).get("categories"),
+                    "prompts": data.get("config", {}).get("prompts"),
                     "summary": data.get("summary"),
                 })
             except Exception:

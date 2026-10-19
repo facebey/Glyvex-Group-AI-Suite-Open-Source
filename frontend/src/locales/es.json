@@ -134,6 +134,7 @@
           "live_charts": "LLM Server · gráficos de 5 min",
           "history": "LLM Server · histórico"
         },
+        "sessionCost": "Costo de sesión",
         "processes": "Procesos activos",
         "processesHint": "Oculto, el backend además deja de recorrer los procesos del sistema."
       },
@@ -536,6 +537,8 @@
     "runtimeDownloading": "Runtime: descargando…",
     "runtimeMissing": "sin runtime — descargar",
     "runtimeMissingTitle": "Abre Config → Runtime para descargar la versión probada",
+    "runtimeOutdated": "Runtime: desactualizado — actualizar",
+    "runtimeOutdatedTitle": "Queda una build anterior en disco. Abre Config → Runtime para actualizarla",
     "configuringFor": "Configurando lanzamiento para",
     "loadingModels": "Cargando modelos…",
     "auto": "Auto",
@@ -630,12 +633,14 @@
     "kvParallelWarning": "⚠ Con n_parallel > 1 y kv_unified apagado, cada slot reserva su propio KV cache completo (x{{n}} la VRAM de contexto).",
     "apiKeyLabel": "API key (opcional)",
     "apiKeyPlaceholder": "Dejar vacío para no requerir auth",
-    "advancedParams": "Parámetros avanzados",
+    "advRopeGroup": "RoPE / Scaling",
+    "advMemoryGroup": "Memoria / Atención",
+    "advCheckpointsCard": "Checkpoints",
+    "advKvSessionCard": "Memoria KV y sesión",
     "cacheReuseDisabled": "0 (desactivado)",
     "defragDisabled": "-1 (desactivado)",
     "defragDeprecatedHint": "Marcado DEPRECATED en el --help del binario; el backend lo sigue enviando por ahora.",
     "oneDisabled": "1 = desactivado",
-    "checkpointsMemory": "Checkpoints y memoria",
     "ctxCheckpointsHint": "Máx. checkpoints de contexto por slot (~150 MiB de VRAM c/u). Default de la build: 32.",
     "checkpointMinStepHint": "Espaciado mínimo entre checkpoints (tokens). Default de la build: 8192.",
     "cacheRamHint": "Límite del prompt cache en RAM del sistema (0 = desactivado).",
@@ -794,6 +799,20 @@
       "title": "Procesos activos",
       "empty": "No hay procesos de llama-server/ollama corriendo.",
       "colName": "Nombre"
+    },
+    "sessionCost": {
+      "title": "Costo de sesión",
+      "noUsage": "Sin uso todavía: chateá con un modelo y acá se va acumulando la sesión.",
+      "input": "Tokens de entrada",
+      "output": "Tokens generados",
+      "cached": "Tokens en caché",
+      "turns": "Turnos",
+      "providerLabel": "Proveedor de referencia",
+      "cloudCost": "Costo en {{name}}: {{cost}}",
+      "savings": "Ahorro de esta sesión (local, sin nube): {{cost}}",
+      "noPricing": "Sin proveedores de precios: editá la tabla en Config → Precios de nube.",
+      "reset": "Reiniciar sesión",
+      "resetConfirm": "¿Reiniciar los totales de esta sesión? Se pierde la comparativa de lo que ya se chateó."
     }
   },
   "benchmark": {
@@ -843,7 +862,59 @@
     "categories": {
       "title": "Categorías",
       "all": "Todas",
-      "none": "Ninguna"
+      "none": "Ninguna",
+      "items": {
+        "algorithm": "Algoritmos",
+        "algebra": "Álgebra",
+        "analogy": "Analogías",
+        "arithmetic": "Aritmética",
+        "calculation": "Cálculos",
+        "calculus": "Cálculo",
+        "chemistry": "Química",
+        "comprehension": "Comprensión",
+        "configuration": "Configuración",
+        "conjugation": "Conjugación",
+        "datastructure": "Estructuras de datos",
+        "debug": "Depuración",
+        "deduction": "Deducción",
+        "decorator": "Decoradores",
+        "description": "Descripción",
+        "geometry": "Geometría",
+        "generation": "Generación",
+        "grammar": "Gramática",
+        "kinematics": "Cinemática",
+        "monitoring": "Monitoreo",
+        "networking": "Redes",
+        "parsing": "Parsing",
+        "paradox": "Paradojas",
+        "percentage": "Porcentajes",
+        "physics": "Física",
+        "probability": "Probabilidad",
+        "puzzle": "Rompecabezas",
+        "qos": "QoS",
+        "query": "Consultas",
+        "refactor": "Refactorización",
+        "register": "Registro",
+        "regex": "Expresiones regulares",
+        "sequence": "Secuencias",
+        "spatial": "Espacial",
+        "statistics": "Estadística",
+        "syllogism": "Silogismos",
+        "summary": "Resumen",
+        "usage": "Uso",
+        "vocabulary": "Vocabulario",
+        "writing": "Redacción"
+      }
+    },
+    "difficulty": {
+      "easy": "fácil",
+      "medium": "medio",
+      "hard": "difícil"
+    },
+    "prompts": {
+      "title": "Prompts",
+      "all": "Todos",
+      "hint": "Los prompts desmarcados no se ejecutarán."
     },
     "errors": {
       "startFailed": "No se pudo iniciar el benchmark",
@@ -923,7 +994,10 @@
       "themeLight": "Claro",
       "themeCarbon": "Carbón",
       "themeMetallic": "Metálico",
-      "themeMatrix": "Matrix"
+      "themeMatrix": "Matrix",
+      "themeExternalGroup": "Temas externos",
+      "themeExternalNone": "(ninguno — creá una carpeta en data/themes/)",
+      "themeExternalHint": "Cada carpeta de data/themes/ con al menos un archivo .css aparece acá automáticamente, sin reiniciar. El CSS define las variables --color-glyvex-* (texturas opcionales en la misma carpeta)."
     },
     "export": {
       "section": "Exportar métricas",
@@ -950,6 +1024,14 @@
       "testNoBackend": "no se pudo contactar al backend",
       "influxNote": "Si activás InfluxDB con el histórico apagado, reiniciá el backend para que empiece a medir."
     },
+    "cloudPricing": {
+      "section": "Precios de nube (referencia)",
+      "hint": "Se usan en la comparativa del Monitor (Costo de sesión). Son de referencia para la demo: editá el JSON con los precios actuales de cada proveedor. Si la estructura queda inválida, la app vuelve a los valores por defecto.",
+      "restore": "Restaurar valores por defecto",
+      "restored": "Precios restaurados. Guardá para que queden.",
+      "restoreError": "No se pudieron recuperar los precios por defecto.",
+      "invalidJson": "JSON inválido: {{error}} (se siguen usando los últimos valores válidos)"
+    },
     "runtime": {
       "section": "Runtime",
       "loading": "Consultando estado del runtime…",
@@ -972,6 +1054,7 @@
       "cudaNote": "GPU con compute capability {{cc}} — bundle CUDA 12.x (CUDA 13.x no soporta esta arquitectura).",
       "outdated": "Runtime desactualizado — {{pin}} aún no instalado",
       "outdatedSub": "Hay una build anterior ({{prev}}, {{prevSize}} MB) en disco. Descarga estimada: ~{{size}} MB.",
+      "outdatedDelta": "Delta de tamaño: {{delta}} MB",
       "update": "Actualizar runtime",
       "keepPrevious": "Conservar build anterior (rollback)",
       "uninstall": "Desinstalar",

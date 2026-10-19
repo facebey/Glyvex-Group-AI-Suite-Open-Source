@@ -26,6 +26,8 @@ src-tauri/resources/glyvex-backend/
 
 # Variante local de build (endpoint 127.0.0.1:9735 + bump de versión): solo en disco.
 # El override versionado es tauri.update-local.conf.json (no versionar duplicados del config completo)
+# Override mínimo para builds locales/CI de NSIS (lo escribe el checklist/flujo de release)
+ci-tauri-override.json
 src-tauri/tauri.update-local-full.conf.json
 
 # Documentacion local puntual (solo en disco)

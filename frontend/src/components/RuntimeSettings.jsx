@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import Section from "./ui/Section.jsx";
 import { consumeSSE } from "../lib/sse.js";
+import { sizeDeltaMb, formatDeltaMb } from "../lib/runtimeSize.js";
 
 // Estimación compartida con el onboarding (RT-10): motor base ~19 MB
 // (cualquier GPU) + aceleración NVIDIA ~530 MB.
@@ -126,6 +127,11 @@ export default function RuntimeSettings({ expertBinary }) {
   const gpuLabel = runtime.gpu === "cpu" ? "CPU" : runtime.gpu || "CPU";
   const isNvidia = runtime.gpu_family === "nvidia";
   const sizeMb = isNvidia ? SIZE_MB : SIZE_MB_BASE;
+  // Delta de tamaño de la actualización (RT-12): depende del checkbox de
+  // rollback (reemplazo vs. conservación de la build anterior). Null → se
+  // oculta (build anterior de tamaño desconocido).
+  const prevBuild = runtime.previous_builds?.[0];
+  const deltaText = formatDeltaMb(sizeDeltaMb(sizeMb, prevBuild?.size_mb, keepPrevious));
 
   let view;
   if (expertBinary) view = "expert";
@@ -239,6 +245,11 @@ export default function RuntimeSettings({ expertBinary }) {
                 prevSize: runtime.previous_builds[0].size_mb ?? "—",
                 size: sizeMb,
               })}
+            </p>
+          )}
+          {deltaText !== null && (
+            <p className="text-xs text-glyvex-muted">
+              {t("config.runtime.outdatedDelta", { delta: deltaText })}
             </p>
           )}
           <button

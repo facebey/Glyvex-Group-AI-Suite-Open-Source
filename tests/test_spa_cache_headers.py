@@ -58,6 +58,19 @@ async def test_index_revalida_en_cada_carga(dist_client):
     assert r.headers["cache-control"] == main_module._CACHE_REVALIDATE
 
 
+async def test_cache_buster_por_version_sirve_index(dist_client):
+    # PUB-13: el bootstrap redirige a /?glyvex=<version> (clave de caché
+    # distinta por versión en WebView2). La query no altera la ruta: sigue
+    # cayendo en index.html con revalidación, también en /provision.
+    r = await dist_client.get("/?glyvex=0.10.0-beta")
+    assert r.status_code == 200
+    assert "INDEX" in r.text
+    assert r.headers["cache-control"] == main_module._CACHE_REVALIDATE
+    r2 = await dist_client.get("/provision?glyvex=0.10.0-beta")
+    assert r2.status_code == 200
+    assert "INDEX" in r2.text
+
+
 async def test_archivos_de_public_se_sirven_con_revalidacion(dist_client):
     # Antes de este fix /fonts/* caía en el fallback de index.html y el
     # navegador descartaba la fuente por tipo. No tienen hash en el nombre,

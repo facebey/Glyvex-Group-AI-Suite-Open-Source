@@ -8,6 +8,7 @@ import ChatSettings from "../components/ChatSettings.jsx";
 import RuntimeSettings from "../components/RuntimeSettings.jsx";
 import MetricsDisplaySettings from "../components/MetricsDisplaySettings.jsx";
 import MetricsExportSettings from "../components/MetricsExportSettings.jsx";
+import CloudPricingSettings from "../components/CloudPricingSettings.jsx";
 import { CONFIG_SAVED_EVENT, PRESETS } from "../lib/metricsDisplay.js";
 import { useTranslation } from "react-i18next";
 import { formInputClasses as inputClasses } from "../lib/styles.js";
@@ -132,6 +133,9 @@ async function consumeScanStream(modelDirs, signal, onEvent) {
 export default function Config() {
   const { t } = useTranslation();
   const [config, setConfig] = useState(EMPTY_CONFIG);
+  // Temas externos detectados (carpetas con .css en data/themes/):
+  // aparecen en el select junto a los 5 internos, sin reiniciar.
+  const [externalThemes, setExternalThemes] = useState([]);
   const [newDir, setNewDir] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -176,6 +180,19 @@ export default function Config() {
       scanAbortRef.current = null;
     }
   }
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/themes")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setExternalThemes(d.themes ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Mantener el <select> de tema sincronizado con el botón de ciclo del header.
   useEffect(() => {
@@ -542,7 +559,23 @@ export default function Config() {
               <option value="carbon">{t("config.appPrefs.themeCarbon")}</option>
               <option value="metallic">{t("config.appPrefs.themeMetallic")}</option>
               <option value="matrix">{t("config.appPrefs.themeMatrix")}</option>
+              <optgroup label={t("config.appPrefs.themeExternalGroup")}>
+                {externalThemes.length === 0 ? (
+                  <option value="none" disabled>
+                    {t("config.appPrefs.themeExternalNone")}
+                  </option>
+                ) : (
+                  externalThemes.map((x) => (
+                    <option key={x.name} value={x.name}>
+                      {x.name}
+                    </option>
+                  ))
+                )}
+              </optgroup>
             </select>
+            <p className="mt-1 text-xs text-glyvex-muted-2">
+              {t("config.appPrefs.themeExternalHint")}
+            </p>
           </Field>
         </div>
       </Section>
@@ -556,6 +589,11 @@ export default function Config() {
         exportsConfig={config.exports}
         port={config.app?.port}
         onChange={(exportsConfig) => setConfig((prev) => ({ ...prev, exports: exportsConfig }))}
+      />
+
+      <CloudPricingSettings
+        pricing={config.cloud_pricing}
+        onChange={(cloud_pricing) => setConfig((prev) => ({ ...prev, cloud_pricing }))}
       />
     </div>
   );

@@ -7,6 +7,50 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.10.0-beta] — 2026-10-19
+
+Feature release over v0.9.1-beta: session cost tracking with a cloud
+comparison, external themes loaded from folders, per-prompt benchmark
+selection, a polished runtime update flow, a reorganized advanced-parameters
+panel, and a fix for post-update page caching.
+
+### Added
+- **Monitor: session cost** (MON-2): a panel in the Monitor tracks the
+  prompt/completion/cached tokens used by the suite's own chats and estimates
+  the savings against seven cloud providers (OpenAI, Anthropic, Google,
+  DeepSeek). Rates are editable in a new "Cloud pricing" section of
+  Configuration (EN/ES).
+- **Themes: external themes from folders** (TH-2): each theme is a folder
+  containing one or more `.css` files (plus optional textures) under the
+  `themes/` directory of the data folder. Themes are auto-detected and listed
+  in the theme selector alongside the five built-ins, applied live with no
+  reinstall and no restart, and included in the header's theme-cycle button.
+  A theme's CSS only needs to redefine the app's color variables — anything
+  not redefined inherits the base theme.
+- **Benchmark: per-prompt selection** (K3): individual prompts inside each
+  set can be toggled (previously only whole categories could be filtered);
+  category chips now act as group switches for their own prompts, each set
+  gets a master "all" checkbox, and prompt categories and difficulty labels
+  are fully localized (EN/ES).
+- **Runtime: update / reinstall / uninstall flow** (RT-12): when a newer
+  llama.cpp build is available the runtime panel shows an "outdated" view —
+  update as the primary action with an option to keep the previous build, an
+  explicit size-delta line that reacts to that option, and reinstall /
+  uninstall actions; the Launcher shows a "Runtime: outdated" chip.
+
+### Changed
+- **Launcher: "Advanced parameters" reorganized** (E10): the flat panel of
+  ~30 controls is split into three collapsible groups (RoPE/Scaling,
+  Memory/Attention, Checkpoints and memory); open/closed state persists per
+  group. No behavior changed — same fields, toggles and probe-based
+  disabling.
+
+### Fixed
+- **Updates: no more manual F5 after an in-app update** (PUB-13): the app's
+  bootstrap redirect now carries the installed version as a query parameter,
+  so the WebView2 disk cache can never serve a stale `index.html` from a
+  previous version.
+
 ## [0.9.1-beta] — 2026-10-16
 
 Patch release over v0.9.0-beta: in-app updates land with the new UI right

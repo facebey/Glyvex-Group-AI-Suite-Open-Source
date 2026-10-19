@@ -22,6 +22,16 @@ async function tauriBootstrapRedirect() {
   if (!isTauri()) return null;
   // T5.2: con --provision la app abre directo a la pantalla de provisión.
   const suffix = (await hasProvisionFlag().catch(() => false)) ? "/provision" : "/";
+  // PUB-13: cache-buster por versión. La clave de la caché de disco de
+  // WebView2 incluye la query string: con `?glyvex=<version>` cada
+  // instalación tiene una clave de documento nueva, así que una entrada
+  // pre-fix (sembrada sin instrucciones de revalidación) jamás se sirve
+  // como el index de la versión actual — el último F5 manual del QA 0.9.1.
+  // Sin IPC no hay versión: se redirige como antes (no rompe el arranque).
+  const version = await import("@tauri-apps/api/app")
+    .then(({ getVersion }) => getVersion())
+    .catch(() => null);
+  const buster = version ? `?glyvex=${encodeURIComponent(version)}` : "";
   // La puerta del redirect es el evento "running": la shell solo lo emite
   // después de verificar /api/health (nunca con el backend a medio arrancar)
   // y lo repite cada 5 s (heartbeat) para captar páginas que cargan tarde.
@@ -32,7 +42,7 @@ async function tauriBootstrapRedirect() {
     onSidecarState((ev) => {
       if (ev.state === "running" && ev.url) {
         clearTimeout(timer);
-        location.replace(ev.url + suffix);
+        location.replace(ev.url + suffix + buster);
         resolve("redirect");
       } else if (ev.state === "error") {
         clearTimeout(timer);
