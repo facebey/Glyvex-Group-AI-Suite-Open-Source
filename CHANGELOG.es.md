@@ -7,6 +7,151 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+### Añadido
+- **Monitor: telemetría de GPU AMD con LibreHardwareMonitor embebido**
+  (MON-6): en máquinas sin NVIDIA el Monitor ahora inicia
+  LibreHardwareMonitor 0.9.6 (MPL-2.0) como sidecar local — la app viaja sin
+  modificar dentro del instalador (vía `datas` de PyInstaller) y se extrae a
+  DATA_DIR/tools/ en el primer uso con verificación SHA-256, sin descargar
+  nada. corre en un puerto dedicado (127.0.0.1:8185, para no chocar con un
+  LHM del usuario en 8085; si 8185 ya está sirviendo, se adopta en vez de
+  spawnear un segundo proceso) y se configura con un preset propio de su
+  .exe.config escrito antes de cada arranque: servidor web activado, solo
+  la categoría GPU, minimizado a la bandeja. Temperatura del core, uso de
+  core/VRAM, relojes gráficos/memoria, % de fan, potencia de package y VRAM
+  usada/libre/total alimentan el schema GpuMetrics existente — el frontend no
+  distingue la fuente. El fallback solo corre cuando la vía NVML no encuentra
+  nada: equipos solo-NVIDIA o sin GPU se comportan exactamente igual que
+  antes. Un LHM spawneado por la app se termina en el apagado (lifespan y el
+  hook pre-kill de Tauri `/gpu/fan/restore-all`) para no quedar huérfano.
+
+### Cambiado
+- **Runtime embebido: pin llama.cpp b11349 → b11827** (v0.7.0): los nombres
+  de assets son idénticos, solo cambian el tag y los pines SHA-256 (todos
+  verificados localmente). Gate de probe ejecutado contra el binario real:
+  superficie de flags de 257 → 262 long-flags con **cero removidas**
+  (+5: `--moe-cache-mib`, `--spec-draft-n-ubatch`, `--spec-draft-sampling`,
+  `--connect`, `--connect-code`); el formato de `--version` no cambió
+  (0.7.0), así que el parser del probe no se toca. Lo relevante del rango:
+  fix de invalidación de checkpoints SWA para modelos híbridos (#30666),
+  fix del undercount de `usage.completion_tokens` con n>1 (#29486, alimenta
+  MON-4/MON-5), fix de memoria host de `--gpu-visible` en Vulkan (#30468,
+  ruta AMD), MMVQ más rápido en low-bit CUDA (#30517) y patches de
+  dependencias cpp-httplib → 0.62.0 y BoringSSL → 0.20261020.0. El bundle
+  de NVIDIA crece en consecuencia (runtime en disco ~710.8 MB → ~1157.8 MB,
+  sobre todo el ggml-cuda.dll de CUDA 12.4), y las estimaciones de descarga
+  de la UI se recalibraron con los tamaños reales de los archives de b11827
+  (base ~23 MB, NVIDIA ~656 MB, AMD Vulkan ~58 MB, AMD ROCm ~274 MB).
+  `--moe-cache-mib` queda **fuera** del launcher a propósito (feature
+  separada; upstream cambió su política de eviction a SLRU 50/50 en este
+  rango).
+
+- **Precios de nube por defecto actualizados a la lista cerrada 2026-10**
+  (defaults de MON-2): la lista base incorporada detrás de "Precios de
+  nube" pasa de 7 proveedores a 36, tomada de la lista cerrada de Fabian
+  (Files/Pricing Providers/pricing.json, verificada 2026-10). Los
+  proveedores con tarifas con vigencia se mantienen como entradas
+  separadas con la nota en su nombre (ej. "Gemini 4 Argon hasta
+  30-nov-2026" / "desde 1-dic-2026"). Solo cambian los valores por
+  defecto: las configuraciones que ya guardaron precios propios no se
+  tocan, y la lista sigue siendo editable desde Configuración.
+
+## [0.11.0-alpha3] — 2026-10-22 (preview de prueba en hardware)
+
+Tercera build alpha de prueba para la validación en hardware real del
+soporte a GPU AMD (RT-10). El flujo de runtime queda igual que en alpha2
+(llama.cpp b11349 pinnado, misma oferta Vulkan/ROCm), así que esta build
+no interfiere con el protocolo del tester. No se publica en el canal de
+actualización: las instalaciones en 0.10.0-beta no se ven afectadas.
+
+### Añadido
+- **Monitor: consumo total de por vida** (MON-5): el panel de consumo del
+  server suma ahora una sección "Total de por vida" que agrega todos los
+  procesos llama-server que la suite haya monitoreado alguna vez
+  (reinicios combinados), con gran total, desglose por modelo y costo
+  estimado en la nube para comparar; servida por un nuevo
+  `GET /api/llm-metrics/consumption/all`. El conteo empieza en el primer
+  uso con 0.11.x — no hay backfill de versiones anteriores.
+- **Integración con agentes OpenCode** (AG-1): mientras la integración
+  con OpenCode esté habilitada en Configuración, los servers lanzados por
+  la suite se publican como agentes listos para usar en la configuración
+  de OpenCode y se retiran cuando el server se detiene. Una nueva tarjeta
+  "Agentes" en el lanzador lista los agentes publicados y puede abrir
+  OpenCode apuntado a uno de ellos.
+- **Monitor: consumo por server** (MON-4, enviado en alpha2 pero no
+  documentado hasta ahora): el Monitor muestra el uso de tokens por
+  proceso llama-server monitoreado (prompt/cached/completado) con series
+  de tiempo y costo estimado. Se agrega acá para que el changelog sea
+  honesto sobre lo que alpha2 realmente incluía.
+
+### Corregido
+- **Seguridad: CORS ya no permite credenciales** (E7, del análisis de
+  seguridad SEC-1): ningún endpoint usa cookies ni autenticación y el
+  frontend nunca manda credenciales, así que `allow_credentials=True` era
+  superficie de ataque muerta; ahora está deshabilitado. Como efecto
+  secundario, `GLYVEX_CORS_ORIGINS='*'` pasa a ser una configuración
+  válida en lugar de una combinación advertida en el log.
+
+## [0.11.0-alpha2] — 2026-10-22 (preview de prueba en hardware)
+
+Segunda build alpha de prueba para la validación en hardware real del
+soporte a GPU AMD (RT-10 B1+B2). No se publica en el canal de
+actualización: las instalaciones en 0.10.0-beta no se ven afectadas.
+
+### Añadido
+- **Runtime: aceleración ROCm seleccionable para GPU AMD** (RT-10 B2,
+  preview): las placas AMD ahora tienen una elección Vulkan/ROCm en el
+  panel de runtime. Se ofrece como segunda fuente de aceleración la build
+  oficial ggml-org/llama.cpp b11349 con ROCm 10.0 (Windows, pinnada por
+  SHA-256); la elección queda guardada en la configuración. No hay
+  fallback implícito: si la ruta elegida no está disponible, el runtime
+  degrada a CPU con una nota explícita, para que las mediciones sean
+  honestas. Vulkan sigue siendo el valor por defecto hasta que lleguen
+  los datos de la comparativa en hardware (protocolo
+  PRUEBA-VULKAN-AMD-b11349.md).
+- **El estado del runtime muestra el backend de aceleración activo** —
+  el panel y la API de estado del runtime ahora informan qué backend está
+  en uso (Vulkan/ROCm/CUDA) y qué opciones hay para la familia de GPU
+  detectada.
+
+### Cambiado
+- **Tamaño de descarga según backend elegido** — el tamaño estimado de
+  descarga del runtime que muestra la app ahora refleja la elección de
+  aceleración seleccionada (AMD: Vulkan ~51 MB / ROCm ~263 MB). Sin
+  cambio de comportamiento en NVIDIA.
+
+## [0.11.0-alpha1] — 2026-10-20 (preview de prueba en hardware)
+
+Build alpha de prueba para la validación en hardware real del soporte a
+GPU AMD (RT-10 B1). No se publica en el canal de actualización: las
+instalaciones en 0.10.0-beta no se ven afectadas. Esta versión vive en
+una rama de feature hasta que el reporte del tester externo sea
+aprobado.
+
+### Añadido
+- **Runtime: oferta de aceleración Vulkan para GPU AMD** (RT-10 B1,
+  preview): las placas AMD reciben ahora el mismo flujo de runtime en dos
+  etapas que ya tiene NVIDIA — la suite detecta la familia de GPU y ofrece
+  la build oficial ggml-org/llama.cpp b11349 con soporte Vulkan (Windows),
+  pinnada por SHA-256. Si la etapa de aceleración falla, el runtime sigue
+  degradando a CPU, nunca a error. Requiere validación en hardware real
+  (protocolo PRUEBA-VULKAN-AMD-b11349.md) antes de llegar al canal
+  estable.
+
+### Cambiado
+- **Ajustes de runtime: tamaños y notas según la familia de GPU** — el
+  tamaño estimado de descarga, las descripciones de etapas y las notas del
+  panel de runtime ahora se derivan de la familia de GPU detectada en vez
+  de constantes duplicadas por marca. Sin cambio de comportamiento en
+  NVIDIA.
+
+### Corregido
+- **Runtime: los archivos sueltos de un zip/tar.gz ahora se extraen** —
+  el heurístico de recorte de raíz trataba un archivo plano de un solo
+  archivo como prefijo de carpeta y no extraía nada; el archivo de
+  aceleración descargado quedaba registrado en la meta pero ausente en
+  disco. Tests de regresión agregados para zip y tar.gz.
+
 ## [0.10.0-beta] — 2026-10-19
 
 Release de features sobre v0.9.1-beta: seguimiento del costo de sesión con

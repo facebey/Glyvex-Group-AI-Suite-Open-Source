@@ -37,7 +37,7 @@ runtime de llama.cpp y, si querés, los modelos de voz.
 
 | | |
 |---|---|
-| ![Chat — streaming y métricas en vivo](screenshots/chat.png)<br><sub>Chat: streaming, razonamiento y métricas en vivo (t/s, TTFT)</sub> | ![Launcher — inventario de modelos](screenshots/launcher.png)<br><sub>Launcher: inventario de modelos, runtime b11349 listo</sub> |
+| ![Chat — streaming y métricas en vivo](screenshots/chat.png)<br><sub>Chat: streaming, razonamiento y métricas en vivo (t/s, TTFT)</sub> | ![Launcher — inventario de modelos](screenshots/launcher.png)<br><sub>Launcher: inventario de modelos, runtime b11827 listo</sub> |
 | ![Launcher — modo avanzado, todos los paneles](screenshots/launcher-avanzado-general.png)<br><sub>Modo Avanzado: todos los paneles de control del lanzamiento</sub> | ![Launcher — contexto y aceleración](screenshots/launcher-avanzado-contexto.png)<br><sub>Contexto hasta 64K, aceleración GPU y VRAM estimada</sub> |
 | ![Launcher — MTP, visión y LoRA](screenshots/launcher-avanzado-modulos.png)<br><sub>MTP especulativo, mmproj, LoRA y razonamiento</sub> | ![Launcher — modelo en ejecución](screenshots/launcher-online.png)<br><sub>En ejecución: t/s, MTP 70.5%, cache 86.6% y log en vivo</sub> |
 | ![Benchmark — resultados](screenshots/benchmark.png)<br><sub>Benchmark: resultados del run</sub> | ![Monitor — GPU y vitales](screenshots/monitor.png)<br><sub>Monitor: GPU, CPU y vitales del LLM server</sub> |
@@ -228,10 +228,10 @@ el modelo activo, o ver su consumo de HW en vivo (`/monitor`).
 
 En **Windows** la suite puede traer su propia build probada de
 [llama.cpp](https://github.com/ggml-org/llama.cpp) para que no tengas que
-instalar nada de inferencia: pin **b11349**, en layout plano, en dos niveles:
+instalar nada de inferencia: pin **b11827**, en layout plano, en dos niveles:
 
-- **motor base** (~19 MB): corre en cualquier GPU/CPU.
-- **aceleración** (~531 MB para NVIDIA + CUDA 13.4; la de AMD/Intel llega
+- **motor base** (~23 MB): corre en cualquier GPU/CPU.
+- **aceleración** (~556 MB para NVIDIA + CUDA 13.4; la de AMD/Intel llega
   en la fase B). Se elige según la familia de GPU detectada.
 - **Arquitectura CUDA** — el bundle de aceleración se elige según la
   capacidad de cómputo de la GPU (se consulta en runtime), así que calza con
@@ -239,7 +239,7 @@ instalar nada de inferencia: pin **b11349**, en layout plano, en dos niveles:
   antiguas (Pascal, ej. serie GTX 10) reciben la build de CUDA correcta en
   vez de un mismatch.
 
-- **Dónde vive:** `<DATA_DIR>/runtime/llama.cpp-b11349/` (exe + DLLs en la
+- **Dónde vive:** `<DATA_DIR>/runtime/llama.cpp-b11827/` (exe + DLLs en la
   misma carpeta, porque `llama-server.exe` busca sus DLLs en su propio
   directorio). No es parte del repo: se descarga bajo demanda y se verifica
   con **sha256**.

@@ -7,6 +7,142 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+### Added
+- **Monitor: AMD GPU telemetry via embedded LibreHardwareMonitor** (MON-6):
+  on machines without NVIDIA the Monitor now starts LibreHardwareMonitor
+  0.9.6 (MPL-2.0) as a local sidecar — the app ships unmodified inside the
+  installer (PyInstaller `datas`) and is extracted to DATA_DIR/tools/ on
+  first use with SHA-256 verification, never downloading anything. It runs
+  on a dedicated port (127.0.0.1:8185, so it never clashes with a user-run
+  LHM on 8085; an already-serving 8185 is adopted instead of spawning a
+  second process) and is configured through its own .exe.config preset
+  written before every launch: web server on, GPU category only, minimized
+  to tray. GPU core temperature, core/VRAM utilization, graphics/memory
+  clocks, fan %, package power and VRAM used/free/total feed the existing
+  GpuMetrics schema — the frontend does not distinguish the source. The
+  fallback only runs when the NVML path finds nothing, so NVIDIA-only and
+  GPU-less machines behave exactly as before; an LHM spawned by the app is
+  terminated on shutdown (lifespan and the Tauri pre-kill hook
+  `/gpu/fan/restore-all`) so it is never orphaned.
+
+### Changed
+- **Embedded runtime: llama.cpp pin b11349 → b11827** (v0.7.0): asset names
+  are identical, only the tag and SHA-256 pins change (all verified locally).
+  Probe gate run against the real binary: flag surface 257 → 262 long-flags
+  with **zero removed** (+5: `--moe-cache-mib`, `--spec-draft-n-ubatch`,
+  `--spec-draft-sampling`, `--connect`, `--connect-code`); the `--version`
+  format is unchanged (0.7.0) so the probe parser is unaffected. Highlights
+  of the range: SWA checkpoint-invalidation fix for hybrid models (#30666),
+  `usage.completion_tokens` undercount fix with n>1 (#29486, feeds MON-4/
+  MON-5), Vulkan `--gpu-visible` host-memory fix (#30468, AMD route), faster
+  MMVQ on low-bit CUDA (#30517), and dependency patches cpp-httplib → 0.62.0
+  and BoringSSL → 0.20261020.0. The NVIDIA bundle download grows accordingly
+  (runtime on disk ~710.8 MB → ~1157.8 MB, mostly the CUDA 12.4
+  ggml-cuda.dll), so the UI download estimates were re-based on the real
+  b11827 archive sizes (base ~23 MB, NVIDIA ~656 MB, AMD Vulkan ~58 MB, AMD
+  ROCm ~274 MB). `--moe-cache-mib` is deliberately **not** exposed in the
+  launcher yet (separate feature; upstream changed its eviction policy to
+  SLRU 50/50 in this range).
+
+- **Default cloud pricing refreshed to the closed 2026-10 list** (MON-2
+  defaults): the built-in seed list behind "Cloud pricing" grows from 7
+  providers to 36, taken from Fabian's closed list (Files/Pricing
+  Providers/pricing.json, verified 2026-10). Providers with time-limited
+  rates are kept as separate entries with the validity note in their name
+  (e.g. "Gemini 4 Argon until Nov 30, 2026" / "from Dec 1, 2026"). Only
+  the defaults change: configs that already saved their own pricing are
+  untouched, and the list remains fully editable from Config.
+
+## [0.11.0-alpha3] — 2026-10-22 (hardware-test preview)
+
+Third alpha test build for the real-hardware validation of AMD GPU support
+(RT-10). The runtime flow is untouched from alpha2 (llama.cpp b11349
+pinned, same Vulkan/ROCm offer), so this build does not disturb the
+tester's protocol. Not published in the update channel: installs on
+0.10.0-beta are not affected.
+
+### Added
+- **Monitor: lifetime consumption totals** (MON-5): the server consumption
+  panel gains a "Lifetime total" section that aggregates every
+  llama-server process the suite has ever monitored (restarts merged),
+  with a grand total, a per-model breakdown and an estimated cloud cost
+  for comparison; served by a new `GET /api/llm-metrics/consumption/all`.
+  Counting starts at the first use on 0.11.x — there is no backfill of
+  earlier versions.
+- **OpenCode agent bridge** (AG-1): while the OpenCode integration toggle
+  is enabled, servers launched by the suite are published as ready-to-use
+  agents in the OpenCode configuration and are removed when the server
+  stops. A new "Agents" card in the launcher lists the published agents
+  and can open OpenCode pointed at one of them.
+- **Monitor: per-server consumption panel** (MON-4, shipped in alpha2 but
+  undocumented until now): the Monitor shows token usage per monitored
+  llama-server process (prompt/cached/completion) with time series and
+  estimated cost. Listed here to keep the changelog honest about what
+  alpha2 actually shipped.
+
+### Fixed
+- **Security: CORS no longer allows credentials** (E7, from the SEC-1
+  security audit): no endpoint uses cookies or auth and the frontend never
+  sends credentials, so `allow_credentials=True` was a dead attack
+  surface; it is now disabled. As a side effect `GLYVEX_CORS_ORIGINS='*'`
+  becomes a valid configuration instead of a combination warned about in
+  the log.
+
+## [0.11.0-alpha2] — 2026-10-22 (hardware-test preview)
+
+Second alpha test build for the real-hardware validation of AMD GPU
+support (RT-10 B1+B2). Not published in the update channel: installs on
+0.10.0-beta are not affected.
+
+### Added
+- **Runtime: selectable ROCm acceleration for AMD GPUs** (RT-10 B2,
+  preview): AMD cards now get a Vulkan/ROCm choice in the runtime panel.
+  The official ggml-org/llama.cpp b11349 ROCm 10.0 build (Windows,
+  pinned by SHA-256) is offered as a second acceleration source; the
+  choice is saved in the configuration. There is no implicit fallback:
+  if the chosen route is unavailable the runtime degrades to CPU with an
+  explicit note, so benchmarks stay honest. Vulkan remains the default
+  until the hardware comparison data arrives
+  (protocol PRUEBA-VULKAN-AMD-b11349.md).
+- **Runtime status shows the active acceleration backend** — the runtime
+  panel and status API now report which backend is in use
+  (Vulkan/ROCm/CUDA) and which choices are available for the detected
+  GPU family.
+
+### Changed
+- **Download sizing per chosen backend** — the estimated runtime download
+  size shown in the app now reflects the selected acceleration choice
+  (AMD: Vulkan ~51 MB / ROCm ~263 MB). No behavior change on NVIDIA.
+
+## [0.11.0-alpha1] — 2026-10-20 (hardware-test preview)
+
+Alpha test build for the real-hardware validation of AMD GPU support
+(RT-10 B1). Not published in the update channel: installs on 0.10.0-beta
+are not affected. This version lives on a feature branch until the
+external tester's report is approved.
+
+### Added
+- **Runtime: Vulkan acceleration offer for AMD GPUs** (RT-10 B1,
+  preview): AMD graphics cards now get the same two-stage runtime flow
+  NVIDIA has — the suite detects the GPU family and offers the official
+  ggml-org/llama.cpp b11349 build with Vulkan support (Windows), pinned
+  by SHA-256. A failed acceleration stage still degrades to the CPU
+  runtime, never an error. Requires real-hardware validation (protocol
+  PRUEBA-VULKAN-AMD-b11349.md) before reaching the stable channel.
+
+### Changed
+- **Runtime settings: sizing and hints driven by GPU family** — the
+  estimated download size, stage descriptions and notes shown in the
+  runtime panel are now derived from the detected GPU family instead of
+  duplicated per-brand constants. No behavior change on NVIDIA.
+
+### Fixed
+- **Runtime: single-file archives are now extracted** — the archive
+  root-stripping heuristic treated a one-file flat archive as a folder
+  prefix and extracted nothing; the downloaded acceleration file was
+  recorded in metadata but missing on disk. Regression tests added for
+  zip and tar.gz.
+
 ## [0.10.0-beta] — 2026-10-19
 
 Feature release over v0.9.1-beta: session cost tracking with a cloud

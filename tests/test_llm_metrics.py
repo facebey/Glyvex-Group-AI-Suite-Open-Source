@@ -151,6 +151,22 @@ def test_flatten_incluye_totales_de_cache_y_mtp():
     assert "llm.spec_accept_pct_total" not in flat2
 
 
+def test_flatten_guarda_totales_absolutos_de_tokens():
+    # MON-4: la build persiste los contadores de vida del server para poder
+    # reconstruir el consumo total aunque el proceso ya no exista.
+    snap = llm.build_snapshot(
+        _process(),
+        {"prompt_tokens_total": 120, "prompt_tokens_cached_total": 340,
+         "tokens_predicted_total": 500},
+        dict(llm.EMPTY_RATES), None,
+    )
+    flat = llm.flatten_llm_snapshot(snap)
+    assert flat["llm.prompt_tokens_total"] == 120.0
+    assert flat["llm.prompt_tokens_cached_total"] == 340.0
+    assert flat["llm.tokens_predicted_total"] == 500.0
+    assert llm.PERSISTED_UNITS["llm.prompt_tokens_total"] == "tokens"
+
+
 def test_salida_real_de_llama_server_2026_09():
     """Salida de /metrics de un llama-server real (build 2026-09)."""
     text = (Path(__file__).parent / "fixtures" / "llama_server_metrics_2026-09.txt").read_text()
@@ -164,6 +180,10 @@ def test_salida_real_de_llama_server_2026_09():
     assert snap.cache_hit_pct_total == 94.9       # 1.72M / (1.72M + 92k)
     assert snap.spec_accept_pct_total is None     # 0 drafts: sin MTP, no 0 %
     assert snap.requests_processing == 0
+    # MON-4: los totales absolutos también viajan en el snapshot, no solo en %.
+    assert snap.prompt_tokens_total == 91_990
+    assert snap.prompt_tokens_cached_total == 1_723_230
+    assert snap.tokens_predicted_total == 28_831
 
 
 def test_rates_cache_y_especulativa():
@@ -527,3 +547,81 @@ async def test_processos_endpoint_filtra_cortos_y_limita(monkeypatch):
     # Con la lista saturada se descarta a los de 30 s (p5..p14) y queda el tope.
     assert set(pids) == {f"p{i}" for i in range(5)}
     assert len(pids) <= llm.MAX_STORED_PROCESSES
+
+
+async def test_consumption_endpoint_mergea_reinicios_y_embebe_pricing(monkeypatch):
+    # El merge fino lo prueba test_metrics_store; acá: el endpoint arma la
+    # respuesta a partir del store y embebe el pricing (patrón session_tokens).
+    class StoreFake:
+        def consumption_totals(self, process_id, keys):
+            entry = {"total": 340, "model_name": "Qwen3-Test",
+                     "first_ts": 100, "last_ts": 700, "runs": 2}
+            return {k: dict(entry) for k in keys}
+
+    monkeypatch.setattr(metrics_module.manager, "store", StoreFake())
+    data = await llm.get_consumption("p1")
+    assert data["process_id"] == "p1"
+    assert data["prompt_tokens"] == 340 and data["predicted_tokens"] == 340
+    assert data["runs"] == 2 and data["model_name"] == "Qwen3-Test"
+    assert data["first_ts"] == 100 and data["last_ts"] == 700
+    assert data["pricing"]["providers"]
+
+
+async def test_consumption_endpoint_sin_historico_devuelve_none(monkeypatch):
+    class StoreFake:
+        def consumption_totals(self, process_id, keys):
+            return {k: None for k in keys}
+
+    monkeypatch.setattr(metrics_module.manager, "store", StoreFake())
+    data = await llm.get_consumption("p9")
+    # Sin muestras: null (no 0), para que la UI diga "sin datos" y no "consumió 0".
+    assert data["prompt_tokens"] is None and data["predicted_tokens"] is None
+    assert data["runs"] == 0 and data["model_name"] is None
+
+
+async def test_consumption_all_endpoint_agrupa_modelos_y_embebe_pricing(monkeypatch):
+    # MON-5: el endpoint suma las filas del store por modelo y globally. El merge
+    # fino de reinicios lo prueba test_metrics_store; acá la agregación.
+    ROWS = [
+        {"key": "llm.prompt_tokens_total", "process_id": "p1", "model_name": "Qwen3-Test",
+         "total": 340, "first_ts": 100, "last_ts": 700, "runs": 2},
+        {"key": "llm.tokens_predicted_total", "process_id": "p1", "model_name": "Qwen3-Test",
+         "total": 80, "first_ts": 100, "last_ts": 700, "runs": 2},
+        {"key": "llm.prompt_tokens_total", "process_id": "p2", "model_name": "Llama-Test",
+         "total": 80, "first_ts": 200, "last_ts": 400, "runs": 1},
+        {"key": "llm.prompt_tokens_cached_total", "process_id": "p2", "model_name": "Llama-Test",
+         "total": 30, "first_ts": 200, "last_ts": 400, "runs": 1},
+    ]
+
+    class StoreFake:
+        def consumption_series_all(self, keys):
+            return [dict(r) for r in ROWS if r["key"] in keys]
+
+    monkeypatch.setattr(metrics_module.manager, "store", StoreFake())
+    data = await llm.get_consumption_all()
+    assert data["servers"] == 2
+    assert data["prompt_tokens"] == 420  # 340 de p1 + 80 de p2
+    assert data["cached_tokens"] == 30 and data["predicted_tokens"] == 80
+    assert data["first_ts"] == 100 and data["last_ts"] == 700
+    # Orden por actividad más reciente primero.
+    qwen, llama = data["models"]
+    assert qwen["model_name"] == "Qwen3-Test" and qwen["last_ts"] == 700
+    assert qwen["prompt_tokens"] == 340 and qwen["predicted_tokens"] == 80
+    assert qwen["cached_tokens"] is None  # ninguna serie de Qwen aportó caché: null, no 0
+    assert qwen["processes"] == 1
+    assert llama["model_name"] == "Llama-Test" and llama["prompt_tokens"] == 80
+    assert llama["cached_tokens"] == 30 and llama["predicted_tokens"] is None
+    assert data["pricing"]["providers"]
+
+
+async def test_consumption_all_endpoint_sin_historico_devuelve_none(monkeypatch):
+    class StoreFake:
+        def consumption_series_all(self, keys):
+            return []
+
+    monkeypatch.setattr(metrics_module.manager, "store", StoreFake())
+    data = await llm.get_consumption_all()
+    # Sin datos: null (no 0) y lista vacía, igual que el endpoint por proceso.
+    assert data["servers"] == 0 and data["models"] == []
+    assert data["prompt_tokens"] is None and data["predicted_tokens"] is None
+    assert data["first_ts"] is None and data["last_ts"] is None

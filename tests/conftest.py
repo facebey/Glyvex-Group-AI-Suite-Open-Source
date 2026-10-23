@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import os
 import platform
 import sys
 from pathlib import Path
@@ -63,6 +64,7 @@ import chat as chat_module  # noqa: E402,F401  (importado para smoke-test de car
 import config as config_module  # noqa: E402
 import database as database_module  # noqa: E402
 import launcher as launcher_module  # noqa: E402
+import lhm as lhm_module  # noqa: E402
 import llm_metrics as llm_metrics_module  # noqa: E402
 import main as main_module  # noqa: E402
 import metrics as metrics_module  # noqa: E402
@@ -221,6 +223,20 @@ async def _isolated_state(tmp_path):
     metrics_module.manager.history.clear()
     metrics_module.manager.configure_store(tmp_path / "metrics.db")
 
+    # -- lhm.py: sidecar LibreHardwareMonitor apagado y sin recursos reales --
+    # Sin esto, un test que fuerce PYNVML_AVAILABLE=False encontraría el zip
+    # real de assets/vendor, extraería y spawnearía LHM de verdad (convención:
+    # ningún test toca el mundo real). Con las rutas en tmp la resolución falla
+    # y el error de degradación GPU queda como el original de NVML.
+    lhm_module.DATA_DIR = tmp_path / "data"
+    lhm_module.BUNDLE_DIR = tmp_path / "bundle"
+    metrics_module.manager.collector._lhm = None
+    # El env se guarda/restaura a mano en el teardown: si este fixture pidiera
+    # `monkeypatch`, pytest lo instalaría ANTES que el monkeypatch del propio
+    # test y lo revertiría DESPUÉS del teardown de este fixture, donde
+    # manager.stop() correría contra el store fake que dejó ese test.
+    saved_lhm_env = os.environ.pop(lhm_module.ENV_LHM_DIR, None)
+
     # -- tts.py: la cache de voces SAPI vive en el módulo y sobreviviría entre
     # tests (un test que la siembra a mano la colaría al siguiente).
     tts_module._reset_voices_cache()
@@ -267,6 +283,9 @@ async def _isolated_state(tmp_path):
     themes_module.THEMES_DIR = tmp_path / "themes"
 
     yield
+
+    if saved_lhm_env is not None:
+        os.environ[lhm_module.ENV_LHM_DIR] = saved_lhm_env
 
     # -- teardown: no dejar procesos/tasks/engines colgando entre tests ----
     for process in list(launcher_module.manager._handles.values()):
@@ -452,7 +471,7 @@ def make_probeable_binary(tmp_path):
     """
     Fábrica de "binarios" probeables: cada llamada devuelve un archivo nuevo
     en tmp_path que responde --help/--version con el texto que el test defina
-    (version_lines default: una línea con build b11349) y hace busy-loop con
+    (version_lines default: una línea con build b11827) y hace busy-loop con
     cualquier otro argv. Permite simular builds con distintos sets de flags
     (p. ej. una vieja sin --ctx-checkpoints, o una que le falta un flag
     crítico) sin depender de un llama.cpp real.
@@ -461,7 +480,7 @@ def make_probeable_binary(tmp_path):
 
     def _make(
         help_lines: list[str],
-        version_lines: tuple[str, ...] = ("llama.cpp version b11349",),
+        version_lines: tuple[str, ...] = ("llama.cpp version b11827",),
     ) -> str:
         n = next(counter)
         # La extensión importa: Windows ejecuta .bat vía CreateProcess
@@ -478,7 +497,7 @@ def make_probeable_binary(tmp_path):
 @pytest.fixture
 def probeable_binary(make_probeable_binary):
     """
-    "Build b11349 clásica": trae los flags siempre presentes del comando
+    "Build b11827 clásica": trae los flags siempre presentes del comando
     (model, host, port, ctx-size, batch, gpu-layers, cache-type-k/v,
     flash-attn, metrics, jinja, chat-template-kwargs, reasoning, sampling,
     parallel, mlock, no-mmap, api-key, verbosity, fit) pero NO los de

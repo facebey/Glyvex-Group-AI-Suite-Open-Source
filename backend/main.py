@@ -25,6 +25,7 @@ from paths import BUNDLE_DIR, DATA_DIR, ENV_NAME, FROZEN
 from database import db_all_attachment_ids, init_db
 import benchmark
 import chat
+import agent_bridge
 import launcher
 import llm_metrics
 import logsetup
@@ -59,7 +60,7 @@ if sys.platform == "win32":
 # (glyvex.spec, datas → _internal/frontend/dist).
 FRONTEND_DIST = BUNDLE_DIR / "frontend" / "dist"
 
-APP_VERSION = "0.10.0-beta"
+APP_VERSION = "0.11.0-alpha3"
 APP_NAME = "Glyvex-AI-Suite"
 APP_START_MONOTONIC = time.monotonic()
 
@@ -133,6 +134,9 @@ async def lifespan(app: FastAPI):
     # Último: los managers encolan sus ventanas pendientes al detenerse.
     await metrics_export.exporter.stop()
     await launcher.manager.shutdown()
+    # AG-1: ultimo paso — retirar de la config de OpenCode los bloques que esta
+    # instancia publico (los servers que gestione ya no van a seguir sirviendo).
+    await agent_bridge.cleanup_all()
     stt.unload_model()
 
 
@@ -146,27 +150,24 @@ def _cors_origins() -> list[str]:
     puede ser fija. El default mantiene el valor histórico para que una
     instalación que no setea la variable siga funcionando igual que antes.
 
-    "*" se acepta pero se avisa: con allow_credentials=True los navegadores
-    rechazan esa combinación, así que es casi siempre un error de
-    configuración y conviene que quede en el log en vez de fallar en silencio
-    desde el browser.
+    "*" se acepta sin aviso (E7): la app no usa cookies ni autenticación y el
+    middleware va con allow_credentials=False, así que la combinación queda
+    explícitamente válida y el único control es la lista de orígenes.
     """
     raw = os.environ.get("GLYVEX_CORS_ORIGINS", "").strip()
     if not raw:
         return ["http://localhost:5173"]
     origins = [item.strip() for item in raw.split(",") if item.strip()]
-    if "*" in origins:
-        logger.warning(
-            "GLYVEX_CORS_ORIGINS='*' junto con allow_credentials=True: los "
-            "navegadores rechazan esa combinación. Listá los orígenes."
-        )
     return origins or ["http://localhost:5173"]
 
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
-    allow_credentials=True,
+    # E7 (SEC-1): sin credenciales. Ningún endpoint usa cookies ni auth y el
+    # frontend nunca manda credentials: 'include'; allow_credentials=True solo
+    # sumaba superficie (y invalidaba el "*" con un warning en el log).
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -202,6 +203,12 @@ async def update_config(patch: ConfigUpdate) -> dict[str, Any]:
     data = patch.model_dump(exclude_unset=True)
     config.update(data)
     await config.save()
+    # AG-1: si el toggle se apaga, las claves publicadas en la config de OpenCode
+    # se retiran de inmediato: no conviene dejar bloques que ya no administra
+    # ningun bridge activo.
+    bridge_patch = data.get("agent_bridge")
+    if isinstance(bridge_patch, dict) and bridge_patch.get("enabled") is False:
+        await agent_bridge.cleanup_all()
     logger.info("config actualizada: %s", _redact_secrets(data))
     return config.data
 
@@ -262,6 +269,7 @@ api_router.include_router(tts.router, prefix="/tts", tags=["tts"])
 api_router.include_router(piper_runtime_api.router, prefix="/tts/piper", tags=["tts-piper"])
 api_router.include_router(kokoro_runtime_api.router, prefix="/tts/kokoro", tags=["tts-kokoro"])
 api_router.include_router(runtime_api.router, prefix="/runtime", tags=["runtime"])
+api_router.include_router(agent_bridge.router, prefix="/agent-bridge", tags=["agent-bridge"])
 api_router.include_router(themes.router, prefix="/themes", tags=["themes"])
 
 app.include_router(api_router)

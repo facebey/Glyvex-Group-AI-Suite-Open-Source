@@ -76,6 +76,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, model_validator
 
 from config import config
+import agent_bridge
 from paths import BUNDLE_DIR, DATA_DIR
 from database import (
     db_delete_template,
@@ -1119,6 +1120,13 @@ class ModelProcessManager:
                 current = self._info.get(process_id)
                 if current and current.state == "starting":
                     current.state = "running"
+                    # AG-1: server healthy -> publicar su provider en el config
+                    # de OpenCode. El bridge nunca puede romper un launch: sus
+                    # fallos se tragan acá y quedan en bridge_status.last_error.
+                    try:
+                        await agent_bridge.publish(current)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("agent bridge: publish fallo: %s", exc)
                 return
             if elapsed < HEALTH_CHECK_TIMEOUT_TOTAL_S:
                 interval = HEALTH_CHECK_INTERVAL_S
@@ -1201,6 +1209,12 @@ class ModelProcessManager:
                 "proceso termino inesperadamente: id=%s backend=%s model=%s codigo=%s",
                 process_id, info.backend, info.model_name, returncode,
             )
+        # AG-1: el proceso salio (stop normal o caida) -> retirar el bloque
+        # publicado. No-op si no publicaba o si el toggle esta OFF.
+        try:
+            await agent_bridge.unpublish(process_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("agent bridge: unpublish fallo: %s", exc)
 
     # -- start / stop / restart ------------------------------------------
 
@@ -1262,6 +1276,13 @@ class ModelProcessManager:
             )
             self._info[process_id] = info
             self._start_monotonic[process_id] = time.monotonic()
+            if is_up:
+                # AG-1: un server lm_studio que consumimos (no lanzamos) tambien
+                # se publica: para OpenCode es un endpoint OpenAI-compatible mas.
+                try:
+                    await agent_bridge.publish(info)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("agent bridge: publish fallo: %s", exc)
             return info
         # C3: validar ANTES de lanzar: _pump_output escribe en log_path.
         log_path = resolve_log_path(cfg.log_file, process_id)
@@ -1397,6 +1418,12 @@ class ModelProcessManager:
             # lm_studio (no administramos el proceso) u otro ya finalizado.
             info.state = "stopped"
             info.pid = None
+            # _watch_exit no existe para estos procesos: la retirada del bloque
+            # (AG-1) se hace acá.
+            try:
+                await agent_bridge.unpublish(process_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("agent bridge: unpublish fallo: %s", exc)
             return info
         self._stopping.add(process_id)
         if info.backend == "llama_server" and info.host and info.port:

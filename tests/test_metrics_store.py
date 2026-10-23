@@ -46,6 +46,70 @@ def test_series_hw_no_se_duplican(tmp_path):
     store.close()
 
 
+def test_consumption_totals_mergea_reinicios(tmp_path):
+    # MON-4: corrida 1 acumula 100→250; el llama-server reinicia con el mismo
+    # process_id y arranca la corrida 2 en 40→90. El total de vida mergea:
+    # 250 de la corrida 1 + 90 de la corrida 2 = 340.
+    store = _store(tmp_path)
+    seq = {T0: 100.0, T0 + 5: 250.0, T0 + 10: 40.0, T0 + 15: 90.0}
+    windows = [
+        SampleWindow(key="llm.prompt_tokens_total", ts=ts, avg=v, min=v, max=v)
+        for ts, v in seq.items()
+    ]
+    store.write_raw(windows, scope="llm", process_id="p1", model_name="M1",
+                    units={"llm.prompt_tokens_total": "tokens"})
+    res = store.consumption_totals("p1", ["llm.prompt_tokens_total", "llm.tokens_predicted_total"])
+    e = res["llm.prompt_tokens_total"]
+    assert e["total"] == 340 and e["runs"] == 2
+    assert e["model_name"] == "M1"
+    assert e["first_ts"] == T0 and e["last_ts"] == T0 + 15
+    # Key o proceso sin muestras: None, no 0.
+    assert res["llm.tokens_predicted_total"] is None
+    missing = store.consumption_totals("pX", ["llm.prompt_tokens_total"])
+    assert missing["llm.prompt_tokens_total"] is None
+    store.close()
+
+
+def test_consumption_series_all_suma_todas_las_instancias(tmp_path):
+    # MON-5: una fila por cada serie llm de la db, con el merge de reinicios
+    # por proceso. El scope hw queda afuera aunque comparta la key.
+    store = _store(tmp_path)
+
+    def write(pid, model, key, seq):
+        windows = [SampleWindow(key=key, ts=ts, avg=v, min=v, max=v) for ts, v in seq.items()]
+        store.write_raw(windows, scope="llm", process_id=pid, model_name=model,
+                        units={key: "tokens"})
+
+    write("p1", "M1", "llm.prompt_tokens_total", {T0: 100.0, T0 + 5: 250.0, T0 + 10: 40.0, T0 + 15: 90.0})
+    write("p1", "M1", "llm.tokens_predicted_total", {T0: 10.0, T0 + 5: 30.0})
+    write("p2", "M2", "llm.prompt_tokens_total", {T0 + 100: 50.0, T0 + 105: 80.0})
+    store.write_raw(  # mismo key en scope hw: no forma parte del gran total.
+        [SampleWindow(key="llm.prompt_tokens_total", ts=T0, avg=999.0, min=999.0, max=999.0)],
+        scope="hw",
+    )
+
+    keys = ["llm.prompt_tokens_total", "llm.tokens_predicted_total", "llm.prompt_tokens_cached_total"]
+    rows = store.consumption_series_all(keys)
+    assert len(rows) == 3  # p1×2 + p2×1; la serie hw se descarta
+    by = {(r["process_id"], r["key"]): r for r in rows}
+    p1_prompt = by[("p1", "llm.prompt_tokens_total")]
+    assert p1_prompt["total"] == 340 and p1_prompt["runs"] == 2
+    assert p1_prompt["model_name"] == "M1"
+    assert p1_prompt["first_ts"] == T0 and p1_prompt["last_ts"] == T0 + 15
+    assert by[("p1", "llm.tokens_predicted_total")]["total"] == 30
+    assert by[("p2", "llm.prompt_tokens_total")]["total"] == 80
+    assert by[("p2", "llm.prompt_tokens_total")]["model_name"] == "M2"
+    # Key sin series para ese proceso: no aparece la fila (no None).
+    assert ("p2", "llm.tokens_predicted_total") not in by
+
+    # DB vacía o sin keys: lista vacía, no error.
+    empty = _store(tmp_path.parent / "empty.db")
+    assert empty.consumption_series_all(keys) == []
+    assert empty.consumption_series_all([]) == []
+    store.close()
+    empty.close()
+
+
 def test_rollup_a_minuto_preserva_min_y_max(tmp_path):
     store = _store(tmp_path)
     # Un pico de 95 °C en una sola ventana de 5 s dentro del minuto.

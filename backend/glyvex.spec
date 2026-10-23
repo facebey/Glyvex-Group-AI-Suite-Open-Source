@@ -35,6 +35,12 @@ datas = [
     # "backend"/"prompts"). Sin esto el step 2 del Benchmark queda vacío en
     # la app instalada: /api/benchmark/sets devuelve [].
     ("./prompts", "backend/prompts"),
+    # MON-6: telemetría AMD GPU. LibreHardwareMonitor 0.9.6 (MPL-2.0) viaja
+    # embebido; lhm.py lo extrae de BUNDLE_DIR/assets/vendor a
+    # DATA_DIR/tools/... verificando el sha256, sin red. En dev BUNDLE_DIR es
+    # la raíz del repo y la resolución encuentra la misma ruta (el mismo
+    # truco de destino que backend/prompts).
+    ("../assets/vendor/LibreHardwareMonitor-0.9.6.zip", "assets/vendor"),
 ]
 
 hiddenimports = [

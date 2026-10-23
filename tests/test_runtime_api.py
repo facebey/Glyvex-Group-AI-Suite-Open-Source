@@ -95,14 +95,14 @@ async def test_status_ready_when_binary_present(client, monkeypatch):
     d.mkdir(parents=True, exist_ok=True)
     (d / runtime_module.BINARY_NAME).touch()
     (d / runtime_module.META_FILENAME).write_text(
-        json.dumps({"pin": "b11349", "state": "ready", "build": "b11349", "source": "official"}),
+        json.dumps({"pin": "b11827", "state": "ready", "build": "b11827", "source": "official"}),
         encoding="utf-8",
     )
 
     res = await client.get("/api/runtime/status")
     data = res.json()
     assert data["state"] == "ready"
-    assert data["build"] == "b11349"
+    assert data["build"] == "b11827"
     assert data["source"] == "official"
     assert data["size_mb"] == 0.0
 
@@ -277,3 +277,86 @@ async def test_reset_removes_runtime_dir(client, monkeypatch):
     assert data["reset"] is True
     assert data["status"]["state"] == "missing"
     assert not d.exists()
+
+
+# --------------------------------------------------------------------------
+# RT-10 B2: selección de aceleración para familias con más de una ruta
+# --------------------------------------------------------------------------
+
+
+async def test_status_advertises_accel_choices_for_amd(client, monkeypatch):
+    # La UI pinta el selector con estos dos campos: rutas seleccionables para
+    # la familia/plataforma actual y la selección guardada (None = default).
+    _force_windows(monkeypatch)
+    monkeypatch.setattr(runtime_module, "detect_gpu_family", lambda: "amd")
+
+    res = await client.get("/api/runtime/status")
+    data = res.json()
+    assert data["accel_choices"] == ["vulkan", "rocm"]
+    assert data["accel_choice"] is None
+
+
+async def test_status_reports_saved_accel_choice(client, monkeypatch):
+    # La elección guardada (POST /api/config) se re-expone en /status para que
+    # el selector no pierda estado al recargar. Un valor inválido (el parche
+    # no se valida, MON-2) cuenta como "sin elección".
+    await client.post("/api/config", json={"runtime": {"accel": "rocm"}})
+    try:
+        res = await client.get("/api/runtime/status")
+        assert res.json()["accel_choice"] == "rocm"
+
+        await client.post("/api/config", json={"runtime": {"accel": "directx"}})
+        res = await client.get("/api/runtime/status")
+        assert res.json()["accel_choice"] is None
+    finally:
+        await client.post("/api/config/reset")
+
+
+async def test_download_rejects_unknown_accel(client, monkeypatch):
+    _force_windows(monkeypatch)
+
+    res = await client.post("/api/runtime/download?accel=directx")
+    assert res.status_code == 400
+    assert "vulkan o rocm" in res.json()["detail"]
+
+
+async def test_download_accel_query_reaches_selection(client, monkeypatch):
+    # ?accel=rocm fluye hasta download_runtime(accel_choice=...): la descarga
+    # real elegiría el paquete ROCm; acá se verifica el cableado de la capa API.
+    _force_windows(monkeypatch)
+    monkeypatch.setattr(runtime_module, "BASE_SOURCES", _fake_base_source())
+    captured: dict = {}
+
+    async def fake_download(on_progress=None, keep_previous=False, accel_choice=None):
+        captured["accel_choice"] = accel_choice
+        return runtime_module.runtime_status()
+
+    monkeypatch.setattr(runtime_module, "download_runtime", fake_download)
+
+    async with client.stream("POST", "/api/runtime/download?accel=rocm") as res:
+        assert res.status_code == 200
+        events = await drain_sse(res)
+    parsed = _parse_sse(events)
+    assert captured["accel_choice"] == "rocm"
+    assert parsed[-1]["type"] == "done"
+
+
+async def test_download_falls_back_to_saved_accel_choice(client, monkeypatch):
+    # Sin ?accel= manda la selección guardada: la UI de Config guarda la
+    # elección y reinstala sin parámetros, y esa elección es la que aplica.
+    _force_windows(monkeypatch)
+    monkeypatch.setattr(runtime_module, "BASE_SOURCES", _fake_base_source())
+    captured: dict = {}
+
+    async def fake_download(on_progress=None, keep_previous=False, accel_choice=None):
+        captured["accel_choice"] = accel_choice
+        return runtime_module.runtime_status()
+
+    monkeypatch.setattr(runtime_module, "download_runtime", fake_download)
+    await client.post("/api/config", json={"runtime": {"accel": "vulkan"}})
+    try:
+        parsed = await _post_download_stream(client)
+        assert captured["accel_choice"] == "vulkan"
+        assert parsed[-1]["type"] == "done"
+    finally:
+        await client.post("/api/config/reset")

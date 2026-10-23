@@ -11,6 +11,7 @@ import ExternalLink from "./components/ExternalLink.jsx";
 import { getStoredTheme, applyTheme, nextInList, isExternalThemeName, syncThemeLinks, THEMES, THEME_META, THEME_CHANGED_EVENT } from "./lib/theme.js";
 import MatrixRain from "./components/MatrixRain.jsx";
 import { consumeSSE } from "./lib/sse.js";
+import { runtimeSizeMb, accelOffered } from "./lib/runtimeSize.js";
 import StatusWidget from "./components/StatusWidget.jsx";
 import LanguageSelector from "./components/LanguageSelector.jsx";
 import SidecarOverlay from "./components/SidecarOverlay.jsx";
@@ -155,8 +156,10 @@ function OnboardingScreen({ onDismiss }) {
   // soportado" vía state, y el frontend solo lo renderiza.
   const expertBinary = cfg?.backends?.llama_server?.binary_path;
   const gpuLabel = runtime?.gpu === "cpu" ? "CPU" : (runtime?.gpu || "CPU");
-  const isNvidia = runtime?.gpu_family === "nvidia";
-  const sizeMb = isNvidia ? 549 : 19;
+  // RT-10 B1: la oferta de aceleración y la estimación de tamaño dependen de
+  // la familia (espejo de ACCEL_SOURCES del backend en lib/runtimeSize.js).
+  const offerAccel = accelOffered(runtime?.gpu_family);
+  const sizeMb = runtimeSizeMb(runtime?.gpu_family, runtime?.accel_choice);
 
   let runtimeView;
   if (expertBinary) runtimeView = "expert";
@@ -193,7 +196,7 @@ function OnboardingScreen({ onDismiss }) {
               <p className="text-xs text-glyvex-muted">
                 {t("onboarding.runtimeReadySub", { gpu: gpuLabel })}
               </p>
-              {isNvidia && !runtime?.accel && (
+              {offerAccel && !runtime?.accel && (
                 <p className="text-xs text-amber-400">
                   {t("onboarding.runtimeDegraded")}
                 </p>
@@ -236,7 +239,7 @@ function OnboardingScreen({ onDismiss }) {
               </div>
               <p className="text-xs text-glyvex-muted">
                 {t("onboarding.runtimeSize", { size: sizeMb })}
-                {!isNvidia && <> · {t("onboarding.runtimeCpuNote")}</>}
+                {!offerAccel && <> · {t("onboarding.runtimeCpuNote")}</>}
               </p>
               <button type="button" onClick={handleRuntimeDownload}
                 className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-500">

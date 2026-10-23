@@ -9,6 +9,7 @@ import RuntimeSettings from "../components/RuntimeSettings.jsx";
 import MetricsDisplaySettings from "../components/MetricsDisplaySettings.jsx";
 import MetricsExportSettings from "../components/MetricsExportSettings.jsx";
 import CloudPricingSettings from "../components/CloudPricingSettings.jsx";
+import AgentBridgeSettings from "../components/AgentBridgeSettings.jsx";
 import { CONFIG_SAVED_EVENT, PRESETS } from "../lib/metricsDisplay.js";
 import { useTranslation } from "react-i18next";
 import { formInputClasses as inputClasses } from "../lib/styles.js";
@@ -73,6 +74,7 @@ const EMPTY_CONFIG = {
     prometheus_token: "",
     influx: { enabled: false, version: "v2", url: "http://127.0.0.1:8086" },
   },
+  agent_bridge: { enabled: false },
 };
 
 /** Avisa a las páginas abiertas (Monitor, Chat, Launcher) que la config cambió. */
@@ -594,6 +596,11 @@ export default function Config() {
       <CloudPricingSettings
         pricing={config.cloud_pricing}
         onChange={(cloud_pricing) => setConfig((prev) => ({ ...prev, cloud_pricing }))}
+      />
+
+      <AgentBridgeSettings
+        bridgeConfig={config.agent_bridge}
+        onChange={(agent_bridge) => setConfig((prev) => ({ ...prev, agent_bridge }))}
       />
     </div>
   );

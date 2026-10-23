@@ -135,6 +135,7 @@
           "history": "LLM Server · history"
         },
         "sessionCost": "Session cost",
+        "serverConsumption": "Server total consumption",
         "processes": "Active processes",
         "processesHint": "When hidden, the backend also stops scanning system processes."
       },
@@ -653,6 +654,14 @@
     "processState": "Process state",
     "noActiveProcess": "No active process for this model.",
     "serverReady": "✓ Server ready",
+    "bridgePublished": "Published to OpenCode",
+    "bridgeOpen": "Open OpenCode",
+    "bridgeOpenNotFound": "OpenCode CLI not found on this system (install it or add it to the PATH).",
+    "bridgeOpenFail": "Could not open OpenCode.",
+    "agentsCard": "Agents",
+    "agentsDesc": "Models you launch from this suite become available in OpenCode while they are running.",
+    "agentsPublishedTitle": "Published models",
+    "agentsPublishedEmpty": "None right now. Launch a server with the integration active.",
     "commandExecuted": "Executed command",
     "errors": {
       "commandBuild": "Could not build the launch command.",
@@ -813,6 +822,27 @@
       "noPricing": "No pricing providers: edit the table in Config → Cloud pricing.",
       "reset": "Reset session",
       "resetConfirm": "Reset this session's totals? The comparison for what was already chatted is lost."
+    },
+    "serverConsumption": {
+      "title": "Server total consumption",
+      "processLabel": "Process",
+      "noProcesses": "No llama-server processes with monitored history.",
+      "noData": "No consumption data for this process yet: its counters only started being recorded after it was launched.",
+      "input": "Input tokens",
+      "cached": "Cached tokens reused",
+      "output": "Generated tokens",
+      "total": "Total tokens",
+      "sinceStart": "Accumulated by llama-server since its startup, across all clients (app chat, OpenCode or any other API consumer).",
+      "merged": "Includes {{n}} merged startups of the same process",
+      "providerLabel": "Reference provider",
+      "cloudCost": "The same on {{name}} would cost: {{cost}}",
+      "noPricing": "No pricing providers: edit the table in Config → Cloud pricing.",
+      "lifetimeTitle": "Lifetime total (all instances)",
+      "lifetimeMeta": "Sum of the consumption of {{n}} instance(s) monitored by this installation, across all clients.",
+      "lifetimeSince": "since {{date}}",
+      "lifetimeModelsLabel": "Breakdown by model",
+      "lifetimeModelCost": "The same would cost: {{cost}}",
+      "unknownModel": "Unnamed model"
     }
   },
   "benchmark": {
@@ -1032,6 +1062,27 @@
       "restoreError": "Could not retrieve the default prices.",
       "invalidJson": "Invalid JSON: {{error}} (the last valid values are still in use)"
     },
+    "agentBridge": {
+      "section": "OpenCode integration",
+      "hint": "With the integration active, servers you launch from this suite become available in OpenCode automatically while they are running, and are removed when they stop. The bridge only writes its own keys (glyvex-*) into OpenCode's config; it never touches your providers or the rest of the file.",
+      "toggle": "Enable OpenCode integration",
+      "toggleHint": "Applied when you save the configuration (Save button).",
+      "liveTitle": "Bridge status",
+      "enabled": "Active",
+      "disabled": "Inactive",
+      "pendingApply": "Not applied yet: save the configuration.",
+      "configPath": "OpenCode config file",
+      "style": "Detected format: {{style}}",
+      "fileMissing": "OpenCode's config file does not exist; it would be created when publishing the first server.",
+      "keys": "Blocks written by the bridge",
+      "noKeys": "none",
+      "publishedTitle": "Published servers",
+      "publishedEmpty": "No servers published right now.",
+      "publishedVision": "vision",
+      "lastError": "Last error: {{error}}",
+      "refresh": "Refresh status",
+      "statusError": "Could not fetch the bridge status."
+    },
     "runtime": {
       "section": "Runtime",
       "loading": "Checking runtime status…",
@@ -1051,6 +1102,14 @@
       "expertSub": "You have your own binary configured (binary_path in Backends) and it always wins.",
       "cpuNote": "GPU acceleration is coming soon; it runs on CPU for now",
       "degraded": "GPU acceleration not installed — running on CPU.",
+      "accelTitle": "AMD acceleration",
+      "accelOptions": {
+        "vulkan": "Vulkan (all AMD GPUs)",
+        "rocm": "ROCm 10.0 (RDNA2/RDNA3)"
+      },
+      "accelActive": "Active acceleration: {{backend}}",
+      "accelReinstall": "You chose {{choice}}: reinstall the runtime (~{{size}} MB) to activate it",
+      "accelSaveError": "Could not save the acceleration selection",
       "cudaNote": "GPU with compute capability {{cc}} — CUDA 12.x bundle (CUDA 13.x does not support this architecture).",
       "outdated": "Runtime outdated — {{pin}} not installed yet",
       "outdatedSub": "Previous build {{prev}} ({{prevSize}} MB) is on disk. Estimated download: ~{{size}} MB.",

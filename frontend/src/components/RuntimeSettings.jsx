@@ -11,12 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import Section from "./ui/Section.jsx";
 import { consumeSSE } from "../lib/sse.js";
-import { sizeDeltaMb, formatDeltaMb } from "../lib/runtimeSize.js";
-
-// Estimación compartida con el onboarding (RT-10): motor base ~19 MB
-// (cualquier GPU) + aceleración NVIDIA ~530 MB.
-const SIZE_MB = 549;
-const SIZE_MB_BASE = 19;
+import { sizeDeltaMb, formatDeltaMb, runtimeSizeMb, accelOffered, accelChoiceFromSource } from "../lib/runtimeSize.js";
 
 /**
  * Card "Runtime" de Config (RT-5). Mantiene el mismo orden de vistas que el
@@ -83,7 +78,7 @@ export default function RuntimeSettings({ expertBinary }) {
   async function handleReinstall() {
     if (
       !window.confirm(
-        t("config.runtime.reinstallConfirm", { pin: runtime?.pin, size: runtime?.size_mb ?? SIZE_MB })
+        t("config.runtime.reinstallConfirm", { pin: runtime?.pin, size: runtime?.size_mb ?? runtimeSizeMb(runtime?.gpu_family, selectedChoice) })
       )
     ) return;
     setDl(null);
@@ -97,6 +92,24 @@ export default function RuntimeSettings({ expertBinary }) {
       return;
     }
     await handleDownload(false);
+  }
+
+  async function handleAccelChange(choice) {
+    // (RT-10 B2) Persiste la elección (config.runtime.accel). Cambiar la backend
+    // de un runtime ya instalado requiere reinstalar: la nota ámbar lo indica y
+    // el botón Reinstalar (reset + download) aplica la selección guardada sin
+    // necesidad de parámetros en el download.
+    try {
+      const res = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runtime: { accel: choice } }),
+      });
+      if (!res.ok) throw new Error();
+      setRuntime((prev) => ({ ...prev, accel_choice: choice }));
+    } catch {
+      setDl({ phase: "error", error: t("config.runtime.accelSaveError") });
+    }
   }
 
   async function handleUninstall() {
@@ -125,8 +138,31 @@ export default function RuntimeSettings({ expertBinary }) {
   }
 
   const gpuLabel = runtime.gpu === "cpu" ? "CPU" : runtime.gpu || "CPU";
-  const isNvidia = runtime.gpu_family === "nvidia";
-  const sizeMb = isNvidia ? SIZE_MB : SIZE_MB_BASE;
+  const offerAccel = accelOffered(runtime.gpu_family);
+  // (RT-10 B2) Familias con rutas de aceleración seleccionables (AMD): manda la
+  // elección guardada; si no hay, la fuente instalada; si tampoco, el default
+  // del catálogo. Con menos de 2 choices no se pinta selector (NVIDIA se fija
+  // por CUDA; Intel/CPU no ofrecen aceleración gestionada).
+  const accelChoices = runtime.accel_choices ?? [];
+  const activeChoice = accelChoiceFromSource(runtime.accel_source);
+  const selectedChoice = runtime.accel_choice ?? activeChoice ?? accelChoices[0] ?? null;
+  const sizeMb = runtimeSizeMb(runtime.gpu_family, selectedChoice);
+  const accelSelect = (
+    <label className="flex flex-wrap items-center gap-2 text-xs text-glyvex-muted">
+      <span>{t("config.runtime.accelTitle")}</span>
+      <select
+        value={selectedChoice ?? ""}
+        onChange={(e) => handleAccelChange(e.target.value)}
+        className="bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-2 py-1.5 text-xs text-glyvex-text"
+      >
+        {accelChoices.map((choice) => (
+          <option key={choice} value={choice}>
+            {t(`config.runtime.accelOptions.${choice}`)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
   // Delta de tamaño de la actualización (RT-12): depende del checkbox de
   // rollback (reemplazo vs. conservación de la build anterior). Null → se
   // oculta (build anterior de tamaño desconocido).
@@ -153,16 +189,32 @@ export default function RuntimeSettings({ expertBinary }) {
           <p className="text-xs text-glyvex-muted">
             {t("config.runtime.readySub", {
               pin: runtime.pin,
-              size: runtime.size_mb ?? SIZE_MB,
+              size: runtime.size_mb ?? runtimeSizeMb(runtime.gpu_family),
               source: runtime.source,
             })}
           </p>
-          {isNvidia && !runtime.accel && (
+          {offerAccel && !runtime.accel && (
             <p className="text-xs text-amber-400">{t("config.runtime.degraded")}</p>
           )}
           {runtime.cuda_note && (
             <p className="text-xs text-amber-400">
               {t("config.runtime.cudaNote", { cc: runtime.cuda_note })}
+            </p>
+          )}
+          {activeChoice !== null && (
+            <p className="text-xs text-glyvex-muted">
+              {t("config.runtime.accelActive", {
+                backend: t(`config.runtime.accelOptions.${activeChoice}`),
+              })}
+            </p>
+          )}
+          {accelChoices.length > 1 && accelSelect}
+          {accelChoices.length > 1 && selectedChoice !== activeChoice && (
+            <p className="text-xs text-amber-400">
+              {t("config.runtime.accelReinstall", {
+                choice: t(`config.runtime.accelOptions.${selectedChoice}`),
+                size: sizeMb,
+              })}
             </p>
           )}
           <div className="flex gap-2">
@@ -298,8 +350,9 @@ export default function RuntimeSettings({ expertBinary }) {
           </div>
           <p className="text-xs text-glyvex-muted">
             {t("config.runtime.size", { size: sizeMb })} · {t("config.runtime.tested", { pin: runtime.pin })}
-            {!isNvidia && <> · {t("config.runtime.cpuNote")}</>}
+            {!offerAccel && <> · {t("config.runtime.cpuNote")}</>}
           </p>
+          {accelChoices.length > 1 && accelSelect}
           <button
             type="button"
             onClick={handleDownload}

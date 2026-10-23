@@ -57,3 +57,10 @@ def test_cors_origins_lista_separada_por_comas(monkeypatch):
 def test_cors_origins_solo_espacios_vuelve_al_default(monkeypatch):
     monkeypatch.setenv("GLYVEX_CORS_ORIGINS", " , ")
     assert main_module._cors_origins() == ["http://localhost:5173"]
+
+
+def test_cors_middleware_sin_credenciales():
+    # E7 (SEC-1): la app no usa cookies ni auth, así que el CORS no debe
+    # permitir credenciales; era True sin ningún consumidor real.
+    mw = next(m for m in main_module.app.user_middleware if m.cls is main_module.CORSMiddleware)
+    assert mw.kwargs["allow_credentials"] is False

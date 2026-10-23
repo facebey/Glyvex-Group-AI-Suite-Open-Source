@@ -61,7 +61,7 @@ try:
 except ImportError:
     winreg = None
 
-RUNTIME_PIN = "b11349"
+RUNTIME_PIN = "b11827"
 META_FILENAME = ".runtime-meta.json"
 BINARY_NAME = "llama-server.exe" if platform.system() == "Windows" else "llama-server"
 
@@ -87,31 +87,33 @@ def _platform_files(files: list[dict]) -> list[dict]:
 
 # Split de RT-10 en 2 niveles: motor base (CPU) siempre, y aceleración de la
 # familia detectada encima cuando existe paquete verificable. La fuente es la
-# build oficial de la release ggml-org/llama.cpp del pin (b11349, familia
-# v0.5.0), descargada y verificada en la máquina de desarrollo. El bump
-# b11146 -> b11349 no cambió la superficie de flags: 329 long-flags idénticos
-# en ambos (0 agregados / 0 removidos, verificado contra --help real de los
-# dos binarios).
+# build oficial de la release ggml-org/llama.cpp del pin (b11827, familia
+# v0.7.0), descargada y verificada en la máquina de desarrollo. El bump
+# b11349 -> b11827 creció la superficie de flags de 257 a 262 long-flags
+# (0 removidos; +5: moe-cache-mib, spec-draft-n-ubatch, spec-draft-sampling,
+# connect, connect-code), verificado contra el --help real de los binarios.
+# La versión 0.7.0 no cambió el formato de --version: el probe sigue
+# extrayendo el build con el mismo parseo.
 
 # Nivel 1: motor base (CPU). Corre en cualquier hardware x64 (Windows y
 # Linux); la aceleración, cuando existe para la familia, se extrae encima.
 BASE_SOURCES: list[dict] = [
     {
         "id": "official",
-        "description": "Build oficial ggml-org/llama.cpp b11349 (CPU)",
+        "description": "Build oficial ggml-org/llama.cpp b11827 (CPU)",
         "files": [
             {
                 "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                       "b11349/llama-b11349-bin-win-cpu-x64.zip",
-                "sha256": "3f387c5877b66d078b89b52a2a59cf0f5aa10e69513f3956163edabacffa1c6e",
+                       "b11827/llama-b11827-bin-win-cpu-x64.zip",
+                "sha256": "2740eeac6ed9b727a3a1002f5a42e74defa3c4cbb9a8b42b11356a07f969cb13",
                 "platforms": ["win"],
             },
             {
                 # Builds "ubuntu" target glibc vieja → compatibles con
                 # versiones nuevas (probado contra Ubuntu 26.04, RT-14).
                 "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                       "b11349/llama-b11349-bin-ubuntu-x64.tar.gz",
-                "sha256": "7efd2fb72db59f12b05614a709ba6d506b9859e867943955fc9bbd8ee13eccea",
+                       "b11827/llama-b11827-bin-ubuntu-x64.tar.gz",
+                "sha256": "7c1de2b2a139aa90e28b88d44a75f5966485604f68aa0ccdc2339959bca9b5f6",
                 "platforms": ["linux"],
             },
         ],
@@ -119,9 +121,15 @@ BASE_SOURCES: list[dict] = [
 ]
 
 # Nivel 2: aceleración por familia de GPU, en orden de preferencia.
-# Fase A: solo "nvidia". "vulkan" (AMD+Intel) y "rocm" (RDNA2/3) entran en
-# fase B SOLO tras la aprobación del protocolo PRUEBA-VULKAN-AMD-b11009.md
-# en hardware real. Familia ausente → runtime degradado a CPU, no error.
+# Fase A: "nvidia" (aprobada). "vulkan" (todas las AMD) entra en fase B con
+# la build b11827 VALIDADA en hardware real por el protocolo
+# PRUEBA-VULKAN-AMD-b11827.md; vive en la rama de las builds de prueba B1/B2 y
+# su merge a main queda condicionado al reporte aprobado (política dura: solo
+# versiones probadas). "rocm" (RDNA2/3, B2): ambas rutas AMD conviven y el
+# usuario elige cuál instala (config.runtime.accel → ?accel= en el download);
+# sin elección manda el orden de esta lista: Vulkan primero por cubrir toda la
+# familia. El orden definitivo sale de la comparativa t/s de la Parte 2 del
+# protocolo. Familia ausente → runtime degradado a CPU, no error.
 ACCEL_SOURCES: dict[str, list[dict]] = {
     "nvidia": [
         {
@@ -130,18 +138,18 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
             # Selección por arquitectura (RT-15): cc major < 10 → 12.x por
             # defecto (bundle autocontenido, el usuario no instala toolkit).
             "id": "official-cuda-12.4",
-            "description": "Build oficial ggml-org/llama.cpp b11349 (CUDA 12.4 + cuDART, Windows)",
+            "description": "Build oficial ggml-org/llama.cpp b11827 (CUDA 12.4 + cuDART, Windows)",
             "cuda_major": 12,
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                            "b11349/llama-b11349-bin-win-cuda-12.4-x64.zip",
-                    "sha256": "1084a0a4c6567511c7f67d8c4db71979f837170ed22b2fcb72c0d8637a4eaf14",
+                            "b11827/llama-b11827-bin-win-cuda-12.4-x64.zip",
+                    "sha256": "de09bcd70c917debda692025b751e753af4891e0807d991b44b2996fa44794b9",
                     "platforms": ["win"],
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                            "b11349/cudart-llama-bin-win-cuda-12.4-x64.zip",
+                            "b11827/cudart-llama-bin-win-cuda-12.4-x64.zip",
                     "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
                     "platforms": ["win"],
                 },
@@ -152,19 +160,19 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
             # NVIDIA >=570 (p. ej. 580.x). CUDA 13.4 exige driver >=590, así
             # que en equipos con driver 580 la GPU jamás se inicializaría.
             "id": "official-cuda-12.8",
-            "description": "Build oficial ggml-org/llama.cpp b11349 (CUDA 12.8 + cuDART, Linux)",
+            "description": "Build oficial ggml-org/llama.cpp b11827 (CUDA 12.8 + cuDART, Linux)",
             "cuda_major": 12,
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                            "b11349/llama-b11349-bin-ubuntu-cuda-12.8-x64.tar.gz",
-                    "sha256": "fa9f499e892e5388ec1a2250bc12478f539f6b155cae662d72f223d81d55d04b",
+                            "b11827/llama-b11827-bin-ubuntu-cuda-12.8-x64.tar.gz",
+                    "sha256": "c1f538781281ec07841badf0f3972ed88e4f4b60b5aa7598139cadfa3d51a484",
                     "platforms": ["linux"],
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                            "b11349/cudart-llama-b11349-bin-ubuntu-cuda-12.8-x64.tar.gz",
-                    "sha256": "056b65c841f6a54a36c1af38d2d47354bb4ac060f930c0941ce3f0b34423190f",
+                            "b11827/cudart-llama-b11827-bin-ubuntu-cuda-12.8-x64.tar.gz",
+                    "sha256": "613ba629acfefe64bc35acc5b25af9bcecfdb4f114a8f137a674cc4a003bc83d",
                     "platforms": ["linux"],
                 },
             ],
@@ -175,32 +183,73 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
             # 75/80/86/89/90/120a/121a; cero Pascal), por eso no es el
             # default para arquitecturas <= 9.x (RT-15).
             "id": "official",
-            "description": "Build oficial ggml-org/llama.cpp b11349 (CUDA 13.4 + cuDART)",
+            "description": "Build oficial ggml-org/llama.cpp b11827 (CUDA 13.4 + cuDART)",
             "cuda_major": 13,
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11349/llama-b11349-bin-win-cuda-13.4-x64.zip",
-                    "sha256": "06f2efb5f54d845002972928fa879448491799a556741c185a1974b491d8b4f0",
+                           "b11827/llama-b11827-bin-win-cuda-13.4-x64.zip",
+                    "sha256": "5d54c5fa2f26d9c80fa7439692e5929e8f7f1e7b2d00e3d6ab5a919154c768fa",
                     "platforms": ["win"],
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11349/cudart-llama-bin-win-cuda-13.4-x64.zip",
+                           "b11827/cudart-llama-bin-win-cuda-13.4-x64.zip",
                     "sha256": "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668",
                     "platforms": ["win"],
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11349/llama-b11349-bin-ubuntu-cuda-13.4-x64.tar.gz",
-                    "sha256": "4fbe049cfc3ecdc42a7f69816f6d6527562680f24de907e0996933495bf7eac3",
+                           "b11827/llama-b11827-bin-ubuntu-cuda-13.4-x64.tar.gz",
+                    "sha256": "1baf6ae4459bfcccb04b66bc6acb2914923ae5698bc40cf475be0ab1c939d95a",
                     "platforms": ["linux"],
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11349/cudart-llama-b11349-bin-ubuntu-cuda-13.4-x64.tar.gz",
-                    "sha256": "0b6167c50599cc33184121c5491f1a75527a4aad13f3915d261fd520f51cd2a9",
+                           "b11827/cudart-llama-b11827-bin-ubuntu-cuda-13.4-x64.tar.gz",
+                    "sha256": "7c55cfc0ab65e36c0fcb03868f7c281273fcf7a91426c4343c3960fff3b17c20",
                     "platforms": ["linux"],
+                },
+            ],
+        },
+    ],
+    "amd": [
+        {
+            # (RT-10 B1) Vulkan cubre a TODA AMD (GCN→RDNA3) con una sola
+            # ruta cross-brand: no hace falta distinguir RDNA2/3 (eso solo
+            # importa para ROCm, fase B2). Win-only por ahora: el protocolo de
+            # validación cubre Windows; Linux vulkan queda para después de la
+            # aprobación (misma política: solo builds probadas).
+            # Tag "accel" (B2): permite la elección explícita del usuario
+            # (config.runtime.accel). Las familias sin tag no tienen selector.
+            "id": "official-vulkan",
+            "accel": "vulkan",
+            "description": "Build oficial ggml-org/llama.cpp b11827 (Vulkan, Windows)",
+            "files": [
+                {
+                    "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
+                            "b11827/llama-b11827-bin-win-vulkan-x64.zip",
+                    "sha256": "760034ee144e5f0ab712abd55e2c46dfe9930fd4f38508eb0f0ec36890074e6d",
+                    "platforms": ["win"],
+                },
+            ],
+        },
+        {
+            # (RT-10 B2) ROCm 10.0: kernels oficiales para gfx1030/1035/1100/
+            # 1101/1102 (RDNA2/RDNA3) — más t/s que Vulkan en esas GPUs, pero
+            # NO cubre GCN/RDNA1. Por eso vive DETRÁS de Vulkan en la lista:
+            # sin elección la familia AMD sigue con la ruta universal; la
+            # elección ROCm la hace el usuario (selector de Config → Runtime)
+            # y la comparativa de la Parte 2 decide si ROCm pasa a default.
+            "id": "official-rocm-10.0",
+            "accel": "rocm",
+            "description": "Build oficial ggml-org/llama.cpp b11827 (ROCm 10.0, Windows)",
+            "files": [
+                {
+                    "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
+                            "b11827/llama-b11827-bin-win-rocm-10.0-x64.zip",
+                    "sha256": "290c51fc21ce1ae2a1918fdc91334ca3cec571eb8cc84b524fbfd2c124b92c43",
+                    "platforms": ["win"],
                 },
             ],
         },
@@ -289,30 +338,59 @@ def _cuda_note() -> str | None:
     return f"{cc[0]}.{cc[1]}"
 
 
-def _select_accel_source(family: str) -> dict | None:
+def _source_verifiable(source: dict) -> bool:
+    """Fuente con archivos para la plataforma actual y sha256 en el catálogo."""
+    files = _platform_files(source["files"])
+    return bool(files) and all(f.get("sha256") for f in files)
+
+
+def _select_accel_source(family: str, accel_choice: str | None = None) -> dict | None:
     """Fuente de aceleración verificable para la familia + plataforma, elegida
     por el mayor de CUDA que requiere la arquitectura de la GPU (RT-15).
     None si no hay paquete → runtime degradado a CPU (no error).
 
-    Dos pasadas: 1º fuentes del mayor requerido (o sin tag cuda_major, para
-    fixtures); 2º fallback a cualquier fuente verificable (catálogo legado).
+    accel_choice (RT-10 B2): elección explícita del usuario para familias con
+    más de una ruta ("vulkan"/"rocm"). Con elección solo cuentan las fuentes
+    con ese tag y NO hay fallback a otra ruta: si lo elegido no está disponible
+    para esta familia/plataforma el runtime se degrada a CPU y download_runtime
+    deja el motivo en accel_error (elegir ROCm en una GPU sin kernels debe
+    verse como degradado, no como una sorpresa con Vulkan).
+    Sin elección: el orden de la lista define el default.
+
+    Dos pasadas (sin elección): 1º fuentes del mayor requerido (o sin tag
+    cuda_major, para fixtures); 2º fallback a cualquier fuente verificable
+    (catálogo legado).
     """
     sources = ACCEL_SOURCES.get(family, [])
     required = _required_cuda_major()
 
-    def _verifiable(source: dict) -> bool:
-        files = _platform_files(source["files"])
-        return bool(files) and all(f.get("sha256") for f in files)
+    if accel_choice:
+        for source in sources:
+            if source.get("accel") == accel_choice and _source_verifiable(source):
+                return source
+        return None
 
     for source in sources:
         if source.get("cuda_major") not in (required, None):
             continue
-        if _verifiable(source):
+        if _source_verifiable(source):
             return source
     for source in sources:
-        if _verifiable(source):
+        if _source_verifiable(source):
             return source
     return None
+
+
+def accel_choices(family: str) -> list[str]:
+    """(RT-10 B2) Tags de aceleración verificables para la familia en la
+    plataforma actual — familias con rutas seleccionables por el usuario (AMD:
+    vulkan/rocm). Lista vacía cuando el runtime ofrece una sola ruta o ninguna
+    (NVIDIA se decide por cuda_major, no por elección del usuario). La UI pinta
+    el selector solo con más de una opción."""
+    return [
+        s["accel"] for s in ACCEL_SOURCES.get(family, [])
+        if s.get("accel") and _source_verifiable(s)
+    ]
 
 
 def _read_meta() -> dict | None:
@@ -352,6 +430,7 @@ def runtime_status() -> dict:
         "size_mb": None,
         "source": None,
         "accel": None,
+        "accel_source": None,
         "accel_error": None,
         "cuda_note": None,
         "error": None,
@@ -372,6 +451,9 @@ def runtime_status() -> dict:
         status["build"] = (meta or {}).get("build", RUNTIME_PIN)
         status["source"] = (meta or {}).get("source")
         status["accel"] = (meta or {}).get("accel")
+        # Qué fuente de aceleración quedó instalada (B2): la UI la usa para el
+        # selector de rutas AMD y para mostrar la backend activa.
+        status["accel_source"] = (meta or {}).get("accel_source")
         status["accel_error"] = (meta or {}).get("accel_error")
         status["cuda_note"] = (meta or {}).get("cuda_note")
         status["size_mb"] = _dir_size_mb(d)
@@ -505,12 +587,25 @@ def _extract_zip(zip_path: Path, target: Path) -> None:
     raíz, la descarta (el archive propio trae root; los upstream son planos)."""
     with zipfile.ZipFile(zip_path) as zf:
         names = [n for n in zf.namelist() if not n.endswith("/")]
-        tops = {n.split("/", 1)[0] for n in names}
-        prefix = tops.pop() + "/" if len(tops) == 1 else ""
+        # Solo cuentan prefijos de carpeta REALES y se aplica el strip solo
+        # si TODAS las entradas empiezan con esa carpeta: un zip de un único
+        # archivo plano (paquetes de aceleración mínimos) tiene un solo nombre
+        # en tops y el heurístico original lo trataba como root, tragándose el
+        # archivo entero.
+        tops = {n.split("/", 1)[0] for n in names if "/" in n}
+        prefix = ""
+        if len(tops) == 1:
+            cand = next(iter(tops)) + "/"
+            if all(n.startswith(cand) for n in names):
+                prefix = cand
         for info in zf.infolist():
             if info.is_dir():
                 continue
-            rel = info.filename[len(prefix):] if prefix else info.filename
+            rel = (
+                info.filename[len(prefix):]
+                if prefix and info.filename.startswith(prefix)
+                else info.filename
+            )
             if not rel:
                 continue
             dest = (target / rel).resolve()
@@ -540,10 +635,21 @@ def _extract_targz(archive: Path, target: Path) -> None:
     dinámico con "cannot open shared object file" (RT-14)."""
     with tarfile.open(archive, "r:gz") as tf:
         members = [m for m in tf.getmembers() if m.isfile() or m.issym()]
-        tops = {m.name.split("/", 1)[0] for m in members}
-        prefix = tops.pop() + "/" if len(tops) == 1 else ""
+        # Mismo criterio que el zip: prefijos de carpeta reales, strip solo si
+        # todas las entradas comparten esa carpeta (un tar de un solo archivo
+        # plano no es una root).
+        tops = {m.name.split("/", 1)[0] for m in members if "/" in m.name}
+        prefix = ""
+        if len(tops) == 1:
+            cand = next(iter(tops)) + "/"
+            if all(m.name.startswith(cand) for m in members):
+                prefix = cand
         for m in members:
-            rel = m.name[len(prefix):] if prefix else m.name
+            rel = (
+                m.name[len(prefix):]
+                if prefix and m.name.startswith(prefix)
+                else m.name
+            )
             if not rel:
                 continue
             dest = (target / rel).resolve()
@@ -634,7 +740,11 @@ def can_download() -> bool:
     return platform_supported() and _select_base_source() is not None
 
 
-async def download_runtime(on_progress=None, keep_previous: bool = False) -> dict:
+async def download_runtime(
+    on_progress=None,
+    keep_previous: bool = False,
+    accel_choice: str | None = None,
+) -> dict:
     """Descarga y verifica el runtime del pin activo en 2 etapas (acto explícito).
 
     keep_previous=False (default) borra las builds gestionadas anteriores
@@ -644,8 +754,9 @@ async def download_runtime(on_progress=None, keep_previous: bool = False) -> dic
 
     1. Motor BASE (0-50 %): siempre. Un fallo aquí ES error.
     2. Aceleración de la familia detectada (50-100 %): solo si existe
-       paquete verificable para la familia (fase A: nvidia). Un fallo aquí
-       NO rompe el runtime: queda degradado a CPU (meta con accel_error) y
+       paquete verificable para la familia. Con accel_choice ("vulkan"/"rocm",
+       RT-10 B2) se fuerza esa ruta; None deja el orden del catálogo. Un fallo
+       aquí NO rompe el runtime: queda degradado a CPU (meta con accel_error) y
        la descarga termina en "ready".
 
     on_progress(pct: float 0-100, detail: str) — opcional.
@@ -661,7 +772,7 @@ async def download_runtime(on_progress=None, keep_previous: bool = False) -> dic
     if base is None:
         raise RuntimeError("No hay fuente de runtime base con sha256 verificable")
     family = detect_gpu_family()
-    accel = _select_accel_source(family)
+    accel = _select_accel_source(family, accel_choice)
     if on_progress is None:
         on_progress = lambda pct, detail: None  # noqa: E731
 
@@ -690,6 +801,17 @@ async def download_runtime(on_progress=None, keep_previous: bool = False) -> dic
         # Etapa 2: aceleración (degradación elegante, nunca un error).
         accel_id = None
         accel_error = None
+        if accel is None and accel_choice:
+            # Una elección sin paquete verificable para esta familia/plataforma:
+            # se degrada a CPU PERO se deja el motivo en la meta — la UI lo
+            # muestra en vez de cambiar a otra ruta sin avisar.
+            accel_error = (
+                f"No hay paquete verificado para la aceleración elegida ({accel_choice})"
+            )
+            logger.warning(
+                "aceleración %s no disponible para %s; runtime degradado a CPU",
+                accel_choice, family,
+            )
         if accel is not None:
             try:
                 await _download_stage(_platform_files(accel["files"]), work, on_progress, 50.0, 100.0)

@@ -10,6 +10,9 @@ POST /api/runtime/download — descarga con progreso por SSE (mismo patrón que
                               acá solo se puentea on_progress al stream.
                               ?keep_previous=true conserva la build anterior
                               (rollback, RT-12).
+                              ?accel=vulkan|rocm elige la ruta de aceleración
+                              (RT-10 B2); sin param manda la selección
+                              guardada en config.runtime.accel.
 POST /api/runtime/reset    — borra el runtime gestionado (reinstalar =
                              reset + download).
 """
@@ -25,6 +28,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 import runtime
+from config import get_runtime_accel_choice
 
 logger = logging.getLogger("glyvex.runtime_api")
 
@@ -37,16 +41,29 @@ def _sse(payload: dict) -> str:
 
 @router.get("/status")
 async def status() -> dict:
+    family = runtime.detect_gpu_family()
     return {
         **runtime.runtime_status(),
         "gpu": runtime.detect_gpu(),
-        "gpu_family": runtime.detect_gpu_family(),
+        "gpu_family": family,
+        # (RT-10 B2) rutas seleccionables para esta familia/plataforma + selección
+        # guardada: la UI pinta el selector solo si hay más de una opción.
+        "accel_choices": runtime.accel_choices(family),
+        "accel_choice": get_runtime_accel_choice(),
         "platform": platform.system(),
     }
 
 
 @router.post("/download")
-async def download(keep_previous: bool = False) -> StreamingResponse:
+async def download(
+    keep_previous: bool = False,
+    accel: str | None = None,
+) -> StreamingResponse:
+    # (RT-10 B2) ?accel= explícito gana sobre la selección guardada; con
+    # ninguno de los dos, None → default del catálogo (Vulkan primero en AMD).
+    if accel not in (None, "vulkan", "rocm"):
+        raise HTTPException(status_code=400, detail="accel debe ser vulkan o rocm")
+    accel_choice = accel if accel is not None else get_runtime_accel_choice()
     if not runtime.platform_supported():
         raise HTTPException(
             status_code=400,
@@ -68,7 +85,9 @@ async def download(keep_previous: bool = False) -> StreamingResponse:
 
     async def runner() -> None:
         try:
-            result = await runtime.download_runtime(on_progress, keep_previous=keep_previous)
+            result = await runtime.download_runtime(
+                on_progress, keep_previous=keep_previous, accel_choice=accel_choice
+            )
             queue.put_nowait({"type": "done", "status": result})
         except Exception as exc:
             # El error se serializa al cliente por SSE; la meta queda con

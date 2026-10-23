@@ -39,6 +39,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 import fan_control
+import lhm
 import metrics_export
 import nvapi_fan
 from config import config
@@ -194,6 +195,10 @@ class MetricsCollector:
         # Estado del engine de curvas por índice: último objetivo aplicado y
         # fallos consecutivos (ver apply_fan_curves).
         self._fan_curve_state: dict[int, dict[str, int | None]] = {}
+        # MON-6: sidecar LibreHardwareMonitor para GPUs AMD: lazy, solo se
+        # crea si la vía NVML falla (un equipo sin AMD nunca lo toca). None =
+        # nunca se creó, no hay nada que limpiar.
+        self._lhm: lhm.LhmSidecar | None = None
 
         if PSUTIL_AVAILABLE:
             # cpu_percent (global y per-core) necesita una primera llamada
@@ -212,6 +217,13 @@ class MetricsCollector:
 
     def shutdown(self) -> None:
         self.shutdown_nvml()
+        self.shutdown_lhm()
+
+    def shutdown_lhm(self) -> None:
+        # MON-6: solo se termina el sidecar propio; un LHM adoptado (el del
+        # usuario usando 8185 para otros fines) se deja vivo.
+        if self._lhm is not None:
+            self._lhm.shutdown()
 
     def shutdown_nvml(self) -> None:
         # D6: cierre explícito desde el lifespan (no depender de __del__,
@@ -226,6 +238,7 @@ class MetricsCollector:
 
     def __del__(self) -> None:
         self.shutdown_nvml()
+        self.shutdown_lhm()
 
     # -- GPU -------------------------------------------------------------
 
@@ -237,6 +250,27 @@ class MetricsCollector:
             return default
 
     def collect_gpu(self) -> tuple[list[GpuMetrics] | None, str | None]:
+        gpus, error = self._collect_gpu_nvml()
+        if gpus is not None:
+            return gpus, error
+
+        # MON-6: sin GPUs por NVML (sin NVIDIA o sin pynvml) → sidecar
+        # LibreHardwareMonitor para GPUs AMD. Si no existe ningún recurso LHM
+        # (dev sin instalador), el error NVML original queda intacto: la
+        # semántica de degradación del Monitor no cambia en máquinas sin AMD.
+        if self._lhm is None:
+            if not lhm.resource_available():
+                return None, error
+            self._lhm = lhm.LhmSidecar()
+        try:
+            amd_gpus, lhm_error = self._lhm.collect()
+        except Exception as exc:  # noqa: BLE001 — un sidecar roto no debe crashear el Monitor
+            return None, f"{error} (fallback AMD: {exc})"
+        if amd_gpus:
+            return [GpuMetrics(**entry) for entry in amd_gpus], None
+        return None, f"{error} (fallback AMD: {lhm_error})"
+
+    def _collect_gpu_nvml(self) -> tuple[list[GpuMetrics] | None, str | None]:
         if not PYNVML_AVAILABLE:
             return None, "pynvml no está instalado"
         if not self._nvml_ready:
@@ -793,7 +827,9 @@ class MetricsManager:
         except Exception as exc:  # noqa: BLE001 — un restore fallido no debe trabar el shutdown
             logger.warning("no se pudo restaurar el fan: %s", exc)
         # NVML se cierra antes de nada más: es el único recurso de proceso.
+        # MON-6: ídem con el sidecar LHM propio (los adoptados no se tocan).
         self.collector.shutdown_nvml()
+        self.collector.shutdown_lhm()
         task = self._broadcast_task
         if task is not None and not task.done():
             task.cancel()
@@ -964,6 +1000,10 @@ async def restore_all_gpu_fans() -> dict[str, Any]:
     el apagado gracioso. Idempotente: responde solo por las GPUs con baseline
     capturado en esta ejecución."""
     results = await asyncio.to_thread(manager.collector.restore_fan_baselines)
+    # MON-6: esta ruta es el hook pre-kill y también apaga el sidecar LHM
+    # propio: si no, TerminateProcess lo dejaría huérfano sirviendo 8185 por
+    # fuera de la app.
+    await asyncio.to_thread(manager.collector.shutdown_lhm)
     return {"ok": True,
             "restored": {str(i): {"ok": ok, "error": err} for i, (ok, err) in results.items()}}
 

@@ -135,6 +135,7 @@
           "history": "LLM Server · histórico"
         },
         "sessionCost": "Costo de sesión",
+        "serverConsumption": "Consumo total del server",
         "processes": "Procesos activos",
         "processesHint": "Oculto, el backend además deja de recorrer los procesos del sistema."
       },
@@ -653,6 +654,14 @@
     "processState": "Estado del proceso",
     "noActiveProcess": "Sin proceso activo para este modelo.",
     "serverReady": "✓ Servidor listo",
+    "bridgePublished": "Publicado en OpenCode",
+    "bridgeOpen": "Abrir OpenCode",
+    "bridgeOpenNotFound": "No se encontró el CLI de OpenCode en el sistema (instálalo o agregalo al PATH).",
+    "bridgeOpenFail": "No se pudo abrir OpenCode.",
+    "agentsCard": "Agentes",
+    "agentsDesc": "Los modelos que lances desde esta suite quedan disponibles en OpenCode mientras están corriendo.",
+    "agentsPublishedTitle": "Modelos publicados",
+    "agentsPublishedEmpty": "Ninguno en este momento. Lanzá un server con la integración activa.",
     "commandExecuted": "Comando ejecutado",
     "errors": {
       "commandBuild": "No se pudo armar el comando.",
@@ -813,6 +822,27 @@
       "noPricing": "Sin proveedores de precios: editá la tabla en Config → Precios de nube.",
       "reset": "Reiniciar sesión",
       "resetConfirm": "¿Reiniciar los totales de esta sesión? Se pierde la comparativa de lo que ya se chateó."
+    },
+    "serverConsumption": {
+      "title": "Consumo total del server",
+      "processLabel": "Proceso",
+      "noProcesses": "No hay procesos de llama-server con histórico monitoriado.",
+      "noData": "Sin datos de consumo para este proceso: sus contadores comenzaron a registrarse recién tras su lanzamiento.",
+      "input": "Tokens de entrada",
+      "cached": "Tokens de caché reutilizados",
+      "output": "Tokens generados",
+      "total": "Total de tokens",
+      "sinceStart": "Acumulado por llama-server desde su arranque, de todos los clientes (chat de la app, OpenCode u otros consumidores de la API).",
+      "merged": "Incluye {{n}} arranques mergeados del mismo proceso",
+      "providerLabel": "Proveedor de referencia",
+      "cloudCost": "Lo mismo en {{name}} costaría: {{cost}}",
+      "noPricing": "Sin proveedores de precios: editá la tabla en Config → Precios de nube.",
+      "lifetimeTitle": "Total de por vida (todas las instancias)",
+      "lifetimeMeta": "Suma del consumo de {{n}} instancia(s) monitoriada(s) por esta instalación, de todos los clientes.",
+      "lifetimeSince": "desde {{date}}",
+      "lifetimeModelsLabel": "Desglose por modelo",
+      "lifetimeModelCost": "Lo mismo costaría: {{cost}}",
+      "unknownModel": "Modelo sin nombre"
     }
   },
   "benchmark": {
@@ -1032,6 +1062,27 @@
       "restoreError": "No se pudieron recuperar los precios por defecto.",
       "invalidJson": "JSON inválido: {{error}} (se siguen usando los últimos valores válidos)"
     },
+    "agentBridge": {
+      "section": "Integración con OpenCode",
+      "hint": "Con la integración activa, los servers que lances desde esta suite quedan disponibles en OpenCode automáticamente mientras están corriendo, y se retiran al detenerlos. El bridge solo escribe sus propias claves (glyvex-*) en el config de OpenCode; no toca providers tuyos ni el resto del archivo.",
+      "toggle": "Activar integración con OpenCode",
+      "toggleHint": "Se aplica al guardar la configuración (botón Guardar).",
+      "liveTitle": "Estado del bridge",
+      "enabled": "Activo",
+      "disabled": "Inactivo",
+      "pendingApply": "Todavía no está aplicado: guardá la configuración.",
+      "configPath": "Archivo de OpenCode",
+      "style": "Formato detectado: {{style}}",
+      "fileMissing": "El archivo de configuración de OpenCode no existe; se crearía al publicar el primer server.",
+      "keys": "Bloques escritos por el bridge",
+      "noKeys": "ninguno",
+      "publishedTitle": "Servidores publicados",
+      "publishedEmpty": "No hay servers publicados en este momento.",
+      "publishedVision": "visión",
+      "lastError": "Último error: {{error}}",
+      "refresh": "Actualizar estado",
+      "statusError": "No se pudo consultar el estado del bridge."
+    },
     "runtime": {
       "section": "Runtime",
       "loading": "Consultando estado del runtime…",
@@ -1051,6 +1102,14 @@
       "expertSub": "Tenés un binario propio configurado (binary_path en Backends) y ese gana siempre.",
       "cpuNote": "la aceleración GPU llega próximamente; por ahora corre en CPU",
       "degraded": "Aceleración GPU no instalada — corriendo en CPU.",
+      "accelTitle": "Aceleración AMD",
+      "accelOptions": {
+        "vulkan": "Vulkan (cubre toda la familia AMD)",
+        "rocm": "ROCm 10.0 (RDNA2/RDNA3)"
+      },
+      "accelActive": "Aceleración activa: {{backend}}",
+      "accelReinstall": "Elegiste {{choice}}: reinstalá el runtime (~{{size}} MB) para activarla",
+      "accelSaveError": "No se pudo guardar la selección de aceleración",
       "cudaNote": "GPU con compute capability {{cc}} — bundle CUDA 12.x (CUDA 13.x no soporta esta arquitectura).",
       "outdated": "Runtime desactualizado — {{pin}} aún no instalado",
       "outdatedSub": "Hay una build anterior ({{prev}}, {{prevSize}} MB) en disco. Descarga estimada: ~{{size}} MB.",

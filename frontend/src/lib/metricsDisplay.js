@@ -32,6 +32,7 @@ export const DISPLAY_CATALOG = [
       { key: "monitor.llm.live_charts", labelKey: "display.items.monitor.llm.live_charts" },
       { key: "monitor.llm.history", labelKey: "display.items.monitor.llm.history" },
       { key: "monitor.sessionCost", labelKey: "display.items.monitor.sessionCost" },
+      { key: "monitor.serverConsumption", labelKey: "display.items.monitor.serverConsumption" },
       {
         key: "monitor.processes",
         labelKey: "display.items.monitor.processes",

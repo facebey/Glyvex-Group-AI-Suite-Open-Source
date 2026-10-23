@@ -37,7 +37,7 @@ Want to run it from source, or on Linux/macOS? See [Installation](#installation)
 
 | | |
 |---|---|
-| ![Chat — streaming and live metrics](screenshots/chat.png)<br><sub>Chat: streaming, reasoning and live metrics (t/s, TTFT)</sub> | ![Launcher — model inventory](screenshots/launcher.png)<br><sub>Launcher: model inventory, b11349 runtime ready</sub> |
+| ![Chat — streaming and live metrics](screenshots/chat.png)<br><sub>Chat: streaming, reasoning and live metrics (t/s, TTFT)</sub> | ![Launcher — model inventory](screenshots/launcher.png)<br><sub>Launcher: model inventory, b11827 runtime ready</sub> |
 | ![Launcher — advanced mode, all panels](screenshots/launcher-avanzado-general.png)<br><sub>Advanced mode: all launch control panels</sub> | ![Launcher — context and acceleration](screenshots/launcher-avanzado-contexto.png)<br><sub>Context up to 64K, GPU acceleration and estimated VRAM</sub> |
 | ![Launcher — MTP, vision and LoRA](screenshots/launcher-avanzado-modulos.png)<br><sub>Speculative MTP, mmproj, LoRA and reasoning</sub> | ![Launcher — model running](screenshots/launcher-online.png)<br><sub>Running: t/s, MTP 70.5%, cache 86.6% and live log</sub> |
 | ![Benchmark — results](screenshots/benchmark.png)<br><sub>Benchmark: run results</sub> | ![Monitor — GPU and vitals](screenshots/monitor.png)<br><sub>Monitor: GPU, CPU and LLM server vitals</sub> |
@@ -228,17 +228,17 @@ active model, or watch its HW usage live (`/monitor`).
 
 On **Windows** the suite can bring its own tested build of
 [llama.cpp](https://github.com/ggml-org/llama.cpp) so you don't have to
-install any inference software: pin **b11349**, flat layout, in two levels:
+install any inference software: pin **b11827**, flat layout, in two levels:
 
-- **base engine** (~19 MB): runs on any GPU/CPU.
-- **acceleration** (~531 MB for NVIDIA + CUDA 13.4; the AMD/Intel one comes
+- **base engine** (~23 MB): runs on any GPU/CPU.
+- **acceleration** (~556 MB for NVIDIA + CUDA 13.4; the AMD/Intel one comes
   in phase B). It's picked based on the detected GPU family.
 - **CUDA arch** — the acceleration bundle is matched to the GPU's compute
   capability (queried at runtime), so it fits the card you have: both recent
   (Turing/Ampere/Ada) and older (Pascal, e.g. GTX 10-series) NVIDIA cards
   get the correct CUDA build instead of a mismatch.
 
-- **Where it lives:** `<DATA_DIR>/runtime/llama.cpp-b11349/` (exe + DLLs in
+- **Where it lives:** `<DATA_DIR>/runtime/llama.cpp-b11827/` (exe + DLLs in
   the same folder, because `llama-server.exe` looks for its DLLs in its own
   directory). It's not part of the repo: it's downloaded on demand and
   verified with **sha256**.

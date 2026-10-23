@@ -47,7 +47,7 @@ COMPLEMENTO EXHAUSTIVO DE COMPONENTES DE TERCEROS
 
 A. RUNTIMES DE INFERENCIA (descargados/provisionados por la aplicacion)
 --------------------------------------------------------------------------------
-llama.cpp (llama-server, build b11349)
+llama.cpp (llama-server, build b11827)
    Source: https://github.com/ggml-org/llama.cpp
    License: MIT
    Copyright (c) 2024-2025 ggml-org
@@ -68,6 +68,13 @@ PyInstaller (bootloader del ejecutable empaquetado)
    Source: https://github.com/pyinstaller/pyinstaller
    License: MIT/PSF
    Copyright (c) 2005-2025 PyInstaller development team
+
+LibreHardwareMonitor 0.9.6 (telemetria de GPU AMD; va embebida sin modificacion
+en el resource del sidecar via `datas` del spec PyInstaller y se extrae a
+DATA_DIR/tools/ al primer uso, verificando sha256; sin red)
+   Source: https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
+   License: Mozilla Public License 2.0 (MPL-2.0)
+   Copyright (c) LibreHardwareMonitor contributors
 
 Paquetes Python (cierre de dependencias de requirements.txt, versiones del build):
 
@@ -899,6 +906,8 @@ Licencias con referencia (texto completo en los enlaces indicados)
 --------------------------------------------------------------------------------
 PSF-2.0 (Python Software Foundation License 2.0)
    https://docs.python.org/3/license.html
+MPL-2.0 (Mozilla Public License 2.0; usado en certifi, tqdm y LibreHardwareMonitor)
+   https://www.mozilla.org/en-US/MPL/2.0/
 MPL-1.1 (usado en tld)
    https://www.mozilla.org/media/MPL/1.1/NOTICE.txt
 Unicode License 3.0 (crates icu_*/zerovec, etc.)

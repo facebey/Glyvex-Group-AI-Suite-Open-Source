@@ -55,6 +55,7 @@ from pydantic import BaseModel
 
 import metrics as hw_metrics
 import metrics_export
+from config import get_cloud_pricing
 from launcher import ProcessInfo
 from launcher import manager as launcher_manager
 
@@ -94,6 +95,11 @@ PERSISTED_UNITS: dict[str, str] = {
     "llm.spec_accept_pct": "%",
     "llm.cache_hit_pct_total": "%",
     "llm.spec_accept_pct_total": "%",
+    # Totales absolutos por corrida (MON-4): store.consumption_totals los
+    # mergea a través de reinicios del mismo process_id.
+    "llm.prompt_tokens_total": "tokens",
+    "llm.prompt_tokens_cached_total": "tokens",
+    "llm.tokens_predicted_total": "tokens",
 }
 
 
@@ -155,6 +161,9 @@ class LlmMetricsSnapshot(BaseModel):
 
     tokens_predicted_total: int | None = None
     prompt_tokens_total: int | None = None
+    # Caché reutilizado en valor absoluto (MON-4): más abajo solo existe el
+    # porcentaje, y para el consumo total del server hace falta el número.
+    prompt_tokens_cached_total: int | None = None
 
     ctx_total: int | None = None
     ctx_used: int | None = None
@@ -331,6 +340,7 @@ def build_snapshot(
 
     snap.tokens_predicted_total = as_int("tokens_predicted_total")
     snap.prompt_tokens_total = as_int("prompt_tokens_total")
+    snap.prompt_tokens_cached_total = as_int("prompt_tokens_cached_total")
     snap.requests_processing = as_int("requests_processing")
     snap.requests_deferred = as_int("requests_deferred")
     # n_tokens_max en builds actuales; n_past_max en anteriores.
@@ -387,6 +397,11 @@ def flatten_llm_snapshot(snap: LlmMetricsSnapshot) -> dict[str, float]:
     put("llm.spec_accept_pct", snap.spec_accept_pct)
     put("llm.cache_hit_pct_total", snap.cache_hit_pct_total)
     put("llm.spec_accept_pct_total", snap.spec_accept_pct_total)
+    # Totales absolutos de la corrida actual (MON-4): acumulados por el propio
+    # llama-server, así cuentan también a los clientes externos a la app.
+    put("llm.prompt_tokens_total", snap.prompt_tokens_total)
+    put("llm.prompt_tokens_cached_total", snap.prompt_tokens_cached_total)
+    put("llm.tokens_predicted_total", snap.tokens_predicted_total)
     return out
 
 
@@ -831,6 +846,119 @@ async def list_processes() -> dict[str, Any]:
             and e["last_ts"] - e["first_ts"] >= MIN_STORED_LIFETIME_S
         ]
     return {"live": live, "stored": ordered[:MAX_STORED_PROCESSES]}
+
+
+# Series de consumo total por instancia (MON-4): las keys que persiste
+# flatten_llm_snapshot, cuyos valores consumption_totals mergea por process_id.
+CONSUMPTION_KEYS = (
+    "llm.prompt_tokens_total",
+    "llm.prompt_tokens_cached_total",
+    "llm.tokens_predicted_total",
+)
+
+
+@router.get("/{process_id}/consumption")
+async def get_consumption(process_id: str) -> dict[str, Any]:
+    """
+    MON-4: tokens acumulados por una instancia de llama-server desde su arranque,
+    de TODOS los clientes. Los contadores Prometheus del server cuentan el chat
+    de la app, OpenCode y cualquier consumidor de la API por igual; se leen del
+    metrics.db (la misma frescura que los gráficos del Monitor) y se mergean a
+    través de reinicios del mismo process_id. Funciona también para procesos
+    muertos con histórico. El pricing va embebido, patrón session_tokens, para
+    que la comparativa de nube se calcule en el frontend sin pedir permiso.
+    """
+    store = hw_metrics.manager.store
+    totals: dict[str, Any] = {}
+    if store is not None:
+        totals = await asyncio.to_thread(store.consumption_totals, process_id, list(CONSUMPTION_KEYS))
+
+    def part(key: str) -> dict[str, Any]:
+        e = totals.get(key) or {}
+        return {"tokens": e.get("total"), "first_ts": e.get("first_ts"),
+                "last_ts": e.get("last_ts"), "runs": e.get("runs")}
+
+    prompt = part("llm.prompt_tokens_total")
+    cached = part("llm.prompt_tokens_cached_total")
+    predicted = part("llm.tokens_predicted_total")
+    entries = [e for e in totals.values() if e]
+    return {
+        "process_id": process_id,
+        "model_name": entries[0]["model_name"] if entries else None,
+        # Un llama-server reiniciado resetea todos sus contadores a la vez: el
+        # máximo entre series es el número de arranques de la instancia.
+        "runs": max((e["runs"] for e in entries), default=0),
+        "first_ts": min((e["first_ts"] for e in entries), default=None),
+        "last_ts": max((e["last_ts"] for e in entries), default=None),
+        "prompt_tokens": prompt["tokens"],
+        "cached_tokens": cached["tokens"],
+        "predicted_tokens": predicted["tokens"],
+        "pricing": get_cloud_pricing().model_dump(),
+    }
+
+
+# Mapeo de keys de Prometheus a campos de la respuesta de consumo.
+CONSUMPTION_FIELDS = {
+    "llm.prompt_tokens_total": "prompt_tokens",
+    "llm.prompt_tokens_cached_total": "cached_tokens",
+    "llm.tokens_predicted_total": "predicted_tokens",
+}
+
+
+@router.get("/consumption/all")
+async def get_consumption_all() -> dict[str, Any]:
+    """
+    MON-5: total de tokens de POR VIDA de todas las instancias de llama-server
+    registradas en el metrics.db, de todos los clientes. Es la suma de los
+    totales por proceso (mismo merge de reinicios, serie por serie) con un
+    desglose por modelo para comparar contra qué modelo se habría pagado en la
+    nube. Para una instalación nueva esto empieza en su primer launch: el
+    histórico cubre desde que la app monitoreó el server. Pricing embebido,
+    patrón session_tokens.
+    """
+    store = hw_metrics.manager.store
+    rows: list[dict[str, Any]] = []
+    if store is not None:
+        rows = await asyncio.to_thread(store.consumption_series_all, list(CONSUMPTION_KEYS))
+
+    # None significa "ninguna serie aportó ese contador", no 0: la UI lo muestra
+    # como sin datos, igual que el endpoint por proceso.
+    models: dict[str, dict[str, Any]] = {}
+    totals: dict[str, int | None] = {f: None for f in CONSUMPTION_FIELDS.values()}
+    processes: set[str] = set()
+    for r in rows:
+        field = CONSUMPTION_FIELDS[r["key"]]
+        model = models.setdefault(r["model_name"] or "", {
+            "model_name": r["model_name"] or "",
+            "process_ids": set(),
+            **{f: None for f in CONSUMPTION_FIELDS.values()},
+            "first_ts": None,
+            "last_ts": None,
+        })
+        model[field] = (model[field] or 0) + r["total"]
+        model["first_ts"] = min(filter(None, [model["first_ts"], r["first_ts"]]), default=None)
+        model["last_ts"] = max(filter(None, [model["last_ts"], r["last_ts"]]), default=None)
+        model["process_ids"].add(r["process_id"])
+        totals[field] = (totals[field] or 0) + r["total"]
+        processes.add(r["process_id"])
+
+    by_model = sorted(
+        (
+            {**m, "processes": len(m.pop("process_ids"))}
+            for m in models.values()
+        ),
+        key=lambda m: (m["last_ts"] is None, -(m["last_ts"] or 0)),
+    )
+    return {
+        "servers": len(processes),
+        "first_ts": min((r["first_ts"] for r in rows), default=None),
+        "last_ts": max((r["last_ts"] for r in rows), default=None),
+        "prompt_tokens": totals["prompt_tokens"],
+        "cached_tokens": totals["cached_tokens"],
+        "predicted_tokens": totals["predicted_tokens"],
+        "models": by_model,
+        "pricing": get_cloud_pricing().model_dump(),
+    }
 
 
 @router.get("/{process_id}/history", response_model=list[LlmMetricsSnapshot])

@@ -595,6 +595,18 @@ select {
   padding-inline-end: 2.2rem;
 }
 
+/* WebView2 (Windows) pinta la LISTA desplegada de <select> con los colores del
+   sistema: con Windows en tema claro salía texto claro heredado del tema oscuro
+   de la app sobre el popup claro (contraste ilegible, reportado al revisar
+   MON-4 2026-10-21). El popup es una superficie del sistema, no flota sobre el
+   fondo de la app, así que el fondo va explícito y OPACO con la paleta propia
+   (--color-glyvex-card es sólido en cada tema; la lista queda acorde al tema
+   activo, igual que el select cerrado). */
+select option {
+  background-color: var(--color-glyvex-card);
+  color: var(--color-glyvex-text);
+}
+
 /* JetBrains Mono para código, métricas y logs */
 code, pre, .font-mono {
   font-family: 'JetBrains Mono', ui-monospace, monospace;

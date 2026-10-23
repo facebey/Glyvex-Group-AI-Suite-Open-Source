@@ -94,6 +94,9 @@
       "measurement_prefix": "glyvex"
     }
   },
+  "agent_bridge": {
+    "enabled": false
+  },
   "model_dirs": [],
   "last_used_model": null,
   "auto_start_last": false

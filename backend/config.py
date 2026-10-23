@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from paths import DATA_DIR
-from typing import Any
+from typing import Any, Literal
 
 import aiofiles
 from pydantic import BaseModel, Field, ValidationError
@@ -229,23 +229,85 @@ class CloudPricingProvider(BaseModel):
 
 
 def _default_cloud_pricing_providers() -> list[CloudPricingProvider]:
-    # Valores de referencia (USD/Mtok, verificados 2026-10). Cambian seguido,
-    # así que son editables desde Config → "Precios de nube" sin tocar código.
+    # Valores de referencia: lista cerrada de Fabian (Files/Pricing
+    # Providers/pricing.json, verificada 2026-10). Cambian seguido, así que
+    # son editables desde Config → "Precios de nube" sin tocar código.
+    # Los nombres con notas de vigencia ("desde 1-dic-2026", "horario pico")
+    # se copian tal cual: la vigencia es información para el usuario, no
+    # lógica de la app (la app no hace billing).
     return [
+        CloudPricingProvider(id="openai-gpt-6-astra", name="OpenAI GPT-6 Astra",
+                             input_per_mtok=10.0, output_per_mtok=50.0, cache_read_per_mtok=1.0),
+        CloudPricingProvider(id="openai-gpt-6.1-sol", name="OpenAI GPT-6.1 Sol",
+                             input_per_mtok=2.0, output_per_mtok=10.0, cache_read_per_mtok=0.1),
+        CloudPricingProvider(id="openai-gpt-6-luna", name="OpenAI GPT-6 Luna",
+                             input_per_mtok=0.1, output_per_mtok=0.5, cache_read_per_mtok=0.01),
         CloudPricingProvider(id="openai-gpt-4o", name="OpenAI GPT-4o",
-                             input_per_mtok=2.50, output_per_mtok=10.00, cache_read_per_mtok=1.25),
+                             input_per_mtok=2.5, output_per_mtok=10.0, cache_read_per_mtok=1.25),
         CloudPricingProvider(id="openai-gpt-4.1", name="OpenAI GPT-4.1",
-                             input_per_mtok=2.00, output_per_mtok=8.00, cache_read_per_mtok=0.50),
+                             input_per_mtok=2.0, output_per_mtok=8.0, cache_read_per_mtok=0.5),
+        CloudPricingProvider(id="anthropic-claude-fable-5.1", name="Anthropic Claude Fable 5.1",
+                             input_per_mtok=10.0, output_per_mtok=50.0, cache_read_per_mtok=0.25),
+        CloudPricingProvider(id="anthropic-claude-opus-5.5", name="Anthropic Claude Opus 5.5",
+                             input_per_mtok=4.0, output_per_mtok=20.0, cache_read_per_mtok=0.2),
         CloudPricingProvider(id="anthropic-claude-opus-4.8", name="Anthropic Claude Opus 4.8",
-                             input_per_mtok=5.00, output_per_mtok=25.00, cache_read_per_mtok=0.50),
+                             input_per_mtok=5.0, output_per_mtok=25.0, cache_read_per_mtok=0.5),
+        CloudPricingProvider(id="anthropic-claude-sonnet-5.5", name="Anthropic Claude Sonnet 5.5",
+                             input_per_mtok=2.0, output_per_mtok=10.0, cache_read_per_mtok=0.1),
         CloudPricingProvider(id="anthropic-claude-sonnet-4.6", name="Anthropic Claude Sonnet 4.6",
-                             input_per_mtok=3.00, output_per_mtok=15.00, cache_read_per_mtok=0.30),
-        CloudPricingProvider(id="google-gemini-2.5-pro", name="Google Gemini 2.5 Pro",
-                             input_per_mtok=1.25, output_per_mtok=10.00, cache_read_per_mtok=0.125),
+                             input_per_mtok=3.0, output_per_mtok=15.0, cache_read_per_mtok=0.3),
+        CloudPricingProvider(id="anthropic-claude-haiku-5.5", name="Anthropic Claude Haiku 5.5 (prompts hasta 100k tokens)",
+                             input_per_mtok=0.1, output_per_mtok=0.5, cache_read_per_mtok=0.01),
+        CloudPricingProvider(id="google-gemini-4-argon", name="Google Gemini 4 Argon (tarifa vigente hasta 30-nov-2026)",
+                             input_per_mtok=2.0, output_per_mtok=10.0, cache_read_per_mtok=0.1),
+        CloudPricingProvider(id="google-gemini-4-argon-dec2026", name="Google Gemini 4 Argon (desde 1-dic-2026)",
+                             input_per_mtok=4.0, output_per_mtok=20.0, cache_read_per_mtok=0.2),
+        CloudPricingProvider(id="google-gemini-3.8-flash", name="Google Gemini 3.8 Flash (tarifa introductoria hasta 31-dic-2026)",
+                             input_per_mtok=0.75, output_per_mtok=3.75, cache_read_per_mtok=0.075),
+        CloudPricingProvider(id="google-gemini-3.8-flash-2027", name="Google Gemini 3.8 Flash (desde 1-ene-2027)",
+                             input_per_mtok=1.5, output_per_mtok=7.5, cache_read_per_mtok=0.15),
+        CloudPricingProvider(id="google-gemini-3.5-flash-lite", name="Google Gemini 3.5 Flash-Lite",
+                             input_per_mtok=0.3, output_per_mtok=2.5, cache_read_per_mtok=0.03),
+        CloudPricingProvider(id="google-gemini-3.1-pro", name="Google Gemini 3.1 Pro Preview (prompts hasta 200k tokens)",
+                             input_per_mtok=2.0, output_per_mtok=12.0, cache_read_per_mtok=0.2),
+        CloudPricingProvider(id="google-gemini-2.5-pro", name="Google Gemini 2.5 Pro (prompts hasta 200k tokens)",
+                             input_per_mtok=1.25, output_per_mtok=10.0, cache_read_per_mtok=0.125),
         CloudPricingProvider(id="google-gemini-2.5-flash", name="Google Gemini 2.5 Flash",
-                             input_per_mtok=0.30, output_per_mtok=2.50, cache_read_per_mtok=0.03),
-        CloudPricingProvider(id="deepseek-v4.1-flash", name="DeepSeek V4.1 Flash",
-                             input_per_mtok=0.30, output_per_mtok=1.20, cache_read_per_mtok=0.006),
+                             input_per_mtok=0.3, output_per_mtok=2.5, cache_read_per_mtok=0.03),
+        CloudPricingProvider(id="deepseek-v4.1-flash", name="DeepSeek V4.1 Flash (horario pico)",
+                             input_per_mtok=0.3, output_per_mtok=1.2, cache_read_per_mtok=0.006),
+        CloudPricingProvider(id="deepseek-v4.1-flash-offpeak", name="DeepSeek V4.1 Flash (fuera de pico)",
+                             input_per_mtok=0.15, output_per_mtok=0.6, cache_read_per_mtok=0.003),
+        CloudPricingProvider(id="deepseek-r1", name="DeepSeek R1",
+                             input_per_mtok=0.55, output_per_mtok=2.19, cache_read_per_mtok=0.14),
+        CloudPricingProvider(id="deepseek-v3", name="DeepSeek V3",
+                             input_per_mtok=0.27, output_per_mtok=1.1, cache_read_per_mtok=0.07),
+        CloudPricingProvider(id="meta-llama-3.3-70b-instruct", name="Meta Llama 3.3 70B Instruct",
+                             input_per_mtok=0.88, output_per_mtok=0.88, cache_read_per_mtok=0.0),
+        CloudPricingProvider(id="meta-llama-3.1-405b-instruct", name="Meta Llama 3.1 405B Instruct",
+                             input_per_mtok=3.5, output_per_mtok=3.5, cache_read_per_mtok=0.0),
+        CloudPricingProvider(id="meta-llama-3.1-8b-instruct", name="Meta Llama 3.1 8B Instruct",
+                             input_per_mtok=0.1, output_per_mtok=0.1, cache_read_per_mtok=0.0),
+        CloudPricingProvider(id="mistral-large-2", name="Mistral Large 2",
+                             input_per_mtok=2.0, output_per_mtok=6.0, cache_read_per_mtok=0.5),
+        CloudPricingProvider(id="mistral-small-3", name="Mistral Small 3",
+                             input_per_mtok=0.2, output_per_mtok=0.6, cache_read_per_mtok=0.05),
+        CloudPricingProvider(id="mistral-codestral", name="Mistral Codestral",
+                             input_per_mtok=0.3, output_per_mtok=0.9, cache_read_per_mtok=0.08),
+        CloudPricingProvider(id="xai-grok-2", name="xAI Grok 2",
+                             input_per_mtok=2.0, output_per_mtok=10.0, cache_read_per_mtok=0.2),
+        CloudPricingProvider(id="xai-grok-vision-beta", name="xAI Grok Vision Beta",
+                             input_per_mtok=5.0, output_per_mtok=15.0, cache_read_per_mtok=0.5),
+        CloudPricingProvider(id="cohere-command-r-plus", name="Cohere Command R+",
+                             input_per_mtok=2.5, output_per_mtok=10.0, cache_read_per_mtok=0.25),
+        CloudPricingProvider(id="cohere-command-r", name="Cohere Command R",
+                             input_per_mtok=0.15, output_per_mtok=0.6, cache_read_per_mtok=0.015),
+        CloudPricingProvider(id="amazon-nova-pro", name="Amazon Nova Pro",
+                             input_per_mtok=0.8, output_per_mtok=3.2, cache_read_per_mtok=0.2),
+        CloudPricingProvider(id="amazon-nova-lite", name="Amazon Nova Lite",
+                             input_per_mtok=0.06, output_per_mtok=0.24, cache_read_per_mtok=0.015),
+        CloudPricingProvider(id="amazon-nova-micro", name="Amazon Nova Micro",
+                             input_per_mtok=0.035, output_per_mtok=0.14, cache_read_per_mtok=0.009),
     ]
 
 
@@ -264,6 +326,29 @@ class CloudPricingConfig(BaseModel):
     )
 
 
+class RuntimeConfig(BaseModel):
+    """Selección de aceleración GPU para el runtime gestionado (RT-10 B2).
+
+    Solo tiene sentido para familias con más de una ruta (AMD: vulkan/rocm).
+    None = default del catálogo (orden de ACCEL_SOURCES: Vulkan primero por
+    cubrir toda la familia). Es una ELECCIÓN, no un estado: se aplica en la
+    próxima descarga/reinstall; la backend realmente instalada vive en la meta
+    del runtime y se expone en /api/runtime/status como accel_source.
+    """
+
+    accel: Literal["vulkan", "rocm"] | None = None
+
+
+class AgentBridgeConfig(BaseModel):
+    """(AG-1) Integracion con OpenCode: mientras un server lanzado por la suite
+    esta 'running', su bloque de provider se publica en el config de OpenCode
+    (~/.config/opencode/) y se retira al stop/crash/shutdown. Default OFF: el
+    bridge no toca ese archivo si no se activa explicitamente. Diseno completo:
+    Files/Docs/design/ag-1-opencode-bridge.md."""
+
+    enabled: bool = False
+
+
 class ConfigSchema(BaseModel):
     """Esquema completo de config.json, usado solo para validar/generar defaults."""
 
@@ -274,6 +359,8 @@ class ConfigSchema(BaseModel):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     stt: STTConfig = Field(default_factory=STTConfig)
     tts: TTSConfig = Field(default_factory=TTSConfig)
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    agent_bridge: AgentBridgeConfig = Field(default_factory=AgentBridgeConfig)
     monitor: MonitorConfig = Field(default_factory=MonitorConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     exports: ExportsConfig = Field(default_factory=ExportsConfig)
@@ -391,3 +478,14 @@ def get_cloud_pricing() -> CloudPricingConfig:
         return CloudPricingConfig.model_validate(config.get("cloud_pricing") or {})
     except (ValidationError, TypeError):
         return CloudPricingConfig()
+
+
+def get_runtime_accel_choice() -> str | None:
+    """(RT-10 B2) Aceleración elegida por el usuario para el runtime (config.
+    runtime.accel). POST /api/config no valida el patch (deep-merge abierto), así
+    que la garantía vive en la lectura: lo que no valida como RuntimeConfig se
+    trata como "sin elección" → default del catálogo (Vulkan primero en AMD)."""
+    try:
+        return RuntimeConfig.model_validate(config.get("runtime") or {}).accel
+    except (ValidationError, TypeError):
+        return None

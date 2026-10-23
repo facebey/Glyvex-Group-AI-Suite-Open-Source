@@ -3,11 +3,10 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, CheckCircle2, Circle, Cpu, Download, Mic, Settings, Volume2 } from "lucide-react";
 import { consumeSSE } from "../lib/sse.js";
+import { runtimeSizeMb } from "../lib/runtimeSize.js";
 
-// Estimaciones compartidas con RuntimeSettings: motor base ~19 MB
-// (cualquier GPU) + aceleración NVIDIA ~530 MB; runtime STT ~162 MB.
-const SIZE_MB = 549;
-const SIZE_MB_BASE = 19;
+// Estimaciones de descarga del runtime centralizadas en lib/runtimeSize.js
+// (RT-10, espejo de ACCEL_SOURCES del backend); runtime STT ~162 MB.
 const STT_SIZE_MB = 162;
 
 export default function Provision() {
@@ -118,7 +117,7 @@ export default function Provision() {
     </div>
   );
 
-  const sizeMb = runtime?.gpu_family === "nvidia" ? SIZE_MB : SIZE_MB_BASE;
+  const sizeMb = runtimeSizeMb(runtime?.gpu_family, runtime?.accel_choice);
 
   // Paso 1 — runtime llama.cpp (obligatorio)
   let runtimeView;

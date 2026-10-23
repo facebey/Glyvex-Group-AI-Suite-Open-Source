@@ -101,6 +101,30 @@ def test_defaults_de_display_y_exports():
     assert data["exports"]["influx"]["enabled"] is False
 
 
+def test_default_de_runtime_para_aceleracion():
+    # RT-10 B2: sin elección guardada el runtime usa el default del catálogo
+    # (Vulkan primero en AMD); la selección vive en runtime.accel.
+    import config as config_module
+
+    assert config_module.Config().defaults()["runtime"] == {"accel": None}
+
+
+async def test_runtime_accel_roundtrip(client):
+    # RT-10 B2: el parche persiste la elección y GET la devuelve. POST /api/config
+    # no valida el parche (MON-2): la validación vive en la lectura
+    # (config.get_runtime_accel_choice → cubierto en test_runtime_api.py).
+    data = (await client.get("/api/config")).json()
+    assert data["runtime"] == {"accel": None}
+
+    await client.post("/api/config", json={"runtime": {"accel": "rocm"}})
+    data = (await client.get("/api/config")).json()
+    assert data["runtime"]["accel"] == "rocm"
+
+    await client.post("/api/config/reset")
+    data = (await client.get("/api/config")).json()
+    assert data["runtime"] == {"accel": None}
+
+
 def test_redaccion_de_secretos_en_el_log():
     import main
 

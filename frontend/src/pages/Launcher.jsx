@@ -30,11 +30,13 @@ import {
   MemoryStick,
   Flag,
   Database,
+  ExternalLink,
+  Bot,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useLlmStream } from "../hooks/useLlmStream.js";
 import { useLocalStorage } from "../hooks/useLocalStorage";
-import { useDisplay } from "../lib/metricsDisplay.js";
+import { useDisplay, CONFIG_SAVED_EVENT } from "../lib/metricsDisplay.js";
 import { useTranslation } from "react-i18next";
 import CollapsiblePanel from "../components/ui/CollapsiblePanel.jsx";
 import BrowseButton from "../components/ui/BrowseButton.jsx";
@@ -1171,6 +1173,11 @@ export default function Launcher() {
   const [showCommand, setShowCommand] = useState(false);
   const [commandPreview, setCommandPreview] = useState(null);
   const [commandError, setCommandError] = useState(null);
+  // AG-1: estado del bridge para saber si el server running quedó publicado
+  // en el config de OpenCode (solo se consulta con un server activo).
+  const [bridgeStatus, setBridgeStatus] = useState(null);
+  const [bridgeOpening, setBridgeOpening] = useState(false);
+  const [bridgeLaunchError, setBridgeLaunchError] = useState(null);
 
   // Una vez que el usuario (o un template, o una config restaurada) definió
   // el sampling, la metadata del GGUF ya no lo pisa.
@@ -1424,6 +1431,50 @@ export default function Launcher() {
     }, 2000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; };
   }, [processInfo]);
+
+  // AG-1: estado del bridge para la card "Agentes" (toggle vigente + modelos
+  // publicados). Se consulta al montar, en cada cambio de estado del proceso y
+  // cuando se guarda la config (el toggle vive en Config).
+  const refreshBridgeStatus = useCallback(() => {
+    fetch("/api/agent-bridge/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => { if (s) setBridgeStatus(s); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshBridgeStatus();
+    const onConfigSaved = () => refreshBridgeStatus();
+    window.addEventListener(CONFIG_SAVED_EVENT, onConfigSaved);
+    return () => window.removeEventListener(CONFIG_SAVED_EVENT, onConfigSaved);
+  }, [refreshBridgeStatus, processInfo?.state]);
+
+  const bridgePublished = Boolean(
+    processInfo && bridgeStatus?.enabled &&
+    bridgeStatus.published?.some((p) => p.process_id === processInfo.process_id)
+  );
+
+  // POST /api/agent-bridge/launch: abre la TUI de OpenCode en una ventana
+  // propia (el backend detecta el CLI; si no está, muestra el error acá).
+  async function openOpenCode() {
+    setBridgeOpening(true);
+    setBridgeLaunchError(null);
+    try {
+      const res = await fetch("/api/agent-bridge/launch", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.launched) {
+        setBridgeLaunchError(
+          data.error === "opencode_cli_not_found"
+            ? t("launcher.bridgeOpenNotFound")
+            : t("launcher.bridgeOpenFail")
+        );
+      }
+    } catch {
+      setBridgeLaunchError(t("launcher.bridgeOpenFail"));
+    } finally {
+      setBridgeOpening(false);
+    }
+  }
 
   // Scroll al panel de configuración cuando se entra desde "Configurar"
   useEffect(() => {
@@ -2444,6 +2495,52 @@ export default function Launcher() {
             )}
           </div>
 
+          {bridgeStatus?.enabled && (
+            <Panel icon={Bot} title={t("launcher.agentsCard")}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-glyvex-text">OpenCode</p>
+                  <p className="text-xs text-glyvex-muted">{t("launcher.agentsDesc")}</p>
+                </div>
+                <span className="px-2 py-0.5 rounded border text-xs font-medium border-emerald-500/40 text-emerald-300 bg-emerald-500/10">
+                  {t("config.agentBridge.enabled")}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={openOpenCode}
+                disabled={bridgeOpening}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-md bg-glyvex-accent text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                {bridgeOpening ? <Loader2 size={16} className="animate-spin" /> : <ExternalLink size={16} />}
+                {t("launcher.bridgeOpen")}
+              </button>
+              {bridgeLaunchError && <p className="text-xs text-red-400">{bridgeLaunchError}</p>}
+
+              <div>
+                <p className="text-xs text-glyvex-muted mb-1">{t("launcher.agentsPublishedTitle")}</p>
+                {(bridgeStatus.published?.length ?? 0) === 0 ? (
+                  <p className="text-xs text-glyvex-muted">{t("launcher.agentsPublishedEmpty")}</p>
+                ) : (
+                  <ul className="space-y-1">
+                    {bridgeStatus.published.map((p) => (
+                      <li key={p.process_id} className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-mono text-glyvex-text">{p.model_name}</span>
+                        <span className="text-glyvex-muted">{p.host}:{p.port}</span>
+                        {p.vision && (
+                          <span className="px-1.5 py-0.5 rounded border border-sky-500/40 text-sky-300 bg-sky-500/10 text-[10px] font-medium">
+                            {t("config.agentBridge.publishedVision")}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </Panel>
+          )}
+
           <Panel icon={GaugeIcon} title={t("launcher.processState")}>
             {!processInfo ? (
               <p className="text-sm text-glyvex-muted">{t("launcher.noActiveProcess")}</p>
@@ -2454,6 +2551,11 @@ export default function Launcher() {
                   {processInfo.pid && <span className="text-sm text-glyvex-muted">PID {processInfo.pid}</span>}
                   <span className="text-sm text-glyvex-muted">{processInfo.host}:{processInfo.port}</span>
                     {processInfo.state === "running" && <span className="text-sm text-emerald-400">{t("launcher.serverReady")}</span>}
+                    {bridgePublished && (
+                      <span className="px-2 py-1 rounded border text-xs font-medium border-emerald-500/40 text-emerald-300 bg-emerald-500/10">
+                        {t("launcher.bridgePublished")}
+                      </span>
+                    )}
                 </div>
                 {processInfo.warning && <p className="text-sm text-amber-400">{processInfo.warning}</p>}
                 {processInfo.error_message && <p className="text-sm text-red-400">{processInfo.error_message}</p>}

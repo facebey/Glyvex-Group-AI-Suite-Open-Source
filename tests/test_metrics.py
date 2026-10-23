@@ -32,6 +32,129 @@ async def test_no_nvidia_graceful(client, monkeypatch):
     assert data["gpu_error"] is not None
 
 
+async def test_no_amd_resource_keeps_nvml_error_verbatim(client, monkeypatch):
+    # MON-6: sin recurso LibreHardwareMonitor (conftet aísla DATA_DIR/BUNDLE_DIR),
+    # el error de degradación debe quedar EXACTAMENTE el de siempre: nada de
+    # sufijos "fallback AMD" en máquinas sin AMD.
+    monkeypatch.setattr(metrics_module, "PYNVML_AVAILABLE", False)
+
+    res = await client.get("/api/metrics/snapshot")
+    data = res.json()
+    assert data["gpu"] is None
+    assert data["gpu_error"] == "pynvml no está instalado"
+
+
+async def test_gpu_amd_fallback_via_sidecar(client, monkeypatch):
+    # Sin NVML pero con un sidecar LHM fake que reporta una RX 7600: el
+    # snapshot debe traer la GPU con el schema GpuMetrics normal (el frontend
+    # no distingue la fuente).
+    monkeypatch.setattr(metrics_module, "PYNVML_AVAILABLE", False)
+
+    fake_entry = {
+        "index": 0,
+        "name": "AMD Radeon RX 7600",
+        "vram_used_mb": 3276.8,
+        "vram_total_mb": 8192.0,
+        "vram_free_mb": 4198.4,
+        "vram_percent": 40.0,
+        "gpu_utilization": 37,
+        "memory_utilization": 12,
+        "temperature_c": 52,
+        "power_draw_w": 98.7,
+        "power_limit_w": None,
+        "clock_graphics_mhz": 2500,
+        "clock_memory_mhz": 2000,
+        "fan_speed_pct": 45,
+    }
+
+    class _FakeSidecar:
+        def __init__(self):
+            self.shutdown_called = 0
+
+        def collect(self):
+            return [dict(fake_entry)], None
+
+        def shutdown(self):
+            self.shutdown_called += 1
+
+    sidecar = _FakeSidecar()
+    metrics_module.manager.collector._lhm = sidecar
+
+    res = await client.get("/api/metrics/snapshot")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["gpu_error"] is None
+    assert len(data["gpu"]) == 1
+    gpu = data["gpu"][0]
+    assert gpu["name"] == "AMD Radeon RX 7600"
+    assert gpu["temperature_c"] == 52
+    assert gpu["vram_total_mb"] == pytest.approx(8192.0)
+    assert gpu["vram_percent"] == pytest.approx(40.0)
+
+
+async def test_nvml_success_never_consults_sidecar(client, monkeypatch):
+    # Con NVML funcionando (GPU NVIDIA presente), el fallback AMD no se toca
+    # ni por asomo: un sidecar que explota al consultarlo lo delata.
+    _mock_nvml(monkeypatch, _FakePynvml())
+    monkeypatch.setattr(metrics_module, "PYNVML_AVAILABLE", True)
+
+    class _BoomSidecar:
+        def collect(self):
+            raise AssertionError("el fallback LHM no debe consultarse con NVML vivo")
+
+        def shutdown(self):
+            pass
+
+    metrics_module.manager.collector._lhm = _BoomSidecar()
+
+    res = await client.get("/api/metrics/snapshot")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["gpu"] is not None and data["gpu_error"] is None
+
+
+async def test_gpu_sidecar_failure_appends_detail(client, monkeypatch):
+    # Sidecar presente pero roto (lanza al collect): el error original se
+    # conserva como prefijo y se agrega el detalle del fallback, sin crashear.
+    monkeypatch.setattr(metrics_module, "PYNVML_AVAILABLE", False)
+
+    class _BrokenSidecar:
+        def collect(self):
+            raise RuntimeError("sidecar caído")
+
+        def shutdown(self):
+            pass
+
+    metrics_module.manager.collector._lhm = _BrokenSidecar()
+
+    res = await client.get("/api/metrics/snapshot")
+    data = res.json()
+    assert data["gpu"] is None
+    assert data["gpu_error"].startswith("pynvml no está instalado")
+    assert "fallback AMD" in data["gpu_error"]
+
+
+async def test_restore_all_also_stops_lhm_sidecar(client):
+    # POST /gpu/fan/restore-all es el hook pre-kill de Tauri: debe apagar
+    # también el sidecar LHM propio para no dejarlo huérfano.
+    class _FakeSidecar:
+        def __init__(self):
+            self.shutdown_called = 0
+
+        def collect(self):
+            return [], "no usado"
+
+        def shutdown(self):
+            self.shutdown_called += 1
+
+    sidecar = _FakeSidecar()
+    metrics_module.manager.collector._lhm = sidecar
+
+    res = await client.post("/api/metrics/gpu/fan/restore-all")
+    assert res.status_code == 200
+    assert sidecar.shutdown_called >= 1
+
+
 async def test_cpu_percent_range(client):
     res = await client.get("/api/metrics/snapshot")
     data = res.json()

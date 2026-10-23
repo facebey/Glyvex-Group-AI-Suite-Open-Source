@@ -170,6 +170,19 @@ def test_extract_zip_flat_stays_in_place(tmp_path):
     assert (target / "cudart64_13.dll").read_bytes() == b"DLL"
 
 
+def test_extract_zip_single_file_flat(tmp_path):
+    # Regresión del heurístico de root (RT-10 B1): un zip PLANO de UN solo
+    # archivo no es una carpeta raíz. El heurístico antiguo veía un solo top
+    # y se lo comía como prefix → no extraía nada.
+    z = _make_zip(tmp_path, {"ggml-vulkan.dll": b"VK"})
+    target = tmp_path / "out"
+    target.mkdir()
+
+    runtime_module._extract_zip(z, target)
+
+    assert (target / "ggml-vulkan.dll").read_bytes() == b"VK"
+
+
 def test_extract_zip_rejects_entry_outside_target(tmp_path):
     # El guard NO dispara con "../evil.txt" sola (el prefix-strip la
     # neutralizaría); hace falta 2+ top-level names para que el prefix
@@ -237,6 +250,17 @@ def test_extract_targz_flat_stays_in_place(tmp_path):
 
     assert (target / "llama-server").read_bytes() == b"BIN"
     assert (target / "libllama.so").read_bytes() == b"LIB"
+
+
+def test_extract_targz_single_file_flat(tmp_path):
+    # Mismo caso que test_extract_zip_single_file_flat en tar.gz.
+    a = _make_targz(tmp_path, {"libggml-vulkan.so": (b"VK", 0o644)})
+    target = tmp_path / "out"
+    target.mkdir()
+
+    runtime_module._extract_targz(a, target)
+
+    assert (target / "libggml-vulkan.so").read_bytes() == b"VK"
 
 
 def test_extract_targz_rejects_entry_outside_target(tmp_path):
@@ -320,8 +344,8 @@ def test_extract_archive_dispatches_by_suffix(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 
 
-def test_select_base_source_official_b11349_verifiable(monkeypatch):
-    # Bump b11349: la fuente es la build oficial de la release (los archives
+def test_select_base_source_official_b11827_verifiable(monkeypatch):
+    # Bump b11827: la fuente es la build oficial de la release (los archives
     # propios "glyvex" eran específicos de b11009).
     _force_windows(monkeypatch)
     source = runtime_module._select_base_source()
@@ -330,7 +354,7 @@ def test_select_base_source_official_b11349_verifiable(monkeypatch):
     assert source["id"] == "official"
     assert len(files) == 1
     assert all(len(f["sha256"]) == 64 for f in files)
-    assert all("b11349" in f["url"] for f in files)
+    assert all("b11827" in f["url"] for f in files)
     assert all(f["url"].endswith(".zip") for f in files)
 
 
@@ -345,7 +369,7 @@ def test_select_accel_source_windows_default_cuda12(monkeypatch):
     assert source["cuda_major"] == 12
     assert all(len(f["sha256"]) == 64 for f in files)
     assert len(files) == 2
-    assert all("b11349" in f["url"] for f in files)
+    assert all("b11827" in f["url"] for f in files)
     assert all(f["url"].endswith(".zip") for f in files)
     assert all("cuda-12.4" in f["url"] for f in files)
 
@@ -442,15 +466,15 @@ def test_platform_files_selects_current_platform(monkeypatch):
         runtime_module._select_base_source()["files"]
     )
     assert [f["url"].rsplit("/", 1)[-1] for f in base_files] == [
-        "llama-b11349-bin-ubuntu-x64.tar.gz",
+        "llama-b11827-bin-ubuntu-x64.tar.gz",
     ]
     accel = runtime_module._select_accel_source("nvidia")
     # Linux elige 12.8 (primera fuente): CUDA 13.4 exige driver >=590.
     assert accel["id"] == "official-cuda-12.8"
     accel_files = runtime_module._platform_files(accel["files"])
     assert [f["url"].rsplit("/", 1)[-1] for f in accel_files] == [
-        "llama-b11349-bin-ubuntu-cuda-12.8-x64.tar.gz",
-        "cudart-llama-b11349-bin-ubuntu-cuda-12.8-x64.tar.gz",
+        "llama-b11827-bin-ubuntu-cuda-12.8-x64.tar.gz",
+        "cudart-llama-b11827-bin-ubuntu-cuda-12.8-x64.tar.gz",
     ]
 
     _force_windows(monkeypatch)
@@ -458,7 +482,7 @@ def test_platform_files_selects_current_platform(monkeypatch):
         runtime_module._select_base_source()["files"]
     )
     assert [f["url"].rsplit("/", 1)[-1] for f in base_files] == [
-        "llama-b11349-bin-win-cpu-x64.zip",
+        "llama-b11827-bin-win-cpu-x64.zip",
     ]
     accel_files = runtime_module._platform_files(
         runtime_module._select_accel_source("nvidia")["files"]
@@ -467,11 +491,74 @@ def test_platform_files_selects_current_platform(monkeypatch):
     assert all(f["url"].endswith(".zip") for f in accel_files)
 
 
-def test_select_accel_source_none_for_family_without_package():
-    # Fase A: solo nvidia tiene paquete. AMD/Intel/CPU → None (degradado).
+def test_select_accel_source_none_for_family_without_package(monkeypatch):
+    # Sin paquete para la familia → None (runtime degradado a CPU). B1
+    # (RT-10): AMD ya tiene paquete Vulkan en Windows (ver
+    # test_select_accel_source_amd_vulkan); en Linux sigue sin package
+    # validado (solo hay build Windows aprobada por el protocolo).
+    _force_windows(monkeypatch)
+    assert runtime_module._select_accel_source("intel") is None
+    assert runtime_module._select_accel_source("cpu") is None
+    _force_linux(monkeypatch)
     assert runtime_module._select_accel_source("amd") is None
     assert runtime_module._select_accel_source("intel") is None
     assert runtime_module._select_accel_source("cpu") is None
+
+
+def test_select_accel_source_amd_vulkan(monkeypatch):
+    # RT-10 B1: AMD ofrece la build Vulkan b11827 (win-only) pinnada por el
+    # protocolo PRUEBA-VULKAN-AMD-b11827.md. Sin tag cuda_major: se elige en
+    # la 1ª pasada para cualquier arquitectura. El merge a main queda
+    # condicionado a la aprobación del protocolo en hardware real.
+    _force_windows(monkeypatch)
+    _force_cc(monkeypatch, None)
+    src = runtime_module._select_accel_source("amd")
+    assert src["id"] == "official-vulkan"
+    files = runtime_module._platform_files(src["files"])
+    assert [f["url"].rsplit("/", 1)[-1] for f in files] == [
+        "llama-b11827-bin-win-vulkan-x64.zip",
+    ]
+    assert all(f["sha256"] for f in files)
+
+
+def test_select_accel_source_amd_choice_rocm(monkeypatch):
+    # RT-10 B2: la elección explícita "rocm" devuelve el paquete ROCm 10.0
+    # pinnado por la Parte 2 de PRUEBA-VULKAN-AMD-b11827.md. Sin elección el
+    # default sigue siendo Vulkan (orden de ACCEL_SOURCES: cubre toda AMD).
+    _force_windows(monkeypatch)
+    _force_cc(monkeypatch, None)
+    assert runtime_module._select_accel_source("amd")["id"] == "official-vulkan"
+    src = runtime_module._select_accel_source("amd", "rocm")
+    assert src["id"] == "official-rocm-10.0"
+    files = runtime_module._platform_files(src["files"])
+    assert [f["url"].rsplit("/", 1)[-1] for f in files] == [
+        "llama-b11827-bin-win-rocm-10.0-x64.zip",
+    ]
+    assert [f["sha256"] for f in files] == [
+        "290c51fc21ce1ae2a1918fdc91334ca3cec571eb8cc84b524fbfd2c124b92c43",
+    ]
+
+
+def test_select_accel_source_choice_without_package_degrades(monkeypatch):
+    # RT-10 B2: una ruta elegida que no existe para la familia/plataforma →
+    # None, sin fallback implícito a otra ruta (la UI explica el degradado).
+    _force_windows(monkeypatch)
+    _force_cc(monkeypatch, None)
+    assert runtime_module._select_accel_source("amd", "cuda") is None
+    _force_linux(monkeypatch)
+    assert runtime_module._select_accel_source("amd", "rocm") is None
+
+
+def test_accel_choices_lists_amd_paths_on_windows(monkeypatch):
+    # RT-10 B2: AMD en Windows ofrece dos rutas seleccionables; las familias
+    # sin rutas seleccionables (NVIDIA se fija por cuda_major) y Linux (sin
+    # package validado aún) ofrecen lista vacía.
+    _force_windows(monkeypatch)
+    assert runtime_module.accel_choices("amd") == ["vulkan", "rocm"]
+    assert runtime_module.accel_choices("nvidia") == []
+    assert runtime_module.accel_choices("intel") == []
+    _force_linux(monkeypatch)
+    assert runtime_module.accel_choices("amd") == []
 
 
 def test_select_sources_none_when_nothing_verifiable(monkeypatch):
@@ -587,7 +674,7 @@ def test_status_ready_with_meta(monkeypatch):
     d.mkdir(parents=True)
     (d / runtime_module.BINARY_NAME).write_bytes(b"FAKE-EXE")
     (d / runtime_module.META_FILENAME).write_text(
-        json.dumps({"state": "ready", "build": "b11349", "source": "official"}),
+        json.dumps({"state": "ready", "build": "b11827", "source": "official"}),
         encoding="utf-8",
     )
 
@@ -595,7 +682,7 @@ def test_status_ready_with_meta(monkeypatch):
 
     assert st["state"] == "ready"
     assert st["binary_path"] == str(d / runtime_module.BINARY_NAME)
-    assert st["build"] == "b11349"
+    assert st["build"] == "b11827"
     assert st["source"] == "official"
     assert st["size_mb"] is not None
 
@@ -659,7 +746,7 @@ def test_status_ready_not_outdated_even_with_previous_build(monkeypatch):
     d.mkdir(parents=True)
     (d / runtime_module.BINARY_NAME).write_bytes(b"EXE")
     (d / runtime_module.META_FILENAME).write_text(
-        json.dumps({"state": "ready", "build": "b11349", "source": "official"}),
+        json.dumps({"state": "ready", "build": "b11827", "source": "official"}),
         encoding="utf-8",
     )
 
@@ -736,8 +823,11 @@ def _zip_bytes(entries: dict[str, bytes]) -> bytes:
     return buf.getvalue()
 
 
-def _stub_sources(monkeypatch, base_body: bytes, accel_body: bytes | None, family: str):
-    """BASE/ACCEL con URLs fake + sha256 reales de los bodies en memoria."""
+def _stub_sources(monkeypatch, base_body: bytes, accel_body: bytes | None, family: str,
+                  accel_tag: str | None = None):
+    """BASE/ACCEL con URLs fake + sha256 reales de los bodies en memoria.
+    accel_tag (RT-10 B2): tag "accel" de la fuente fake para probar elecciones
+    explícitas vulkan/rocm; sin tag el default del catálogo la ignora."""
     base_url = "http://fake/base.zip"
     bodies = {base_url: base_body}
     monkeypatch.setattr(
@@ -751,6 +841,7 @@ def _stub_sources(monkeypatch, base_body: bytes, accel_body: bytes | None, famil
         bodies[accel_url] = accel_body
         accel_sources[family] = [{
             "id": "fake-accel",
+            "accel": accel_tag,
             "files": [{"url": accel_url,
                        "sha256": hashlib.sha256(accel_body).hexdigest()}],
         }]
@@ -793,6 +884,83 @@ async def test_download_two_stage_with_accel(monkeypatch, tmp_path):
     assert meta["accel"] == "nvidia"
     assert meta["accel_source"] == "fake-accel"
     assert set(meta["files"]) == {"base.zip", "accel.zip"}
+
+
+async def test_download_two_stage_with_accel_amd(monkeypatch, tmp_path):
+    # RT-10 B1: familia amd dispara la etapa 2 con el paquete Vulkan (mismo
+    # flujo que CUDA): la meta registra accel="amd" y la dll extraida.
+    _setup_download(monkeypatch, tmp_path, "amd")
+    bodies = _stub_sources(
+        monkeypatch,
+        _zip_bytes({"llama-server.exe": b"EXE", "llama.dll": b"LIB"}),
+        _zip_bytes({"ggml-vulkan.dll": b"VK"}),
+        "amd",
+    )
+    _patch_transport(monkeypatch, lambda req: httpx.Response(200, content=bodies[req.url]))
+
+    st = await runtime_module.download_runtime()
+
+    assert st["state"] == "ready"
+    assert st["accel"] == "amd"
+    assert st["accel_error"] is None
+    d = runtime_module.runtime_dir()
+    assert (d / "llama-server.exe").read_bytes() == b"EXE"
+    assert (d / "ggml-vulkan.dll").read_bytes() == b"VK"
+    meta = json.loads((d / runtime_module.META_FILENAME).read_text(encoding="utf-8"))
+    assert meta["accel"] == "amd"
+    assert meta["accel_source"] == "fake-accel"
+
+
+async def test_download_two_stage_amd_rocm_choice(monkeypatch, tmp_path):
+    # RT-10 B2: la elección explícita de ROCm descarga la etapa 2 con el
+    # paquete ROCm (mismo flujo que Vulkan/CUDA) y la meta registra la fuente
+    # elegida; la UI lo lee vía status.accel_source.
+    _setup_download(monkeypatch, tmp_path, "amd")
+    bodies = _stub_sources(
+        monkeypatch,
+        _zip_bytes({"llama-server.exe": b"EXE", "llama.dll": b"LIB"}),
+        _zip_bytes({"ggml-hip.dll": b"HIP", "rocblas.dll": b"RB"}),
+        "amd",
+        accel_tag="rocm",
+    )
+    _patch_transport(monkeypatch, lambda req: httpx.Response(200, content=bodies[req.url]))
+
+    st = await runtime_module.download_runtime(accel_choice="rocm")
+
+    assert st["state"] == "ready"
+    assert st["accel"] == "amd"
+    assert st["accel_source"] == "fake-accel"
+    assert st["accel_error"] is None
+    d = runtime_module.runtime_dir()
+    assert (d / "llama-server.exe").read_bytes() == b"EXE"
+    assert (d / "ggml-hip.dll").read_bytes() == b"HIP"
+    meta = json.loads((d / runtime_module.META_FILENAME).read_text(encoding="utf-8"))
+    assert meta["accel_source"] == "fake-accel"
+
+
+async def test_download_choice_unavailable_degrades_with_error(monkeypatch, tmp_path):
+    # RT-10 B2: elegir una ruta sin paquete para la familia deja el runtime
+    # operativo en CPU base con accel_error explícito (no cae silenciosamente
+    # a otra ruta): el usuario eligió y debe ver por qué no se aplicó.
+    _setup_download(monkeypatch, tmp_path, "amd")
+    bodies = _stub_sources(
+        monkeypatch,
+        _zip_bytes({"llama-server.exe": b"EXE", "llama.dll": b"LIB"}),
+        None,
+        "amd",
+    )
+    _patch_transport(monkeypatch, lambda req: httpx.Response(200, content=bodies[req.url]))
+
+    st = await runtime_module.download_runtime(accel_choice="rocm")
+
+    assert st["state"] == "ready"
+    assert st["accel"] is None
+    assert st["accel_source"] is None
+    assert "rocm" in (st["accel_error"] or "")
+    d = runtime_module.runtime_dir()
+    assert (d / "llama-server.exe").read_bytes() == b"EXE"
+    meta = json.loads((d / runtime_module.META_FILENAME).read_text(encoding="utf-8"))
+    assert "rocm" in (meta["accel_error"] or "")
 
 
 async def test_download_accel_failure_degrades_to_cpu(monkeypatch, tmp_path):

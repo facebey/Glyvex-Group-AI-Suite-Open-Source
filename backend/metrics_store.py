@@ -181,6 +181,99 @@ class MetricsStore:
             for r in rows
         ]
 
+    # -- consumo total por instancia (MON-4) y total de por vida (MON-5) --------
+
+    def _merge_consumption(self, conn: sqlite3.Connection, series_id: int) -> dict[str, Any] | None:
+        """
+        Total de vida de una serie de contadores, mergeando reinicios.
+
+        Los contadores de llama-server acumulan por corrida de SO: un restart
+        con el mismo process_id los vuelve a 0. El total de vida es entonces la
+        primera muestra observada más la suma de deltas positivos; una caída
+        entre muestras es un reinicio (cuenta como corrida nueva y su primer
+        valor se suma como semilla de esa corrida). Dentro de una corrida la
+        suma es telescópica: sale igual del nivel crudo o del compactado, porque
+        los puntos intermedios se cancelan. Se usa el nivel con la cobertura
+        más antigua para no perder el tramo viejo de servidores largos por la
+        retención. Arista: un reinicio dentro de una ventana compactada mezcla
+        sus valores y ese merge es levemente aproximado.
+        """
+        best: tuple[int, int, str] | None = None  # (first_ts, last_ts, tabla)
+        for table in TABLE.values():
+            first, last, n = conn.execute(
+                f"SELECT MIN(ts), MAX(ts), COUNT(*) FROM {table} WHERE series_id = ?",
+                (series_id,),
+            ).fetchone()
+            if n and (best is None or first < best[0]):
+                best = (first, last, table)
+        if best is None:
+            return None
+        first_ts, last_ts, table = best
+        values = [r[0] for r in conn.execute(
+            f"SELECT avg FROM {table} WHERE series_id = ? ORDER BY ts", (series_id,)
+        )]
+        total = values[0]
+        runs = 1
+        for prev, cur in zip(values, values[1:]):
+            if cur < prev:
+                runs += 1
+                total += cur
+            elif cur > prev:
+                total += cur - prev
+        return {"total": int(round(total)), "first_ts": first_ts, "last_ts": last_ts, "runs": runs}
+
+    def consumption_totals(self, process_id: str, keys: list[str]) -> dict[str, Any]:
+        """
+        Tokens acumulados de vida por contador de un process_id, mergeando
+        reinicios (ver _merge_consumption). Key o proceso sin muestras: None.
+        """
+        out: dict[str, Any] = {}
+        with self._lock:
+            conn = self._db()
+            for key in keys:
+                row = conn.execute(
+                    "SELECT id, model_name FROM metric_series WHERE key = ? AND process_id = ?",
+                    (key, process_id),
+                ).fetchone()
+                if row is None:
+                    out[key] = None
+                    continue
+                series_id, model_name = row
+                merged = self._merge_consumption(conn, series_id)
+                if merged is None:
+                    out[key] = None
+                    continue
+                merged["model_name"] = model_name
+                out[key] = merged
+        return out
+
+    def consumption_series_all(self, keys: list[str]) -> list[dict[str, Any]]:
+        """
+        MON-5: totales de vida de TODAS las instancias registradas: una fila por
+        cada serie (key, process_id) de scope llm existente en la db, con el mismo
+        merge de reinicios que consumption_totals. Se saltean las series sin
+        muestras y el scope hw: así el gran total cubre todos los servers que
+        alguna vez fueron monitoriados por esta instalación.
+        """
+        if not keys:
+            return []
+        placeholders = ",".join("?" for _ in keys)
+        out: list[dict[str, Any]] = []
+        with self._lock:
+            conn = self._db()
+            rows = conn.execute(
+                f"SELECT id, key, process_id, model_name FROM metric_series "
+                f"WHERE scope = 'llm' AND key IN ({placeholders}) "
+                f"ORDER BY model_name, process_id, key",
+                tuple(keys),
+            ).fetchall()
+            for series_id, key, process_id, model_name in rows:
+                merged = self._merge_consumption(conn, series_id)
+                if merged is None:
+                    continue
+                out.append({"key": key, "process_id": process_id, "model_name": model_name, **merged})
+        return out
+
     # -- escritura ------------------------------------------------------------
 
     def write_raw(
