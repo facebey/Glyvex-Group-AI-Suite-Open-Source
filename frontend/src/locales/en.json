@@ -835,13 +835,18 @@
       "sinceStart": "Accumulated by llama-server since its startup, across all clients (app chat, OpenCode or any other API consumer).",
       "merged": "Includes {{n}} merged startups of the same process",
       "providerLabel": "Reference provider",
-      "cloudCost": "The same on {{name}} would cost: {{cost}}",
+      "cloudCostLabel": "The same on {{name}} would cost",
       "noPricing": "No pricing providers: edit the table in Config → Cloud pricing.",
       "lifetimeTitle": "Lifetime total (all instances)",
       "lifetimeMeta": "Sum of the consumption of {{n}} instance(s) monitored by this installation, across all clients.",
       "lifetimeSince": "since {{date}}",
       "lifetimeModelsLabel": "Breakdown by model",
-      "lifetimeModelCost": "The same would cost: {{cost}}",
+      "lifetimeModelCost": "The same would cost",
+      "splitLabel": "Consumption breakdown by origin",
+      "splitChat": "App chat (this installation)",
+      "splitExternal": "Other clients (API, OpenCode, local benchmarks)",
+      "splitShare": "{{share}}% of total",
+      "splitNote": "The app chat counter starts on {{date}}: consumption before that date shows up as external.",
       "unknownModel": "Unnamed model"
     }
   },
@@ -885,6 +890,11 @@
     "step3": "Step 3 — Parameters",
     "modelLabel": "Model",
     "modelNamePh": "model name",
+    "customEndpointOption": "Other endpoint (external URL)",
+    "apiKeyPh": "api key (optional)",
+    "advancedMode": "Advanced mode",
+    "simpleDefaults": "Using standard parameters: temperature 0.0, max tokens 2048, repetitions 1 and endpoint-default sampling. Enable 'Advanced mode' to adjust them.",
+    "samplingHint": "Empty = endpoint default. top_k, min_p, repeat_penalty and seed are llama-server params; other endpoints may ignore them.",
     "repetitions": "Repetitions",
     "start": "START BENCHMARK",
     "progress": "Progress: {{done}}/{{total}}",
@@ -1140,7 +1150,7 @@
       "finished": "Finished",
       "status": "Status",
       "avgJudgeScore": "Avg Judge score",
-      "notEvaluated": "This run has not been evaluated with Judge yet. To evaluate it, open the run in Benchmark and use the Judge panel."
+      "notEvaluated": "This run has not been evaluated with Judge yet. Use the Judge panel below to judge it with a model."
     },
     "compare": {
       "metric": "Metric",

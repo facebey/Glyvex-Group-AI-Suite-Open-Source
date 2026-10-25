@@ -73,6 +73,58 @@ async def test_reset_zeros_and_persists(tmp_path):
     assert st2.snapshot()["turns"] == 0
 
 
+async def test_lifetime_survives_reset(tmp_path):
+    # MON-5: reset() zera la sesión pero el lifetime nunca se toca: es lo que
+    # permite desglosar chat-vs-externo en el "Total de por vida".
+    st = session_tokens_module.SessionTokens(path=tmp_path / "session_tokens.json")
+    await st.record_turn(prompt_tokens=100, completion_tokens=50, cached_tokens=40)
+    snap = await st.reset()
+    assert snap["prompt_tokens"] == 0 and snap["turns"] == 0
+    life = snap["lifetime"]
+    assert life["prompt_tokens"] == 100
+    assert life["completion_tokens"] == 50
+    assert life["cached_tokens"] == 40
+    assert life["turns"] == 1
+
+    # El lifetime queda en disco y sobrevive un reinicio de la app.
+    st2 = session_tokens_module.SessionTokens(path=st.path)
+    await st2.load()
+    assert st2.snapshot()["turns"] == 0
+    assert st2.snapshot()["lifetime"]["prompt_tokens"] == 100
+
+    # Turnos posteriores suman sesión y lifetime por separado.
+    await st2.record_turn(prompt_tokens=7, completion_tokens=3)
+    snap2 = st2.snapshot()
+    assert snap2["prompt_tokens"] == 7 and snap2["turns"] == 1
+    assert snap2["lifetime"]["prompt_tokens"] == 107
+    assert snap2["lifetime"]["turns"] == 2
+
+
+async def test_load_migrates_legacy_file_without_lifetime(tmp_path):
+    # Un session_tokens.json anterior al campo lifetime solo tiene la sesión:
+    # esa sesión pasa a ser el lifetime conocido (el chat previo a un reset ya
+    # no es recuperable; la UI lo aclara con la fecha de inicio).
+    path = tmp_path / "session_tokens.json"
+    legacy = {
+        "prompt_tokens": 500,
+        "completion_tokens": 80,
+        "cached_tokens": 20,
+        "turns": 6,
+        "started_at": "2026-10-20T10:00:00+00:00",
+        "updated_at": "2026-10-21T10:00:00+00:00",
+    }
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    st = session_tokens_module.SessionTokens(path=path)
+    await st.load()
+    snap = st.snapshot()
+    assert snap["prompt_tokens"] == 500 and snap["turns"] == 6
+    assert snap["lifetime"]["prompt_tokens"] == 500
+    assert snap["lifetime"]["completion_tokens"] == 80
+    assert snap["lifetime"]["cached_tokens"] == 20
+    assert snap["lifetime"]["turns"] == 6
+
+
 # --------------------------------------------------------------------------
 # API (contra la app, singleton aislado por _isolated_state)
 # --------------------------------------------------------------------------
@@ -111,6 +163,8 @@ async def test_api_reset(client):
     data = (await client.get("/api/metrics/session-tokens")).json()
     assert data["tokens"]["turns"] == 0
     assert data["tokens"]["prompt_tokens"] == 0
+    # El lifetime del chat sobrevive al reset (base del desglose MON-5).
+    assert data["tokens"]["lifetime"]["prompt_tokens"] == 10
 
 
 async def test_api_pricing_defaults(client):

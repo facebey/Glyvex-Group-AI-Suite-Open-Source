@@ -122,6 +122,14 @@ class BenchmarkConfig(BaseModel):
     max_tokens: int = 2048
     repetitions: int = 1
     timeout_s: int = 120
+    # K2.b: sampling fino. None = no se manda al endpoint (conserva sus propios
+    # defaults). top_k/min_p/repeat_penalty/seed los entiende llama-server; un
+    # endpoint OpenAI-compat ajeno puede ignorarlos sin romper la corrida.
+    top_p: float | None = None
+    top_k: int | None = None
+    min_p: float | None = None
+    repeat_penalty: float | None = None
+    seed: int | None = None
 
 
 class BenchmarkMetrics(BaseModel):
@@ -146,6 +154,13 @@ class BenchmarkResult(BaseModel):
     metrics: BenchmarkMetrics | None = None
     score_auto: float | None = None
     score_manual: float | None = None
+    # Campos de judge: viven SOLO en la DB (judge_run escribe ahí). El objeto
+    # en memoria y el JSON en disco no los producen; los endpoints de detalle
+    # los superponen vía _hydrate_judge_fields.
+    score_judge: float | None = None
+    judge_reasoning: str | None = None
+    judge_model: str | None = None
+    judged_at: str | None = None
     keywords_found: list[str] = Field(default_factory=list)
     keywords_missing: list[str] = Field(default_factory=list)
     error: str | None = None
@@ -160,6 +175,9 @@ class RunSummary(BaseModel):
     avg_tokens: float
     total_duration_s: float
     keyword_hit_rate: float
+    # Como con los results, el avg del judge solo existe en la DB
+    # (benchmark_summaries.avg_judge_score); lo superponemos al leer el run.
+    avg_judge_score: float | None = None
 
 
 class BenchmarkRun(BaseModel):
@@ -383,6 +401,7 @@ async def _call_model(
     temperature: float,
     max_tokens: int,
     timeout_s: int,
+    sampling: dict[str, Any] | None = None,
 ) -> tuple[str, str | None, BenchmarkMetrics, str | None]:
     content = f"/think {prompt_text}" if thinking_enabled else prompt_text
     payload = {
@@ -395,6 +414,10 @@ async def _call_model(
         # el último chunk y reemplazan a la cuenta de chunks.
         "stream_options": {"include_usage": True},
     }
+    # K2.b: el sampling fino solo viaja si el usuario lo eligió (modo avanzado);
+    # ausente = defaults del endpoint.
+    if sampling:
+        payload.update(sampling)
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -723,6 +746,40 @@ async def _refresh_avg_judge_score(run_id: str) -> float | None:
     return avg
 
 
+async def _hydrate_judge_fields(run: BenchmarkRun) -> None:
+    """Superpone las columnas de judge de la DB sobre un run leído en memoria
+    o desde el JSON en disco. judge_run escribe los scores solo en
+    benchmark_results/benchmark_summaries; sin este paso, los endpoints de
+    detalle nunca mostrarían las evaluaciones (ni en Benchmark ni en Reports).
+    """
+    try:
+        async with get_session() as session:
+            rows = (
+                await session.execute(
+                    select(BenchmarkResultRow).where(
+                        BenchmarkResultRow.run_id == run.run_id
+                    )
+                )
+            ).scalars().all()
+            summary_row = await session.get(BenchmarkSummaryRow, run.run_id)
+    except Exception as exc:
+        logger.warning("Judge: no se pudieron leer las columnas de %s: %s", run.run_id, exc)
+        return
+
+    by_id = {row.id: row for row in rows}
+    for result in run.results:
+        row = by_id.get(result.result_id)
+        if row is None:
+            continue
+        result.score_judge = row.score_judge
+        result.judge_reasoning = row.judge_reasoning
+        result.judge_model = row.judge_model
+        result.judged_at = row.judged_at
+
+    if run.summary is not None and summary_row is not None:
+        run.summary.avg_judge_score = summary_row.avg_judge_score
+
+
 # --------------------------------------------------------------------------
 # Manager de runs
 # --------------------------------------------------------------------------
@@ -964,6 +1021,20 @@ class BenchmarkManager:
         self._queue_totals[run_id] = total
         self._publish(run_id, {"type": "start", "total": total})
 
+        # K2.b: armo el sampling una sola vez por run; los campos no configurados
+        # no se mandan para no pisar los defaults del endpoint.
+        sampling = {
+            key: value
+            for key, value in {
+                "top_p": cfg.top_p,
+                "top_k": cfg.top_k,
+                "min_p": cfg.min_p,
+                "repeat_penalty": cfg.repeat_penalty,
+                "seed": cfg.seed,
+            }.items()
+            if value is not None
+        }
+
         for index, item in enumerate(full_queue):
             set_id = set_lookup[item.id]
             response_text, thinking_text, metrics, error = await _call_model(
@@ -975,6 +1046,7 @@ class BenchmarkManager:
                 temperature=cfg.temperature,
                 max_tokens=cfg.max_tokens,
                 timeout_s=cfg.timeout_s,
+                sampling=sampling,
             )
 
             found, missing = _check_keywords(response_text, item.expected_keywords)
@@ -1235,6 +1307,7 @@ async def get_run(run_id: str) -> BenchmarkRun:
         run = await BenchmarkManager.load_from_disk(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run no encontrado")
+    await _hydrate_judge_fields(run)
     return run
 
 
@@ -1473,6 +1546,7 @@ async def get_history_run(run_id: str) -> BenchmarkRun:
     run = manager.get_run(run_id) or await BenchmarkManager.load_from_disk(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run no encontrado")
+    await _hydrate_judge_fields(run)
     return run
 
 

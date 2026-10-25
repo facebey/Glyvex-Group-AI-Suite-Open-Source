@@ -17,6 +17,13 @@ InfluxDB (push):
         glyvex_hw,series=gpu.0.temp_c,unit=°C avg=65.2,min=64,max=68 1789525000
         glyvex_llm,series=llm.tg_tps,process_id=…,model=…,unit=t/s avg=… 1789525000
 
+    A las series del motor se suman los contadores de chat de la propia app,
+    sin tags de proceso: `llm.app_prompt_tokens_total`,
+    `llm.app_prompt_tokens_cached_total` y `llm.app_tokens_predicted_total`
+    (totales de por vida en formato llama.cpp, prompt sin contar el caché).
+    Con ellos un dashboard puede separar el uso de la app del de otros
+    clientes: externo = totales del motor − app.
+
     Una cola acotada acumula las líneas; si el destino no responde, reintenta
     con espera creciente (hasta 5 min) y avisa en el log una vez por racha de
     fallos. Sirve para InfluxDB 1.x (/write), 2.x y 3 (/api/v2/write),
@@ -35,7 +42,7 @@ import os
 import time
 from collections import deque
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any, Iterable, NamedTuple
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -43,6 +50,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from config import config
+import session_tokens
 
 logger = logging.getLogger("glyvex.metrics_export")
 
@@ -132,6 +140,47 @@ def build_write_request(influx: dict[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# Contadores de la app (chat de por vida)
+# --------------------------------------------------------------------------
+
+APP_TOTAL_UNITS: dict[str, str] = {
+    "llm.app_prompt_tokens_total": "tokens",
+    "llm.app_prompt_tokens_cached_total": "tokens",
+    "llm.app_tokens_predicted_total": "tokens",
+}
+
+
+class CounterPoint(NamedTuple):
+    """Ventana degenerada (avg=min=max) para contadores acumulativos.
+
+    Tiene la misma forma que SampleWindow a la que miran windows_to_lines /
+    enqueue: un contador no tiene promedio mínimo ni máximo separados.
+    """
+
+    key: str
+    ts: int
+    avg: float
+    min: float
+    max: float
+
+
+def app_lifetime_counters() -> dict[str, int]:
+    """
+    Total de chat de la app (lifetime de session_tokens) en formato llama.cpp:
+    prompt EXCLUYE el caché, igual que llm.prompt_tokens_total del motor. La
+    conversión es la misma que el desglose chat-vs-externo de /consumption/all
+    (MON-5), así que las series llm.app_* son restables contra el motor.
+    """
+    life = session_tokens.session_tokens.snapshot().get("lifetime") or {}
+    cached = max(0, int(life.get("cached_tokens") or 0))
+    return {
+        "llm.app_prompt_tokens_total": max(0, int(life.get("prompt_tokens") or 0) - cached),
+        "llm.app_prompt_tokens_cached_total": cached,
+        "llm.app_tokens_predicted_total": max(0, int(life.get("completion_tokens") or 0)),
+    }
+
+
 class InfluxExporter:
     def __init__(self) -> None:
         self._queue: deque[str] = deque()
@@ -141,6 +190,7 @@ class InfluxExporter:
         self._next_attempt = 0.0
         self._failing = False
         self._overflow_warned = False
+        self._last_app_totals: dict[str, int] | None = None
         self.sent_lines = 0
 
     # -- estado -----------------------------------------------------------------
@@ -189,6 +239,34 @@ class InfluxExporter:
                 self._overflow_warned = True
         self._queue.extend(lines)
         return len(lines)
+
+    def enqueue_counters(self, values: dict[str, int], *, units: dict[str, str]) -> int:
+        """Encola contadores acumulativos como ventana degenerada (avg=min=max).
+
+        Sin tags process_id/model: son de la app, no de un llama-server.
+        """
+        ts = int(time.time())
+        windows = [CounterPoint(key, ts, float(v), float(v), float(v))
+                   for key, v in values.items()]
+        return self.enqueue(windows, scope="llm", units=units)
+
+    def sync_app_totals(self) -> int:
+        """Encola los contadores de chat de la app (llm.app_*) si cambiaron.
+
+        Son totales corrientes, no una señal que haya que muestrear: se escribe
+        solo cuando el valor cambia. Se publican incluso en cero, para que la
+        resta motor − app funcione en un dashboard desde la primera puesta en
+        marcha.
+        """
+        if not self.enabled():
+            return 0
+        values = app_lifetime_counters()
+        if values == self._last_app_totals:
+            return 0
+        queued = self.enqueue_counters(values, units=APP_TOTAL_UNITS)
+        if queued:
+            self._last_app_totals = values
+        return queued
 
     # -- envío ----------------------------------------------------------------
 
@@ -243,6 +321,11 @@ class InfluxExporter:
         try:
             while self._running:
                 interval = float(self.settings().get("interval_s") or 10)
+                if self.enabled():
+                    try:
+                        self.sync_app_totals()
+                    except Exception as exc:  # noqa: BLE001 — el exportador no tumba la app
+                        logger.warning("error leyendo los contadores de chat de la app: %s", exc)
                 if self.enabled() and self._queue and time.monotonic() >= self._next_attempt:
                     try:
                         # Un envío exitoso sigue con el próximo lote sin esperar
@@ -373,6 +456,15 @@ def prometheus_text(hw: Any | None, llm_snaps: list[Any]) -> str:
               s.tokens_predicted_total, lb)
         e.add("glyvex_llm_prompt_tokens_total", "Tokens de prompt procesados desde que arrancó el proceso",
               "counter", s.prompt_tokens_total, lb)
+    # Contadores de chat de la propia app (lifetime, no por proceso): el par
+    # de los *_total del motor para separar uso de la app vs otros clientes.
+    app = app_lifetime_counters()
+    e.add("glyvex_app_prompt_tokens_total", "Tokens de prompt del chat de la app (sin caché), de por vida",
+          "counter", app["llm.app_prompt_tokens_total"])
+    e.add("glyvex_app_prompt_tokens_cached_total", "Tokens de prompt del chat de la app servidos desde caché, de por vida",
+          "counter", app["llm.app_prompt_tokens_cached_total"])
+    e.add("glyvex_app_tokens_predicted_total", "Tokens generados por el chat de la app, de por vida",
+          "counter", app["llm.app_tokens_predicted_total"])
     return e.render()
 
 

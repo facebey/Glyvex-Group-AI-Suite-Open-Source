@@ -1,5 +1,6 @@
 """Tests de metrics_export.py y de la visibilidad de métricas (display)."""
 
+import asyncio
 import re
 from types import SimpleNamespace
 
@@ -140,6 +141,77 @@ async def test_envio_v1(mock_llama_server):
     assert INFLUX_STATE["writes"][0]["params"] == {"db": "metricas", "precision": "s"}
 
 
+# -- contadores de chat de la app (llm.app_*) --------------------------------------
+
+
+_LIFETIME = {"prompt_tokens": 120, "completion_tokens": 40, "cached_tokens": 70}
+
+
+def test_contadores_de_app_se_encolan_solo_si_cambian(monkeypatch, mock_llama_server):
+    _influx(mock_llama_server)
+    monkeypatch.setattr(mx.session_tokens.session_tokens, "snapshot",
+                        lambda: {"lifetime": dict(_LIFETIME)})
+    exp = mx.InfluxExporter()
+
+    # Convertido a formato llama.cpp: prompt fresh = 120 - 70 = 50.
+    assert exp.sync_app_totals() == 3
+    lines = list(exp._queue)
+    assert len(lines) == 3
+    for key, value in (("llm.app_prompt_tokens_total", 50.0),
+                       ("llm.app_prompt_tokens_cached_total", 70.0),
+                       ("llm.app_tokens_predicted_total", 40.0)):
+        hit = [l for l in lines if f"series={key}," in l]
+        assert len(hit) == 1
+        assert hit[0].startswith(
+            f"glyvex_llm,series={key},unit=tokens avg={value},min={value},max={value} ")
+        assert "process_id" not in hit[0] and "model=" not in hit[0]
+
+    assert exp.sync_app_totals() == 0             # sin cambio: no se repite
+    assert exp.queued == 3
+
+    monkeypatch.setattr(mx.session_tokens.session_tokens, "snapshot",
+                        lambda: {"lifetime": {**_LIFETIME, "completion_tokens": 55}})
+    assert exp.sync_app_totals() == 3             # cambio: se vuelve a publicar
+
+    config_module.config.set("exports.influx.enabled", False)
+    assert exp.sync_app_totals() == 0
+
+
+async def test_contadores_de_app_llegan_a_influx(mock_llama_server):
+    reset_influx()
+    _influx(mock_llama_server)
+    exp = mx.InfluxExporter()
+    assert exp.enqueue_counters(
+        {"llm.app_prompt_tokens_total": 50, "llm.app_prompt_tokens_cached_total": 70,
+         "llm.app_tokens_predicted_total": 40},
+        units=mx.APP_TOTAL_UNITS) == 3
+    assert await exp.flush_once() is True
+    lines = INFLUX_STATE["writes"][0]["lines"]
+    assert len(lines) == 3
+    assert all(l.startswith("glyvex_llm,series=llm.app_") and "unit=tokens" in l for l in lines)
+
+
+async def test_loop_del_exportador_publica_contadores_de_app(mock_llama_server, monkeypatch):
+    """El loop propio del exportador mantiene las series al día sin histórico ni pollers."""
+    reset_influx()
+    _influx(mock_llama_server, interval_s=1)
+    monkeypatch.setattr(mx.session_tokens.session_tokens, "snapshot",
+                        lambda: {"lifetime": dict(_LIFETIME)})
+    exp = mx.InfluxExporter()
+    await exp.start()
+    try:
+        for _ in range(50):                       # el primer envío del loop es inmediato
+            if INFLUX_STATE["writes"]:
+                break
+            await asyncio.sleep(0.1)
+    finally:
+        await exp.stop()
+    assert INFLUX_STATE["writes"], "el loop debió publicar los contadores de la app"
+    joined = "\n".join(l for w in INFLUX_STATE["writes"] for l in w["lines"])
+    assert "series=llm.app_prompt_tokens_total,unit=tokens" in joined
+    assert "avg=50.0,min=50.0,max=50.0" in joined
+
+
 async def test_probar_conexion(client, mock_llama_server):
     reset_influx()
     res = await client.post("/api/metrics/export/influx/test", json={
@@ -172,7 +244,10 @@ def _hw_snapshot():
     )
 
 
-def test_prometheus_texto():
+def test_prometheus_texto(monkeypatch):
+    monkeypatch.setattr(mx.session_tokens.session_tokens, "snapshot", lambda: {
+        "lifetime": {"prompt_tokens": 1000, "completion_tokens": 250, "cached_tokens": 400},
+    })
     snap = llm.build_snapshot(
         launcher_module.ProcessInfo(process_id="p1", model_id="m", model_name="Qwen3.6-27B",
                                     backend="llama_server", state="running", host="127.0.0.1",
@@ -193,6 +268,12 @@ def test_prometheus_texto():
     assert 'glyvex_llm_generation_tokens_per_second{process_id="p1",model="Qwen3.6-27B"} 37.2' in text
     assert 'glyvex_llm_prompt_cache_hit_ratio{process_id="p1",model="Qwen3.6-27B"} 0.9' in text
     assert "# TYPE glyvex_llm_tokens_predicted_total counter" in text
+    # Contadores de chat de la app (lifetime): prompt en formato llama.cpp
+    # (1000-400 fresh, 400 cached, 250 generados), sin labels de proceso.
+    assert 'glyvex_app_prompt_tokens_total 600.0' in text
+    assert 'glyvex_app_prompt_tokens_cached_total 400.0' in text
+    assert 'glyvex_app_tokens_predicted_total 250.0' in text
+    assert "glyvex_app_prompt_tokens_total{" not in text
     # Cada familia declara HELP y TYPE una sola vez.
     assert text.count("# TYPE glyvex_gpu_temperature_celsius ") == 1
 

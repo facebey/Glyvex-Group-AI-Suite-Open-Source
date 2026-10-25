@@ -43,4 +43,23 @@ export function lifetimeModelRows(life, provider) {
   }));
 }
 
+/**
+ * MON-5: filas del desglose por origen del total de por vida. El backend ya
+ * entrega chat y externo en formato llama.cpp (fresh/cached/generated por
+ * separado), así que totalTokens/usageForPricing aplican tal cual.
+ */
+export function lifetimeSplitRows(split, provider) {
+  const out = [];
+  for (const key of ["chat", "external"]) {
+    const usage = split?.[key];
+    if (!usage) continue;
+    out.push({
+      key,
+      tokens: totalTokens(usage),
+      cost: provider ? cloudCost(usageForPricing(usage), provider) : 0,
+    });
+  }
+  return out;
+}
+
 export { cloudCost };

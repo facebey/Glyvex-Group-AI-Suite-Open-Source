@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { Eye, Trash2, GitCompare, ArrowLeft, Info } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import JudgePanel from "../components/JudgePanel.jsx";
 
 function fmtDate(iso) {
   if (!iso) return "—";
@@ -37,7 +38,7 @@ function ReasoningCell({ reasoning }) {
   );
 }
 
-function RunDetail({ run, onBack }) {
+function RunDetail({ run, onBack, onRunUpdated }) {
   const { t } = useTranslation();
   const results = run.results || [];
   const avgJudge = run.summary?.avg_judge_score;
@@ -105,6 +106,20 @@ function RunDetail({ run, onBack }) {
             {t("reports.detail.notEvaluated")}
           </p>
         </div>
+      )}
+      {/* K2.c: juzgar un run persistido desde Reports. El backend solo juzga
+          los results sin score_judge, por eso el panel sirve también para
+          re-juzgar runs parcialmente evaluados. */}
+      {results.length > 0 && (
+        <JudgePanel
+          key={run.run_id}
+          runId={run.run_id}
+          totalResults={results.length}
+          runEndpoint={run.config?.endpoint}
+          runApiKey={run.config?.api_key || null}
+          initialAvgScore={avgJudge ?? null}
+          onRunRefreshed={onRunUpdated}
+        />
       )}
     </div>
   );
@@ -206,7 +221,7 @@ export default function Reports() {
     loadHistory();
   }
 
-  if (viewRun) return <RunDetail run={viewRun} onBack={() => setViewRun(null)} />;
+  if (viewRun) return <RunDetail run={viewRun} onBack={() => setViewRun(null)} onRunUpdated={setViewRun} />;
   if (compareRuns) return <CompareView runA={compareRuns[0]} runB={compareRuns[1]} onBack={() => setCompareRuns(null)} />;
 
   return (

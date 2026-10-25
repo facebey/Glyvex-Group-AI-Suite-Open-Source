@@ -9,6 +9,7 @@ from pathlib import Path
 import launcher as launcher_module
 import llm_metrics as llm
 import metrics as metrics_module
+import session_tokens as st_module
 from mock_llm_server import reset_metrics
 
 SAMPLE = """# HELP llamacpp:prompt_tokens_total Number of prompt tokens processed.
@@ -612,6 +613,77 @@ async def test_consumption_all_endpoint_agrupa_modelos_y_embebe_pricing(monkeypa
     assert llama["model_name"] == "Llama-Test" and llama["prompt_tokens"] == 80
     assert llama["cached_tokens"] == 30 and llama["predicted_tokens"] is None
     assert data["pricing"]["providers"]
+    # Sin chat registrado (conftest resetea el singleton): sin desglose.
+    assert data["split"] == {"chat": None, "external": None}
+
+
+async def test_consumption_all_desglosa_chat_vs_externo(monkeypatch):
+    # MON-5: al total del motor se le resta el lifetime de chat de la app
+    # (session_tokens). El usage estilo OpenAI (prompt INCLUYE caché) se
+    # normaliza a unidades llama.cpp (fresh = prompt - cached, cached aparte).
+    ROWS = [
+        {"key": "llm.prompt_tokens_total", "process_id": "p1", "model_name": "Qwen3-Test",
+         "total": 1000, "first_ts": 100, "last_ts": 700, "runs": 1},
+        {"key": "llm.prompt_tokens_cached_total", "process_id": "p1", "model_name": "Qwen3-Test",
+         "total": 400, "first_ts": 100, "last_ts": 700, "runs": 1},
+        {"key": "llm.tokens_predicted_total", "process_id": "p1", "model_name": "Qwen3-Test",
+         "total": 300, "first_ts": 100, "last_ts": 700, "runs": 1},
+    ]
+
+    class StoreFake:
+        def consumption_series_all(self, keys):
+            return [dict(r) for r in ROWS if r["key"] in keys]
+
+    # Chat de la app: 600 prompt de los cuales 200 cacheados, 100 generados.
+    fake = st_module._fresh_state()
+    fake["lifetime"] = {
+        "prompt_tokens": 600,
+        "completion_tokens": 100,
+        "cached_tokens": 200,
+        "turns": 4,
+        "started_at": "2026-10-21T00:00:00+00:00",
+        "updated_at": "2026-10-24T00:00:00+00:00",
+    }
+    monkeypatch.setattr(st_module.session_tokens, "_state", fake)
+    monkeypatch.setattr(metrics_module.manager, "store", StoreFake())
+
+    data = await llm.get_consumption_all()
+    assert data["split"]["chat"] == {
+        "prompt_tokens": 400,  # 600 - 200 cacheados: formato llama.cpp
+        "cached_tokens": 200,
+        "predicted_tokens": 100,
+        "turns": 4,
+        "since": "2026-10-21T00:00:00+00:00",
+    }
+    assert data["split"]["external"] == {
+        "prompt_tokens": 600,  # 1000 del motor - 400 frescos del chat
+        "cached_tokens": 200,  # 400 - 200
+        "predicted_tokens": 200,  # 300 - 100
+    }
+
+
+async def test_consumption_all_sin_historico_del_motor_noresta_chat(monkeypatch):
+    # Con chat registrado pero motor sin histórico: el chat se muestra, el
+    # externo es null (no 0) porque no hay total del cual restar.
+    class StoreFake:
+        def consumption_series_all(self, keys):
+            return []
+
+    fake = st_module._fresh_state()
+    fake["lifetime"] = {
+        "prompt_tokens": 50,
+        "completion_tokens": 10,
+        "cached_tokens": 0,
+        "turns": 1,
+        "started_at": "2026-10-21T00:00:00+00:00",
+        "updated_at": "2026-10-21T00:05:00+00:00",
+    }
+    monkeypatch.setattr(st_module.session_tokens, "_state", fake)
+    monkeypatch.setattr(metrics_module.manager, "store", StoreFake())
+
+    data = await llm.get_consumption_all()
+    assert data["split"]["chat"]["prompt_tokens"] == 50
+    assert data["split"]["external"] is None
 
 
 async def test_consumption_all_endpoint_sin_historico_devuelve_none(monkeypatch):
@@ -625,3 +697,5 @@ async def test_consumption_all_endpoint_sin_historico_devuelve_none(monkeypatch)
     assert data["servers"] == 0 and data["models"] == []
     assert data["prompt_tokens"] is None and data["predicted_tokens"] is None
     assert data["first_ts"] is None and data["last_ts"] is None
+    # Sin histórico tampoco hay desglose: null (no 0), coherente con el total.
+    assert data["split"] == {"chat": None, "external": None}

@@ -55,6 +55,7 @@ from pydantic import BaseModel
 
 import metrics as hw_metrics
 import metrics_export
+import session_tokens
 from config import get_cloud_pricing
 from launcher import ProcessInfo
 from launcher import manager as launcher_manager
@@ -949,6 +950,34 @@ async def get_consumption_all() -> dict[str, Any]:
         ),
         key=lambda m: (m["last_ts"] is None, -(m["last_ts"] or 0)),
     )
+
+    # Desglose chat vs externo (MON-5): los contadores del motor cuentan a
+    # TODOS los clientes por igual; restando el total de chat propio de la app
+    # (lifetime de session_tokens, que no se reinicia con el botón Reset) el
+    # resto es consumo externo (OpenCode, API, benchmarks). Se convierte el
+    # usage estilo OpenAI (prompt INCLUYE caché) al formato llama.cpp (fresh
+    # y caché separados), las mismas unidades que los totales del motor.
+    life_chat = session_tokens.session_tokens.snapshot().get("lifetime") or {}
+    chat: dict[str, Any] | None = None
+    if life_chat.get("prompt_tokens") or life_chat.get("completion_tokens"):
+        cached_chat = max(0, int(life_chat.get("cached_tokens") or 0))
+        chat = {
+            "prompt_tokens": max(0, int(life_chat.get("prompt_tokens") or 0) - cached_chat),
+            "cached_tokens": cached_chat,
+            "predicted_tokens": max(0, int(life_chat.get("completion_tokens") or 0)),
+            "turns": int(life_chat.get("turns") or 0),
+            "since": life_chat.get("started_at"),
+        }
+    external: dict[str, Any] | None = None
+    if chat is not None and totals["prompt_tokens"] is not None:
+        external = {
+            "prompt_tokens": max(0, int(totals["prompt_tokens"]) - chat["prompt_tokens"]),
+            "cached_tokens": max(0, int(totals["cached_tokens"] or 0) - chat["cached_tokens"]),
+            "predicted_tokens": max(
+                0, int(totals["predicted_tokens"] or 0) - chat["predicted_tokens"]
+            ),
+        }
+
     return {
         "servers": len(processes),
         "first_ts": min((r["first_ts"] for r in rows), default=None),
@@ -957,6 +986,7 @@ async def get_consumption_all() -> dict[str, Any]:
         "cached_tokens": totals["cached_tokens"],
         "predicted_tokens": totals["predicted_tokens"],
         "models": by_model,
+        "split": {"chat": chat, "external": external},
         "pricing": get_cloud_pricing().model_dump(),
     }
 

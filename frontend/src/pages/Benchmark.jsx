@@ -4,19 +4,28 @@ import { AlertTriangle, ChevronDown, ChevronRight, Play, Square, Download, Check
 import { useLocalStorage } from "../hooks/useLocalStorage.js";
 import { useTranslation } from "react-i18next";
 import { groupAllOn, toggleGroup, turnGroupOn, turnGroupOff } from "../lib/benchmarkSelection.js";
+import JudgePanel from "../components/JudgePanel.jsx";
 import {
   BarChart, Bar, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 
 const ACTIVE_RUN_KEY = "glyvex_active_run_id";
+// Valor centinela del <select>: permite probar un endpoint externo al que no
+// levantamos nosotros (K2.a). Al elegirlo aparecen inputs de URL y api_key.
+const CUSTOM_ENDPOINT = "__custom__";
 
-// Ajustar los `value` al nombre exacto con el que cada modelo se expone en el endpoint del judge.
-// El label visible se resuelve por idioma vía benchmark.judgeChips.<id>.
-const JUDGE_MODEL_CHIPS = [
-  { id: "recommended", value: "Qwen3-8B-Q4_K_M" },
-  { id: "light", value: "Agents-A1-4B" },
-  { id: "precise", value: "Qwen3-Coder-30B" },
+// K2.b: campos de sampling seleccionables en «modo avanzado». Vacío = no se
+// manda al body (el endpoint conserva sus defaults). top_k/min_p/repeat_penalty/
+// seed los entiende llama-server; un endpoint ajeno puede ignorarlos.
+const SAMPLING_FIELDS = [
+  { key: "top_p", step: "0.01", min: 0, max: 1 },
+  { key: "top_k", step: "1", min: 0 },
+  { key: "min_p", step: "0.01", min: 0, max: 1 },
+  { key: "repeat_penalty", step: "0.01", min: 0 },
+  { key: "seed", step: "1", min: 0 },
 ];
+const SAMPLING_KEYS = SAMPLING_FIELDS.map((f) => f.key);
+const EMPTY_SAMPLING = Object.fromEntries(SAMPLING_KEYS.map((k) => [k, ""]));
 
 const inputClasses =
   "w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-3 py-2 text-sm " +
@@ -184,7 +193,10 @@ export default function Benchmark() {
   const { t } = useTranslation();
   const [endpoints, setEndpoints] = useState([]);
   const [endpointUrl, setEndpointUrl] = useState("http://127.0.0.1:8080");
+  const [customEndpoint, setCustomEndpoint] = useState(false);
+  const [apiKey, setApiKey] = useState("");
   const [modelName, setModelName] = useState("");
+  const [endpointModels, setEndpointModels] = useState([]);
   const [sets, setSets] = useState([]);
   const [setsError, setSetsError] = useState(false);
   const [selectedSetIds, setSelectedSetIds] = useLocalStorage("glyvex_benchmark_sets", []);
@@ -222,6 +234,11 @@ export default function Benchmark() {
   const [repetitions, setRepetitions] = useState(1);
   const [timeoutS, setTimeoutS] = useState(120);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  // K2.b: «modo avanzado» persistido. En modo simple los parámetros quedan
+  // ocultos y se usan los defaults (temperature 0, max tokens 2048, 1 repetición,
+  // sampling = default del endpoint).
+  const [advancedMode, setAdvancedMode] = useLocalStorage("glyvex_benchmark_advanced", false);
+  const [sampling, setSampling] = useState(EMPTY_SAMPLING);
   const [running, setRunning] = useState(false);
   const [runId, setRunId] = useState(null);
   const [progress, setProgress] = useState({ completed: 0, total: 0 });
@@ -235,17 +252,6 @@ export default function Benchmark() {
   const wsReconnectAttemptRef = useRef(0);
   const wsRetryRef = useRef(null);
   const wsClosedByUsRef = useRef(false);
-
-  // --- Judge ---
-  const [judgeEndpoint, setJudgeEndpoint] = useState("http://127.0.0.1:8080");
-  const [judgeModel, setJudgeModel] = useState("");
-  const [judgeApiKey, setJudgeApiKey] = useState("");
-  const [judging, setJudging] = useState(false);
-  const [judgeProgress, setJudgeProgress] = useState({ evaluated: 0, total: 0, currentPrompt: null, currentScore: null });
-  const [judgeAvgScore, setJudgeAvgScore] = useState(null);
-  const [judgeError, setJudgeError] = useState(null);
-  const judgeAbortRef = useRef(null);
-  const judgeEndpointTouchedRef = useRef(false);
 
   const loadSets = useCallback(() => {
     setSetsError(false);
@@ -268,6 +274,35 @@ export default function Benchmark() {
     loadSets();
   }, [loadSets]);
 
+  // K2.a: picker de modelos del endpoint elegido, mismo patrón que Chat (E4):
+  // el navegador no puede llamar /v1/models a un endpoint ajeno (CORS), así que
+  // proxy del backend con debounce de 300 ms (la api_key se teclea tecla a
+  // tecla). Si el endpoint no expone modelos, la UI mantiene el texto libre.
+  useEffect(() => {
+    if (!endpointUrl) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const qs = new URLSearchParams({ url: endpointUrl });
+      if (apiKey) qs.set("api_key", apiKey);
+      fetch(`/api/chat/endpoint-models?${qs.toString()}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (cancelled) return;
+          const list = data?.models || [];
+          setEndpointModels(list);
+          if (list.length > 0 && !list.includes(modelName)) setModelName(list[0]);
+        })
+        .catch(() => {
+          if (!cancelled) setEndpointModels([]);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpointUrl, apiKey]);
+
   useEffect(() => {
     return () => {
       wsClosedByUsRef.current = true;
@@ -275,17 +310,6 @@ export default function Benchmark() {
       wsRef.current?.close();
     };
   }, []);
-
-  useEffect(() => {
-    return () => { judgeAbortRef.current?.abort(); };
-  }, []);
-
-  // El endpoint del judge arranca igual al del run, salvo que el usuario lo haya editado.
-  useEffect(() => {
-    if (judgeEndpointTouchedRef.current) return;
-    const ep = finishedRun?.config?.endpoint;
-    if (ep) setJudgeEndpoint(ep);
-  }, [finishedRun]);
 
   function connectProgress(id) {
     wsRef.current?.close();
@@ -354,6 +378,16 @@ export default function Benchmark() {
           });
           if (run.config?.endpoint) setEndpointUrl(run.config.endpoint);
           if (run.config?.model_name) setModelName(run.config.model_name);
+          // K2.a: un run con api_key era contra un endpoint externo; restaurar
+          // la key permite re-juzgar/re-runear sin reescribirla.
+          if (run.config?.api_key) { setApiKey(run.config.api_key); setCustomEndpoint(true); }
+          // K2.b: un run con sampling configurado vuelve a abrir el modo avanzado
+          // con sus valores, para no re-runear pierdeando parámetros.
+          const configuredSampling = SAMPLING_KEYS.filter((k) => run.config?.[k] != null);
+          if (configuredSampling.length > 0) {
+            setAdvancedMode(true);
+            setSampling((prev) => ({ ...prev, ...Object.fromEntries(configuredSampling.map((k) => [k, String(run.config[k])])) }));
+          }
           connectProgress(saved);
         } else if (run.status === "completed") {
           const hist = await fetch(`/api/benchmark/history/${saved}`);
@@ -362,7 +396,6 @@ export default function Benchmark() {
             if (!cancelled) {
               setRunId(saved);
               setFinishedRun(full);
-              if (full.summary?.avg_judge_score != null) setJudgeAvgScore(full.summary.avg_judge_score);
             }
           }
           localStorage.removeItem(ACTIVE_RUN_KEY);
@@ -405,14 +438,16 @@ export default function Benchmark() {
     // K3: la cola queda vacía si desmarcaron todos los prompts disponibles.
     if (availablePrompts.length > 0 && activePromptIds.length === 0) return;
     setRunError(null); setFinishedRun(null); setLiveResults([]); setProgress({ completed: 0, total: 0 });
-    setJudgeAvgScore(null); setJudgeError(null);
-    setJudgeProgress({ evaluated: 0, total: 0, currentPrompt: null, currentScore: null });
     try {
+      // K2.b: el sampling solo viaja en modo avanzado y solo con valores escritos.
+      const samplingBody = advancedMode
+        ? Object.fromEntries(SAMPLING_KEYS.filter((k) => sampling[k] !== "").map((k) => [k, Number(sampling[k])]))
+        : {};
       const res = await fetch("/api/benchmark/run", {
         method: "POST", headers: { "Content-Type": "application/json" },
         // La selección por prompts define la cola completa: las categorías ya
         // son interruptores de grupo de esos prompts (sin filtro AND aparte).
-        body: JSON.stringify({ endpoint: endpointUrl, model_name: modelName, sets: [...selectedSets], prompts: activePromptIds.length === availablePrompts.length ? null : activePromptIds, thinking_enabled: thinkingEnabled, temperature, max_tokens: maxTokens, repetitions, timeout_s: timeoutS }),
+        body: JSON.stringify({ endpoint: endpointUrl, api_key: apiKey, model_name: modelName, sets: [...selectedSets], prompts: activePromptIds.length === availablePrompts.length ? null : activePromptIds, thinking_enabled: thinkingEnabled, temperature, max_tokens: maxTokens, repetitions, timeout_s: timeoutS, ...samplingBody }),
       });
       const run = await res.json();
       if (!res.ok) throw new Error(run.detail || t("benchmark.errors.startFailed"));
@@ -440,83 +475,6 @@ export default function Benchmark() {
     localStorage.removeItem(ACTIVE_RUN_KEY);
   }
 
-  async function handleJudge() {
-    if (!finishedRun || !judgeModel.trim()) return;
-    setJudging(true);
-    setJudgeError(null);
-    setJudgeAvgScore(null);
-    setJudgeProgress({
-      evaluated: 0,
-      total: (finishedRun.results || []).length,
-      currentPrompt: null,
-      currentScore: null,
-    });
-    const controller = new AbortController();
-    judgeAbortRef.current = controller;
-    try {
-      const response = await fetch(`/api/benchmark/run/${finishedRun.run_id}/judge`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          endpoint: judgeEndpoint,
-          model: judgeModel,
-          api_key: judgeApiKey,
-        }),
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const detail = await response.text().catch(() => "");
-        throw new Error(detail || t("benchmark.errors.judgeStatus", { status: response.status }));
-      }
-      if (!response.body) throw new Error(t("benchmark.errors.noStream"));
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          let data;
-          try { data = JSON.parse(line.slice(5).trim()); } catch { continue; }
-          if (data.status === "complete") {
-            setJudgeAvgScore(data.avg_score);
-            setJudgeProgress((prev) => ({
-              ...prev,
-              evaluated: data.evaluated ?? prev.evaluated,
-              total: data.total ?? prev.total,
-              currentPrompt: null,
-              currentScore: null,
-            }));
-            const refreshed = await fetch(`/api/benchmark/history/${finishedRun.run_id}`);
-            if (refreshed.ok) setFinishedRun(await refreshed.json());
-          } else if (data.error) {
-            setJudgeError(data.error);
-          } else {
-            setJudgeProgress((prev) => ({
-              evaluated: data.evaluated ?? prev.evaluated,
-              total: data.total ?? prev.total,
-              currentPrompt: data.current_prompt ?? null,
-              currentScore: data.current_score ?? null,
-            }));
-          }
-        }
-      }
-    } catch (err) {
-      if (err.name !== "AbortError") setJudgeError(err.message || t("benchmark.errors.judgeCatch"));
-    } finally {
-      setJudging(false);
-      judgeAbortRef.current = null;
-    }
-  }
-
-  function handleStopJudge() {
-    judgeAbortRef.current?.abort();
-  }
-
   function exportJson() { if (!finishedRun) return; downloadBlob(JSON.stringify(finishedRun, null, 2), `benchmark-${finishedRun.run_id}.json`, "application/json"); }
   function exportCsv() { if (!finishedRun) return; downloadBlob(resultsToCsv(finishedRun.results), `benchmark-${finishedRun.run_id}.csv`, "text/csv"); }
   async function exportHtml() {
@@ -538,14 +496,50 @@ export default function Benchmark() {
         <div className="grid grid-cols-2 gap-4">
           <label className="block">
             <span className="block text-xs text-glyvex-muted mb-1">Endpoint</span>
-            <select className={inputClasses} value={endpointUrl} onChange={(e) => setEndpointUrl(e.target.value)}>
+            <select
+              className={inputClasses}
+              value={customEndpoint ? CUSTOM_ENDPOINT : endpointUrl}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === CUSTOM_ENDPOINT) { setCustomEndpoint(true); return; }
+                setCustomEndpoint(false);
+                setEndpointUrl(v);
+              }}
+            >
               {endpoints.map((e) => <option key={e.url} value={e.url}>{e.name}</option>)}
-              {!endpoints.some((e) => e.url === endpointUrl) && <option value={endpointUrl}>{endpointUrl}</option>}
+              {!customEndpoint && !endpoints.some((e) => e.url === endpointUrl) && <option value={endpointUrl}>{endpointUrl}</option>}
+              <option value={CUSTOM_ENDPOINT}>{t("benchmark.customEndpointOption")}</option>
             </select>
+            {customEndpoint && (
+              <div className="mt-2 space-y-2">
+                <input
+                  className={inputClasses}
+                  value={endpointUrl}
+                  onChange={(e) => setEndpointUrl(e.target.value)}
+                  placeholder="http://127.0.0.1:8080"
+                  spellCheck={false}
+                />
+                <input
+                  className={inputClasses}
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={t("benchmark.apiKeyPh")}
+                  spellCheck={false}
+                />
+              </div>
+            )}
           </label>
           <label className="block">
             <span className="block text-xs text-glyvex-muted mb-1">{t("benchmark.modelLabel")}</span>
-            <input className={inputClasses} value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder={t("benchmark.modelNamePh")} />
+            {endpointModels.length > 0 ? (
+              <select className={inputClasses} value={modelName} onChange={(e) => setModelName(e.target.value)}>
+                {endpointModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                {!endpointModels.includes(modelName) && <option value={modelName}>{modelName}</option>}
+              </select>
+            ) : (
+              <input className={inputClasses} value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder={t("benchmark.modelNamePh")} />
+            )}
           </label>
         </div>
       </div>
@@ -602,13 +596,39 @@ export default function Benchmark() {
       </div>
 
       <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-3">
-        <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">{t("benchmark.step3")}</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <label className="block"><span className="block text-xs text-glyvex-muted mb-1">Temperature</span><input type="number" step="0.1" className={inputClasses} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} /></label>
-          <label className="block"><span className="block text-xs text-glyvex-muted mb-1">Max tokens</span><input type="number" className={inputClasses} value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} /></label>
-          <label className="block"><span className="block text-xs text-glyvex-muted mb-1">{t("benchmark.repetitions")}</span><input type="number" min={1} className={inputClasses} value={repetitions} onChange={(e) => setRepetitions(Number(e.target.value))} /></label>
-          <label className="block"><span className="block text-xs text-glyvex-muted mb-1">Timeout (s)</span><input type="number" className={inputClasses} value={timeoutS} onChange={(e) => setTimeoutS(Number(e.target.value))} /></label>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium text-glyvex-muted uppercase tracking-wide">{t("benchmark.step3")}</h2>
+          <label className="flex items-center gap-2 text-xs text-glyvex-muted cursor-pointer select-none">
+            <input type="checkbox" checked={advancedMode} onChange={(e) => setAdvancedMode(e.target.checked)} className="accent-glyvex-accent w-3.5 h-3.5" />
+            {t("benchmark.advancedMode")}
+          </label>
         </div>
+        {advancedMode ? (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <label className="block"><span className="block text-xs text-glyvex-muted mb-1">Temperature</span><input type="number" step="0.1" className={inputClasses} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} /></label>
+              <label className="block"><span className="block text-xs text-glyvex-muted mb-1">Max tokens</span><input type="number" className={inputClasses} value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} /></label>
+              <label className="block"><span className="block text-xs text-glyvex-muted mb-1">{t("benchmark.repetitions")}</span><input type="number" min={1} className={inputClasses} value={repetitions} onChange={(e) => setRepetitions(Number(e.target.value))} /></label>
+              <label className="block"><span className="block text-xs text-glyvex-muted mb-1">Timeout (s)</span><input type="number" className={inputClasses} value={timeoutS} onChange={(e) => setTimeoutS(Number(e.target.value))} /></label>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+              {SAMPLING_FIELDS.map((f) => (
+                <label key={f.key} className="block">
+                  <span className="block text-xs text-glyvex-muted mb-1">{f.key}</span>
+                  <input
+                    type="number" step={f.step} min={f.min} max={f.max} className={inputClasses}
+                    value={sampling[f.key]}
+                    onChange={(e) => setSampling((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                    placeholder="—"
+                  />
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-glyvex-muted">{t("benchmark.samplingHint")}</p>
+          </>
+        ) : (
+          <p className="text-xs text-glyvex-muted">{t("benchmark.simpleDefaults")}</p>
+        )}
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={thinkingEnabled} onChange={(e) => setThinkingEnabled(e.target.checked)} className="accent-glyvex-accent w-4 h-4" />
           thinking_enabled
@@ -703,77 +723,15 @@ export default function Benchmark() {
             </table>
           </div>
 
-          <div className="bg-glyvex-card rounded-lg border border-glyvex-border-soft p-5 space-y-4">
-            <div>
-              <h3 className="text-sm font-medium">{t("benchmark.judge.title")}</h3>
-              <p className="text-xs text-glyvex-muted mt-1">{t("benchmark.judge.hint")}</p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {JUDGE_MODEL_CHIPS.map((chip) => (
-                <button key={chip.value} type="button" disabled={judging} onClick={() => setJudgeModel(chip.value)}
-                  className={"px-3 py-1.5 rounded-full text-xs border transition-colors disabled:opacity-50 " +
-                    (judgeModel === chip.value
-                      ? "bg-glyvex-accent text-white border-glyvex-accent"
-                      : "bg-glyvex-veil-disabled border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil")}>
-                  {t(`benchmark.judgeChips.${chip.id}`)}
-                </button>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <label className="block">
-                <span className="block text-xs text-glyvex-muted mb-1">{t("benchmark.judge.endpointLabel")}</span>
-                <input className={inputClasses} value={judgeEndpoint} disabled={judging}
-                  onChange={(e) => { judgeEndpointTouchedRef.current = true; setJudgeEndpoint(e.target.value); }}
-                  placeholder="http://127.0.0.1:8080" />
-              </label>
-              <label className="block">
-                <span className="block text-xs text-glyvex-muted mb-1">{t("benchmark.judge.modelLabel")}</span>
-                <input className={inputClasses} value={judgeModel} disabled={judging}
-                  onChange={(e) => setJudgeModel(e.target.value)} placeholder={t("benchmark.judge.modelPh")} />
-              </label>
-              <label className="block">
-                <span className="block text-xs text-glyvex-muted mb-1">{t("benchmark.judge.apiKeyLabel")}</span>
-                <input className={inputClasses} value={judgeApiKey} disabled={judging}
-                  onChange={(e) => setJudgeApiKey(e.target.value)} placeholder={t("benchmark.judge.apiKeyPh")} />
-              </label>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={handleJudge} disabled={judging || !judgeModel.trim()}
-                className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-glyvex-accent text-white hover:bg-glyvex-accent/85 disabled:opacity-50">
-                {judging ? t("benchmark.judge.evaluating") : t("benchmark.judge.evaluate")}
-              </button>
-              {judging && (
-                <button type="button" onClick={handleStopJudge}
-                  className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-red-600 text-white hover:bg-red-500">
-                  <Square size={14} />{t("benchmark.judge.stop")}
-                </button>
-              )}
-            </div>
-
-            {judging && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3 text-xs text-glyvex-muted">
-                  <span>{t("benchmark.judge.evaluated", { done: judgeProgress.evaluated, total: judgeProgress.total || "?" })}</span>
-                  {judgeProgress.currentScore != null && <JudgeScoreBadge score={judgeProgress.currentScore} />}
-                </div>
-                <div className="gx-bar w-full bg-glyvex-veil-disabled rounded-full h-2 overflow-hidden">
-                  <div className="gx-bar-fill bg-glyvex-accent text-glyvex-accent h-2 rounded-full transition-all"
-                    style={{ width: judgeProgress.total ? `${(judgeProgress.evaluated / judgeProgress.total) * 100}%` : "0%" }} />
-                </div>
-                {judgeProgress.currentPrompt && (
-                  <p className="text-xs text-glyvex-muted truncate">{t("benchmark.judge.evaluatingPrompt", { prompt: judgeProgress.currentPrompt })}</p>
-                )}
-              </div>
-            )}
-
-            {!judging && judgeAvgScore != null && (
-              <p className="text-sm text-emerald-400">{t("benchmark.judge.done", { score: Number(judgeAvgScore).toFixed(1) })}</p>
-            )}
-            {judgeError && <p className="text-sm text-red-400">{judgeError}</p>}
-          </div>
+          <JudgePanel
+            key={finishedRun.run_id}
+            runId={finishedRun.run_id}
+            totalResults={(finishedRun.results || []).length}
+            runEndpoint={finishedRun.config?.endpoint}
+            runApiKey={finishedRun.config?.api_key || null}
+            initialAvgScore={finishedRun.summary?.avg_judge_score ?? null}
+            onRunRefreshed={setFinishedRun}
+          />
         </div>
       )}
     </div>

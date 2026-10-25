@@ -7,6 +7,71 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.11.0-beta] — 2026-10-25
+
+Primera beta de la serie 0.11.x y release completa del conjunto 0.11.0:
+soporte de aceleración AMD de punta a punta (RT-10 — selección in-app de
+Vulkan/ROCm, validada en la RX 7600 del tester a lo largo de las previews
+alpha1–alpha4, con el runtime llama.cpp **b11827** embebido y telemetría
+de GPU AMD), mejoras de flujo en Benchmark (K2) y métricas de tokens de
+largo plazo. A diferencia de las previews alpha, esta versión **sí** se
+publica en el canal de actualización: las instalaciones en 0.10.0-beta la
+reciben.
+
+### Añadido
+- **Benchmark: juzgar corridas guardadas desde Reports** (K2.c): el paso de
+  juzgado ahora vive en un componente compartido (`JudgePanel`) usado tanto
+  por el flujo de Benchmark como por la página Reports — cualquier corrida
+  persistida en el historial puede juzgarse o volver a juzgarse sin
+  repetir la corrida.
+- **Benchmark: endpoints externos arbitrarios** (K2.a): Benchmark ahora
+  puede probar cualquier endpoint OpenAI-compatible por URL con API key y
+  selector de modelo, además de los servidores locales. Las requests van
+  solo al endpoint elegido; las corridas locales se comportan igual que
+  antes.
+- **Benchmark: modo avanzado con sampling fino** (K2.b): el paso 3 agrega
+  un modo avanzado opcional (`top_p`, `top_k`, `min_p`, `repeat_penalty`,
+  `seed`). Los parámetros no configurados nunca se envían, así cada
+  endpoint conserva sus propios defaults; un endpoint que no entiende un
+  parámetro simplemente lo ignora.
+- **Exportación de métricas: contadores de por vida de la app a
+  InfluxDB/Prometheus**: `llm.app_prompt_tokens_total`,
+  `llm.app_prompt_tokens_cached_total` y `llm.app_tokens_predicted_total`
+  — totales acumulados de la propia app (sin tag por servidor), basados en
+  los contadores lifetime no reseteables (MON-5), por lo que son
+  verificables contra los números del propio motor.
+- **Docs: guía de exportación de métricas (ES/EN)** con un dashboard de
+  ejemplo de Grafana: paneles de CPU/GPU/memoria, series de consumo
+  chat-vs-externo y una nota sobre la trampa MB/GB→bytes de Flux al
+  graficar memoria.
+
+### Cambiado
+- **Monitor: división chat vs externo en el total de consumo de por vida**
+  (MON-5): el panel de consumo del servidor ahora separa el total lifetime
+  en tokens de chat de la app y consumo de servidores externos (nueva
+  división en el endpoint de consumo), y las tarjetas de comparación de
+  costo cloud quedan destacadas visualmente.
+
+### Corregido
+- **Desktop: versiones de plugins Tauri alineadas entre npm y Rust** (fix
+  de CI): la CI de Linux (AppImage) fallaba en los tags alpha porque
+  `tauri-plugin-shell` (Rust 2.4.0) y `@tauri-apps/plugin-shell` (npm
+  2.5.0) — igual que `tauri-plugin-updater` (2.13.1 vs 2.14.0) — estaban
+  desalineados; `tauri build` aborta ante plugins desparejados. Ambos
+  lados resuelven ahora 2.5.0 / 2.14.0 y quedan fijados con precisión
+  (Cargo `=x.y.z`, npm save-exact) para que una regeneración futura del
+  lockfile no los separe otra vez. Sin cambio de comportamiento para el
+  usuario.
+
+## [0.11.0-alpha4] — 2026-10-23 (preview de prueba en hardware)
+
+Cuarta build alpha de prueba para validación en hardware real. Trae el
+runtime actualizado (llama.cpp **b11827**, primera build en probarlo en la
+RX 7600 del tester — Parte 3 del protocolo) **y** la nueva telemetría de
+GPU AMD vía LibreHardwareMonitor embebido (MON-6, verificación E2E agregada
+al protocolo). No publicada en el canal de actualización: las instalaciones
+en 0.10.0-beta no se ven afectadas.
+
 ### Añadido
 - **Monitor: telemetría de GPU AMD con LibreHardwareMonitor embebido**
   (MON-6): en máquinas sin NVIDIA el Monitor ahora inicia

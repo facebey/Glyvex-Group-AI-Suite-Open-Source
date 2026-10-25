@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Server } from "lucide-react";
+import { Cloud, Server } from "lucide-react";
 import CollapsiblePanel from "./ui/CollapsiblePanel.jsx";
 import { cloudCost, formatMoney, formatTokens } from "../lib/sessionCost.js";
-import { totalTokens, usageForPricing, lifetimeModelRows } from "../lib/serverConsumption.js";
+import { totalTokens, usageForPricing, lifetimeModelRows, lifetimeSplitRows } from "../lib/serverConsumption.js";
 import { useTranslation } from "react-i18next";
 
 // MON-4: tokens acumulados por instancia de llama-server (todos los clientes,
@@ -22,6 +22,23 @@ function Stat({ label, value }) {
 
 // null significa "este build no expone ese contador", no "0": se muestra em dash.
 const fmt = (n) => (n == null ? "—" : formatTokens(n));
+
+// El costo de referencia es lo que hay que leer de un vistazo: tarjeta con el
+// acento del tema (mismo lenguaje visual que el ahorro de Costo de sesión).
+function CloudCostCard({ providerName, cost }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-glyvex-accent/40 bg-glyvex-accent/10 px-3 py-2">
+      <Cloud size={16} className="text-glyvex-accent shrink-0" />
+      <span className="text-sm text-glyvex-muted">
+        {t("monitor.serverConsumption.cloudCostLabel", { name: providerName })}
+      </span>
+      <span className="ml-auto text-lg font-semibold text-glyvex-accent tabular-nums">
+        {formatMoney(cost)}
+      </span>
+    </div>
+  );
+}
 
 export default function ServerConsumptionPanel() {
   const { t, i18n } = useTranslation();
@@ -108,6 +125,12 @@ export default function ServerConsumptionPanel() {
     life?.first_ts != null
       ? new Date(life.first_ts * 1000).toLocaleDateString(i18n.language)
       : null;
+  // Desglose chat vs externo (MON-5): chat_since es un ISO string (viene de
+  // session_tokens), los ts del motor son epoch seconds — formatos distintos.
+  const splitRows = lifetimeSplitRows(life?.split, provider);
+  const splitTotal = splitRows.reduce((s, r) => s + r.tokens, 0);
+  const chatSinceIso = life?.split?.chat?.since;
+  const chatSince = chatSinceIso ? new Date(chatSinceIso).toLocaleDateString(i18n.language) : null;
 
   return (
     <CollapsiblePanel
@@ -149,7 +172,7 @@ export default function ServerConsumptionPanel() {
                 {t("monitor.serverConsumption.sinceStart")}
                 {data.runs > 1 && <> · {t("monitor.serverConsumption.merged", { n: data.runs })}</>}
               </p>
-              <div className="rounded-md border border-glyvex-border-soft p-3 space-y-2">
+              <div className="rounded-md border border-glyvex-border-soft p-3">
                 {providers.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm text-glyvex-muted">{t("monitor.serverConsumption.providerLabel")}</span>
@@ -164,17 +187,11 @@ export default function ServerConsumptionPanel() {
                     </select>
                   </div>
                 )}
-                {provider ? (
-                  <p className="text-sm text-glyvex-text">
-                    {t("monitor.serverConsumption.cloudCost", {
-                      name: provider.name ?? provider.id,
-                      cost: formatMoney(cost),
-                    })}
-                  </p>
-                ) : (
+                {!provider && (
                   <p className="text-sm text-glyvex-muted">{t("monitor.serverConsumption.noPricing")}</p>
                 )}
               </div>
+              {provider && <CloudCostCard providerName={provider.name ?? provider.id} cost={cost} />}
             </>
           )}
         </div>
@@ -197,12 +214,7 @@ export default function ServerConsumptionPanel() {
             <Stat label={t("monitor.serverConsumption.total")} value={formatTokens(totalTokens(life))} />
           </div>
           {provider && (
-            <p className="text-sm text-glyvex-text">
-              {t("monitor.serverConsumption.cloudCost", {
-                name: provider.name ?? provider.id,
-                cost: formatMoney(lifeCost),
-              })}
-            </p>
+            <CloudCostCard providerName={provider.name ?? provider.id} cost={lifeCost} />
           )}
           {modelRows.length > 0 && (
             <div className="rounded-md border border-glyvex-border-soft p-3 space-y-2">
@@ -214,12 +226,56 @@ export default function ServerConsumptionPanel() {
                   <span className="font-medium">{r.model_name || t("monitor.serverConsumption.unknownModel")}</span>
                   <span className="tabular-nums">{formatTokens(r.tokens)}</span>
                   {provider && (
-                    <span className="text-xs text-glyvex-muted">
-                      {t("monitor.serverConsumption.lifetimeModelCost", { cost: formatMoney(r.cost) })}
-                    </span>
+                    <>
+                      <span className="text-xs text-glyvex-muted">
+                        {t("monitor.serverConsumption.lifetimeModelCost")}
+                      </span>
+                      <span className="text-xs font-medium text-glyvex-accent tabular-nums">
+                        {formatMoney(r.cost)}
+                      </span>
+                    </>
                   )}
                 </p>
               ))}
+            </div>
+          )}
+          {splitRows.length > 0 && (
+            <div className="rounded-md border border-glyvex-border-soft p-3 space-y-2">
+              <p className="text-xs text-glyvex-muted">
+                {t("monitor.serverConsumption.splitLabel")}
+              </p>
+              {splitRows.map((r) => (
+                <p key={r.key} className="flex flex-wrap items-baseline gap-x-2 text-sm text-glyvex-text">
+                  <span className="font-medium">
+                    {r.key === "chat"
+                      ? t("monitor.serverConsumption.splitChat")
+                      : t("monitor.serverConsumption.splitExternal")}
+                  </span>
+                  <span className="tabular-nums">{formatTokens(r.tokens)}</span>
+                  {splitTotal > 0 && (
+                    <span className="text-xs text-glyvex-muted">
+                      {t("monitor.serverConsumption.splitShare", {
+                        share: ((r.tokens / splitTotal) * 100).toFixed(1),
+                      })}
+                    </span>
+                  )}
+                  {provider && (
+                    <>
+                      <span className="text-xs text-glyvex-muted">
+                        {t("monitor.serverConsumption.lifetimeModelCost")}
+                      </span>
+                      <span className="text-xs font-medium text-glyvex-accent tabular-nums">
+                        {formatMoney(r.cost)}
+                      </span>
+                    </>
+                  )}
+                </p>
+              ))}
+              {chatSince && (
+                <p className="text-[11px] text-glyvex-muted">
+                  {t("monitor.serverConsumption.splitNote", { date: chatSince })}
+                </p>
+              )}
             </div>
           )}
         </div>

@@ -7,7 +7,8 @@ local y cuánto habría costado en la nube (precios de config.cloud_pricing).
 - Solo cuenta el chat: el benchmark es prueba deliberada, no uso.
 - Se persiste en <DATA_DIR>/session_tokens.json (una escritura por turno
   cerrado) para que el total sobreviva reinicios de la app. El usuario puede
-  reiniciarlo desde el Monitor.
+  reiniciar la SESIÓN desde el Monitor; el total "lifetime" (desglose
+  chat-vs-externo del panel MON-5) nunca se borra con reset().
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _fresh_state() -> dict[str, Any]:
+def _fresh_portion() -> dict[str, Any]:
     return {
         "prompt_tokens": 0,
         "completion_tokens": 0,
@@ -41,8 +42,17 @@ def _fresh_state() -> dict[str, Any]:
     }
 
 
+def _fresh_state() -> dict[str, Any]:
+    state = _fresh_portion()
+    # Lifetime total (MON-5): reset() NUNCA lo toca. Es lo que permite
+    # separar chat de la app vs consumo externo en el total "todas las
+    # instancias"; la sesión reiniciable es la parte de arriba.
+    state["lifetime"] = _fresh_portion()
+    return state
+
+
 class SessionTokens:
-    """Total de la sesión en memoria, persistido en JSON."""
+    """Total de la sesión + lifetime en memoria, persistido en JSON."""
 
     def __init__(self, path: Path = SESSION_TOKENS_PATH) -> None:
         self.path = path
@@ -72,11 +82,38 @@ class SessionTokens:
         for key in self._state:
             if key in loaded:
                 self._state[key] = loaded[key]
+        # Normaliza el lifetime. Un archivo anterior a este campo solo tiene
+        # la sesión: esa sesión pasa a ser el lifetime conocido (el chat
+        # anterior a un reset ya no es recuperable, y la UI lo aclara).
+        life = _fresh_portion()
+        src = loaded.get("lifetime")
+        if not isinstance(src, dict):
+            src = loaded
+        for key in life:
+            if key in src:
+                life[key] = src[key]
+        self._state["lifetime"] = life
 
     async def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         async with aiofiles.open(self.path, "w", encoding="utf-8") as f:
             await f.write(json.dumps(self._state, indent=2))
+
+    def _apply_turn(
+        self,
+        portion: dict[str, Any],
+        prompt_tokens: int,
+        completion_tokens: int,
+        cached_tokens: int,
+        now: str,
+    ) -> None:
+        portion["prompt_tokens"] += int(prompt_tokens or 0)
+        portion["completion_tokens"] += int(completion_tokens or 0)
+        portion["cached_tokens"] += int(cached_tokens or 0)
+        portion["turns"] += 1
+        portion["updated_at"] = now
+        if portion["started_at"] is None:
+            portion["started_at"] = now
 
     async def record_turn(
         self,
@@ -85,19 +122,23 @@ class SessionTokens:
         completion_tokens: int = 0,
         cached_tokens: int = 0,
     ) -> None:
-        """Suma el uso de un turno cerrado (StreamMetrics ya sumó sus rondas)."""
-        self._state["prompt_tokens"] += int(prompt_tokens or 0)
-        self._state["completion_tokens"] += int(completion_tokens or 0)
-        self._state["cached_tokens"] += int(cached_tokens or 0)
-        self._state["turns"] += 1
+        """Suma el uso de un turno cerrado (StreamMetrics ya sumó sus rondas).
+
+        Registra la sesión Y el lifetime: el reset borra la sesión pero el
+        lifetime es lo que mantiene trazable el chat de por vida (MON-5).
+        """
         now = _utcnow()
-        self._state["updated_at"] = now
-        if self._state["started_at"] is None:
-            self._state["started_at"] = now
+        self._apply_turn(self._state, prompt_tokens, completion_tokens, cached_tokens, now)
+        self._apply_turn(
+            self._state["lifetime"], prompt_tokens, completion_tokens, cached_tokens, now
+        )
         await self._save()
 
     async def reset(self) -> dict[str, Any]:
+        """Zera la sesión; el total lifetime no se pierde nunca."""
+        lifetime = self._state.get("lifetime") or _fresh_portion()
         self._state = _fresh_state()
+        self._state["lifetime"] = lifetime
         await self._save()
         return self.snapshot()
 

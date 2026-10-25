@@ -7,6 +7,64 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.11.0-beta] — 2026-10-25
+
+First beta of the 0.11.x series and the full release of the 0.11.0 feature
+set: end-to-end AMD acceleration support (RT-10 — in-app Vulkan/ROCm
+selection, validated on the tester's RX 7600 across the alpha1–alpha4
+previews, with the embedded llama.cpp **b11827** runtime and AMD GPU
+telemetry), Benchmark workflow improvements (K2) and long-term token
+metrics. Unlike the alpha previews, this version **is** published on the
+update channel: installs on 0.10.0-beta receive it.
+
+### Added
+- **Benchmark: judge saved runs from Reports** (K2.c): the judging step now
+  lives in a shared component (`JudgePanel`) used both by the Benchmark flow
+  and by the Reports page — any run persisted in the history can be judged
+  or re-judged without re-running it.
+- **Benchmark: arbitrary external endpoints** (K2.a): Benchmark can now test
+  any OpenAI-compatible endpoint by URL with an API key and a model picker,
+  alongside locally launched servers. Requests go only to the chosen
+  endpoint; local runs behave exactly as before.
+- **Benchmark: advanced mode with fine sampling** (K2.b): step 3 gains an
+  optional advanced-parameters mode (`top_p`, `top_k`, `min_p`,
+  `repeat_penalty`, `seed`). Parameters that are not configured are never
+  sent, so each endpoint keeps its own defaults; an endpoint that does not
+  understand a parameter simply ignores it.
+- **Metrics export: app-lifetime counters to InfluxDB/Prometheus**:
+  `llm.app_prompt_tokens_total`, `llm.app_prompt_tokens_cached_total` and
+  `llm.app_tokens_predicted_total` — cumulative totals of the app itself
+  (no per-server tag), built on the unresettable lifetime counters (MON-5)
+  so they are verifiable against the engine's own numbers.
+- **Docs: metrics-export guide (ES/EN)** with an example Grafana dashboard:
+  CPU/GPU/memory panels, chat-vs-external consumption series, and a note on
+  the MB/GB-to-bytes Flux gotcha when plotting memory.
+
+### Changed
+- **Monitor: chat-vs-external split in the all-time consumption total**
+  (MON-5): the server-consumption panel now breaks the lifetime total into
+  app chat tokens and external-server consumption (new split in the
+  consumption endpoint), and the cloud-cost comparison cards are visually
+  highlighted.
+
+### Fixed
+- **Desktop: Tauri plugin versions aligned between npm and Rust** (CI fix):
+  the Linux AppImage CI failed on alpha tags because `tauri-plugin-shell`
+  (Rust 2.4.0) and `@tauri-apps/plugin-shell` (npm 2.5.0) — and likewise
+  `tauri-plugin-updater` (2.13.1 vs 2.14.0) — were out of sync;
+  `tauri build` aborts when plugin packages are mismatched. Both sides now
+  resolve to 2.5.0 / 2.14.0 and are pinned exactly (Cargo `=x.y.z`, npm
+  save-exact) so a future lockfile regeneration cannot drift them apart
+  again. No behavior change for users.
+
+## [0.11.0-alpha4] — 2026-10-23 (hardware-test preview)
+
+Fourth alpha test build for real-hardware validation. This one carries the
+upgraded runtime (llama.cpp **b11827**, first build to test it on the
+tester's RX 7600 — protocol Part 3) **and** the new AMD GPU telemetry via
+embedded LibreHardwareMonitor (MON-6, E2E check added to the protocol). Not
+published in the update channel: installs on 0.10.0-beta are not affected.
+
 ### Added
 - **Monitor: AMD GPU telemetry via embedded LibreHardwareMonitor** (MON-6):
   on machines without NVIDIA the Monitor now starts LibreHardwareMonitor

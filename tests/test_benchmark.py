@@ -5,6 +5,7 @@ from pathlib import Path
 
 import benchmark as benchmark_module
 from helpers import wait_until
+from mock_llm_server import COMPLETION_REQUESTS, reset_completion_requests
 
 BACKEND_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "backend" / "prompts"
 
@@ -227,21 +228,100 @@ async def test_delete_run_removes_from_db(client, mock_llama_server, custom_prom
         assert row is None
 
 
-async def test_judge_endpoint(client, mock_llama_server, custom_prompt_set):
-    """POST /run/{id}/judge evalúa los resultados y actualiza score_judge en DB."""
+def test_parse_judge_payload_variants():
+    """El parser del judge tolera prosa/backticks/<think> y rechaza basura."""
+    parse = benchmark_module._parse_judge_payload
+    assert parse('{"score": 8.5, "reasoning": "ok"}') == (8.5, "ok")
+    assert parse('```json\n{"score": 7, "reasoning": "bien"}\n```') == (7.0, "bien")
+    assert parse('Antes de decidir:\n{"score": 9, "reasoning": "muy bien"}') == (9.0, "muy bien")
+    assert parse('<think>pensando</think>{"score": 6, "reasoning": "aceptable"} listo') == (6.0, "aceptable")
+    # Score fuera de 1–10 se clampéa.
+    assert parse('{"score": 15, "reasoning": "x"}')[0] == 10.0
+    assert parse("Hola mundo") is None
+    assert parse('{"reasoning": "sin score"}') is None
+
+
+async def test_run_accepts_external_api_key(client, mock_llama_server, custom_prompt_set):
+    """K2.a: /run acepta api_key para endpoints externos protegidos y el run lo
+    refleja en su config (es el contrato que consume la UI de Benchmark)."""
+    final = await _run_and_wait_completed(
+        client, [custom_prompt_set], endpoint=mock_llama_server, api_key="sk-externo"
+    )
+    assert final["config"]["api_key"] == "sk-externo"
+
+
+async def test_run_forwards_sampling_params(client, mock_llama_server, custom_prompt_set):
+    """K2.b: el sampling del modo avanzado llega al body del endpoint; si no se
+    configura, el payload no lo incluye (el endpoint conserva sus defaults)."""
+    reset_completion_requests()
+    final = await _run_and_wait_completed(
+        client,
+        [custom_prompt_set],
+        top_p=0.9, top_k=40, min_p=0.05, repeat_penalty=1.05, seed=42,
+    )
+    for key, value in (("top_p", 0.9), ("top_k", 40), ("min_p", 0.05), ("repeat_penalty", 1.05), ("seed", 42)):
+        assert final["config"][key] == value
+
+    model_calls = [b for b in COMPLETION_REQUESTS if b.get("stream") is True]
+    assert model_calls, "el runner no llamó al mock"
+    for b in model_calls:
+        assert b["top_p"] == 0.9 and b["top_k"] == 40 and b["min_p"] == 0.05
+        assert b["repeat_penalty"] == 1.05 and b["seed"] == 42
+
+    reset_completion_requests()
+    await _run_and_wait_completed(client, [custom_prompt_set])
+    plain_calls = [b for b in COMPLETION_REQUESTS if b.get("stream") is True]
+    assert plain_calls
+    for b in plain_calls:
+        for key in ("top_p", "top_k", "min_p", "repeat_penalty", "seed"):
+            assert key not in b
+
+
+async def test_judge_completed_run_reflects_in_history(client, mock_llama_server, custom_prompt_set):
+    """K2.c: juzgar un run ya terminado persiste score_judge y lo refleja en
+    GET /history/{run_id}, que es exactamente lo que consume el JudgePanel de
+    Reports sobre runs históricos."""
     final = await _run_and_wait_completed(client, [custom_prompt_set], endpoint=mock_llama_server)
     run_id = final["run_id"]
+    hist0 = (await client.get(f"/api/benchmark/history/{run_id}")).json()
+    assert all(r["score_judge"] is None for r in hist0["results"])
 
-    # Usamos el mismo mock como judge: devuelve texto libre ("Hola mundo"),
-    # así que el parseo del JSON del judge falla — el endpoint tiene que
-    # manejarlo sin romper y completar el stream igual.
     res = await client.post(
         f"/api/benchmark/run/{run_id}/judge",
-        json={"endpoint": mock_llama_server, "model": "test-model", "api_key": ""},
+        json={"endpoint": mock_llama_server, "model": "judge-model", "api_key": ""},
     )
     assert res.status_code == 200
-    content = res.text
-    assert "complete" in content or "evaluated" in content
+    events = [
+        json.loads(line[len("data:"):].strip())
+        for line in res.text.splitlines()
+        if line.startswith("data:")
+    ]
+    done = [e for e in events if e.get("status") == "complete"]
+    assert done, "el judge no emitió 'complete'"
+    assert done[-1]["evaluated"] == 1
+    assert done[-1]["avg_score"] == 8.0
+
+    hist = (await client.get(f"/api/benchmark/history/{run_id}")).json()
+    judged = hist["results"][0]
+    assert judged["score_judge"] == 8.0
+    assert judged["judge_model"] == "judge-model"
+    assert judged["judge_reasoning"]
+    assert hist["summary"]["avg_judge_score"] == 8.0
+
+    # Idempotencia: sin pendientes, el judge completa con el avg existente y no
+    # rompe (es el camino que recorre Reports cuando el run ya está evaluado).
+    res2 = await client.post(
+        f"/api/benchmark/run/{run_id}/judge",
+        json={"endpoint": mock_llama_server, "model": "judge-model", "api_key": ""},
+    )
+    events2 = [
+        json.loads(line[len("data:"):].strip())
+        for line in res2.text.splitlines()
+        if line.startswith("data:")
+    ]
+    done2 = [e for e in events2 if e.get("status") == "complete"]
+    assert done2 and done2[0]["evaluated"] == 0
+    assert done2[0]["avg_score"] == 8.0
 
 
 async def test_migration_imports_existing_json(tmp_path):

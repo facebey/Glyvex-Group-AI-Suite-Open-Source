@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lifetimeModelRows, totalTokens, usageForPricing } from "./serverConsumption.js";
+import { lifetimeModelRows, lifetimeSplitRows, totalTokens, usageForPricing } from "./serverConsumption.js";
 import { cloudCost } from "./sessionCost.js";
 
 describe("usageForPricing", () => {
@@ -57,5 +57,36 @@ describe("lifetimeModelRows", () => {
       null,
     );
     expect(rows).toEqual([{ model_name: "", tokens: 0, cost: 0 }]);
+  });
+});
+
+describe("lifetimeSplitRows", () => {
+  const PROVIDER = { input_per_mtok: 2, output_per_mtok: 8, cache_read_per_mtok: 0.5 };
+
+  it("filas chat/externo con total de tokens y costo, en formato llama.cpp", () => {
+    // El backend ya entrega fresh/cached/generated separados (unidades del
+    // motor); totalTokens y cloudCost aplican sobre ese formato tal cual.
+    const split = {
+      chat: { prompt_tokens: 400_000, cached_tokens: 200_000, predicted_tokens: 100_000 },
+      external: { prompt_tokens: 600_000, cached_tokens: 200_000, predicted_tokens: 200_000 },
+    };
+    const rows = lifetimeSplitRows(split, PROVIDER);
+    expect(rows.map((r) => r.key)).toEqual(["chat", "external"]);
+    expect(rows[0].tokens).toBe(700_000);
+    // chat: 400k frescos × $2/M + 200k caché × $0.5/M + 100k salida × $8/M.
+    expect(rows[0].cost).toBeCloseTo(1.7);
+    expect(rows[1].tokens).toBe(1_000_000);
+    // external: 600k × $2/M + 200k × $0.5/M + 200k × $8/M.
+    expect(rows[1].cost).toBeCloseTo(2.9);
+  });
+
+  it("sin split o lados null: sin filas; sin proveedor: costo 0, nunca NaN", () => {
+    expect(lifetimeSplitRows(null, PROVIDER)).toEqual([]);
+    expect(lifetimeSplitRows({ chat: null, external: null }, PROVIDER)).toEqual([]);
+    const rows = lifetimeSplitRows(
+      { chat: { prompt_tokens: 10, cached_tokens: null, predicted_tokens: undefined } },
+      null,
+    );
+    expect(rows).toEqual([{ key: "chat", tokens: 10, cost: 0 }]);
   });
 });

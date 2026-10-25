@@ -835,13 +835,18 @@
       "sinceStart": "Acumulado por llama-server desde su arranque, de todos los clientes (chat de la app, OpenCode u otros consumidores de la API).",
       "merged": "Incluye {{n}} arranques mergeados del mismo proceso",
       "providerLabel": "Proveedor de referencia",
-      "cloudCost": "Lo mismo en {{name}} costaría: {{cost}}",
+      "cloudCostLabel": "Lo mismo en {{name}} costaría",
       "noPricing": "Sin proveedores de precios: editá la tabla en Config → Precios de nube.",
       "lifetimeTitle": "Total de por vida (todas las instancias)",
       "lifetimeMeta": "Suma del consumo de {{n}} instancia(s) monitoriada(s) por esta instalación, de todos los clientes.",
       "lifetimeSince": "desde {{date}}",
       "lifetimeModelsLabel": "Desglose por modelo",
-      "lifetimeModelCost": "Lo mismo costaría: {{cost}}",
+      "lifetimeModelCost": "Lo mismo costaría",
+      "splitLabel": "Desglose por origen del consumo",
+      "splitChat": "Chat de la app (esta instalación)",
+      "splitExternal": "Otros clientes (API, OpenCode, pruebas locales)",
+      "splitShare": "{{share}}% del total",
+      "splitNote": "El contador de chat de la app empieza el {{date}}: el consumo anterior a esa fecha aparece como externo.",
       "unknownModel": "Modelo sin nombre"
     }
   },
@@ -885,6 +890,11 @@
     "step3": "Paso 3 — Parámetros",
     "modelLabel": "Modelo",
     "modelNamePh": "nombre del modelo",
+    "customEndpointOption": "Otro endpoint (URL externa)",
+    "apiKeyPh": "api key (opcional)",
+    "advancedMode": "Modo avanzado",
+    "simpleDefaults": "Usando parámetros estándar: temperature 0.0, max tokens 2048, repetitions 1 y sampling con los defaults del endpoint. Activá «Modo avanzado» para ajustarlos.",
+    "samplingHint": "Vacío = default del endpoint. top_k, min_p, repeat_penalty y seed los entiende llama-server; otros endpoints pueden ignorarlos.",
     "repetitions": "Repeticiones",
     "start": "INICIAR BENCHMARK",
     "progress": "Progreso: {{done}}/{{total}}",
@@ -1140,7 +1150,7 @@
       "finished": "Finalizado",
       "status": "Estado",
       "avgJudgeScore": "Score Judge promedio",
-      "notEvaluated": "Este run no fue evaluado con Judge todavía. Para evaluarlo, abrí el run en Benchmark y usá el panel de Judge."
+      "notEvaluated": "Este run no fue evaluado con Judge todavía. Usá el panel de Judge de abajo para juzgarlo con un modelo."
     },
     "compare": {
       "metric": "Métrica",

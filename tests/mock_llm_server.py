@@ -56,6 +56,15 @@ def set_models_auth(token: str | None) -> None:
 EXIT_CALLS: list[str] = []
 
 
+# Bodies de POST /v1/chat/completions recibidos (para verificar el passthrough
+# de parámetros). Los tests los reinician con reset_completion_requests().
+COMPLETION_REQUESTS: list[dict] = []
+
+
+def reset_completion_requests() -> None:
+    COMPLETION_REQUESTS.clear()
+
+
 def reset_exit_calls() -> None:
     EXIT_CALLS.clear()
 
@@ -140,14 +149,30 @@ async def _influx_write(request: Request) -> Response:
     return Response(status_code=status, content=b"" if status < 300 else b'{"message":"simulated failure"}')
 
 
-async def _chat_completions(request: Request) -> StreamingResponse:
+async def _chat_completions(request: Request) -> Response:
     body = await request.json()
+    # K2.b: los tests verifican qué payload de sampling llegó realmente al
+    # endpoint (se reinicia con reset_completion_requests()).
+    COMPLETION_REQUESTS.append(body)
     messages = body.get("messages", [])
     last_user_content = ""
     for m in reversed(messages):
         if m.get("role") == "user":
             last_user_content = m.get("content", "")
             break
+
+    if body.get("stream") is False:
+        # Llamadas no-streaming: en toda la suite las usa solo el LLM-judge del
+        # benchmark (ver _judge_once). Completion estándar con score parseable.
+        return JSONResponse({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": '{"score": 8, "reasoning": "Respuesta correcta y clara."}',
+                },
+                "finish_reason": "stop",
+            }],
+        })
 
     async def event_stream():
         if "__THINKING_TEST__" in last_user_content:
