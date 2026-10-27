@@ -203,9 +203,15 @@ The repo ships a ready-to-import example dashboard:
 datasource assigned: Grafana asks you to pick your InfluxDB datasource at import
 time.
 
-The queries use the default values (bucket `glyvex`, measurements `glyvex_hw` /
-`glyvex_llm`). If you changed the bucket or the prefix, replace them in each
-panel (Edit panel → Query).
+The dashboard ships with an **InfluxDB bucket** dropdown at the top: every query
+reads from the `v.bucket` variable, so you just pick the bucket your export
+writes to (the exporter default is `glyvex`; any other bucket works). The
+dropdown is filled with `buckets()`, i.e. it lists the real buckets on the
+server. Measurements are fixed in the JSON (`glyvex_hw` / `glyvex_llm`, the
+prefix defaults): if you changed `measurement_prefix`, replace them in each
+panel (Edit panel → Query). If the dropdown shows up empty, assign the datasource
+to the variable in **Dashboard settings → Variables** (the JSON leaves the
+datasource unassigned on purpose, just like the panels).
 
 Typical Flux query (average of a series):
 
@@ -335,5 +341,6 @@ example (the UI shows it with a "Copy" button):
 | HTTP 404 | The bucket does not exist (create it in Influx) or URL/version mismatch: `v2` posts to `/api/v2/write`, `v1` to `/write`. |
 | "no se pudo contactar al backend" when testing | The suite backend is not running on that port. |
 | `<prefix>_test` appears in the bucket | It comes from "Test connection". Safe to delete. |
-| You changed prefix/bucket after building the dashboard | Update the panel queries (Edit panel → Query). |
+| You changed prefix/bucket after building the dashboard | Change the selection in the **InfluxDB bucket** dropdown; the prefix is fixed per panel (Edit panel → Query). |
+| The bucket does not show up in the dropdown | The dropdown queries the datasource assigned to the variable: if your bucket lives on another InfluxDB server, that datasource points to the wrong place (or the bucket has not been created yet). |
 | Gaps in the graphs | Expected: unavailable sensor or idle engine (e.g. `llm.tg_tps` has no value without generation in progress). They are not filled with zeros. |

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Cloud, Server } from "lucide-react";
+import { Server } from "lucide-react";
 import CollapsiblePanel from "./ui/CollapsiblePanel.jsx";
+import SavingsHero, { SavingsChip } from "./SavingsHero.jsx";
 import { cloudCost, formatMoney, formatTokens } from "../lib/sessionCost.js";
 import { totalTokens, usageForPricing, lifetimeModelRows, lifetimeSplitRows } from "../lib/serverConsumption.js";
 import { useTranslation } from "react-i18next";
@@ -22,23 +23,6 @@ function Stat({ label, value }) {
 
 // null significa "este build no expone ese contador", no "0": se muestra em dash.
 const fmt = (n) => (n == null ? "—" : formatTokens(n));
-
-// El costo de referencia es lo que hay que leer de un vistazo: tarjeta con el
-// acento del tema (mismo lenguaje visual que el ahorro de Costo de sesión).
-function CloudCostCard({ providerName, cost }) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border border-glyvex-accent/40 bg-glyvex-accent/10 px-3 py-2">
-      <Cloud size={16} className="text-glyvex-accent shrink-0" />
-      <span className="text-sm text-glyvex-muted">
-        {t("monitor.serverConsumption.cloudCostLabel", { name: providerName })}
-      </span>
-      <span className="ml-auto text-lg font-semibold text-glyvex-accent tabular-nums">
-        {formatMoney(cost)}
-      </span>
-    </div>
-  );
-}
 
 export default function ServerConsumptionPanel() {
   const { t, i18n } = useTranslation();
@@ -137,6 +121,9 @@ export default function ServerConsumptionPanel() {
       icon={Server}
       title={t("monitor.serverConsumption.title")}
       storageKey="monitor_panel_server_consumption"
+      // Chip con el ahorro de por vida en el header: visible aun colapsado
+      // (slot headerRight de CollapsiblePanel).
+      headerRight={hasLife && provider && lifeCost > 0 ? <SavingsChip cost={lifeCost} currency={pricing.currency} /> : undefined}
     >
       {entries.length === 0 && !hasLife && (
         <p className="text-sm text-glyvex-muted">{t("monitor.serverConsumption.noProcesses")}</p>
@@ -191,7 +178,14 @@ export default function ServerConsumptionPanel() {
                   <p className="text-sm text-glyvex-muted">{t("monitor.serverConsumption.noPricing")}</p>
                 )}
               </div>
-              {provider && <CloudCostCard providerName={provider.name ?? provider.id} cost={cost} />}
+              {provider && (
+                <SavingsHero
+                  savings={cost}
+                  reference={cost}
+                  providerName={provider.name ?? provider.id}
+                  currency={pricing.currency}
+                />
+              )}
             </>
           )}
         </div>
@@ -214,7 +208,12 @@ export default function ServerConsumptionPanel() {
             <Stat label={t("monitor.serverConsumption.total")} value={formatTokens(totalTokens(life))} />
           </div>
           {provider && (
-            <CloudCostCard providerName={provider.name ?? provider.id} cost={lifeCost} />
+            <SavingsHero
+              savings={lifeCost}
+              reference={lifeCost}
+              providerName={provider.name ?? provider.id}
+              currency={pricing.currency}
+            />
           )}
           {modelRows.length > 0 && (
             <div className="rounded-md border border-glyvex-border-soft p-3 space-y-2">

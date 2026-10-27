@@ -33,6 +33,7 @@ from sqlalchemy import (
     Text,
     or_,
     select,
+    update,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -136,6 +137,10 @@ class ChatConversationRow(Base):
     model_name: Mapped[str | None] = mapped_column(Text)
     endpoint: Mapped[str | None] = mapped_column(Text)
     messages: Mapped[str | None] = mapped_column(Text)       # JSON array completo
+    # E5: texto plano derivado de los mensajes, SOLO para búsqueda. Se mantiene
+    # sincronizado en cada escritura y se rellena al arrancar para las
+    # conversaciones creadas antes de esta columna (ver _backfill_*).
+    search_text: Mapped[str | None] = mapped_column(Text)
     config: Mapped[str | None] = mapped_column(Text)         # JSON: temperatura, etc.
     message_count: Mapped[int | None] = mapped_column(Integer)
 
@@ -169,6 +174,8 @@ async def init_db() -> None:
         await conn.exec_driver_sql("PRAGMA synchronous=NORMAL")
         await conn.run_sync(Base.metadata.create_all, checkfirst=True)
     logger.info("DB lista en %s", DB_PATH)
+    await _ensure_chat_search_text(engine)
+    await _backfill_chat_search_text()
     await _sync_builtin_templates()
     await _migrate_existing_runs()
 
@@ -221,6 +228,36 @@ def _as_int(value: Any) -> int | None:
 
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _extract_chat_search_text(messages: list[Any]) -> str:
+    """
+    Texto plano buscable de los mensajes (E5).
+
+    Extrae solo el contenido textual de cada mensaje (string de `content`,
+    partes {"type": "text", ...} y `thinking`). A propósito se descartan
+    `role`, timestamps, métricas y los data-URI de imágenes: buscar sobre el
+    JSON completo hacía que cualquier término coincidiera con la estructura
+    ("user", "content", "text") y volvía la búsqueda inservible.
+    """
+    parts: list[str] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, str):
+            if not value.startswith("data:"):
+                parts.append(value)
+        elif isinstance(value, dict):
+            if value.get("type") in ("image_ref", "image_url"):
+                return
+            for key in ("content", "thinking", "text"):
+                if key in value:
+                    collect(value[key])
+        elif isinstance(value, list):
+            for item in value:
+                collect(item)
+
+    collect(messages)
+    return "\n".join(parts)
 
 
 def utc_now_iso() -> str:
@@ -383,6 +420,7 @@ async def db_create_conversation(
         model_name=model_name,
         endpoint=endpoint,
         messages=_dumps(_as_list(messages)),
+        search_text=_extract_chat_search_text(_as_list(messages)),
         config=_dumps(config if isinstance(config, dict) else {}),
         message_count=len(_as_list(messages)),
     )
@@ -402,11 +440,14 @@ async def db_list_conversations(
     term = (search or "").strip()
     if term:
         like = f"%{term}%"
-        # ilike sobre SQLite es case-insensitive para ASCII vía LIKE.
+        # E5: la búsqueda va sobre el texto plano indexado, no sobre el JSON
+        # crudo: así no coincide con la estructura ("role", "content", claves
+        # escapadas) ni con data-URI de imágenes. ilike sobre SQLite es
+        # case-insensitive para ASCII vía LIKE.
         stmt = stmt.where(
             or_(
                 ChatConversationRow.title.ilike(like),
-                ChatConversationRow.messages.ilike(like),
+                ChatConversationRow.search_text.ilike(like),
             )
         )
     stmt = stmt.limit(max(1, min(limit, 200))).offset(max(0, offset))
@@ -441,6 +482,7 @@ async def db_update_conversation(
             items = _as_list(messages)
             row.messages = _dumps(items)
             row.message_count = len(items)
+            row.search_text = _extract_chat_search_text(items)
         if config is not None:
             row.config = _dumps(config if isinstance(config, dict) else {})
         if model_name is not None:
@@ -460,6 +502,52 @@ async def db_delete_conversation(conv_id: str) -> bool:
         await session.delete(row)
         await session.commit()
     return True
+
+
+# --------------------------------------------------------------------------
+# Migración E5: columna search_text para búsqueda sin tocar el JSON crudo
+# --------------------------------------------------------------------------
+
+
+async def _ensure_chat_search_text(engine: AsyncEngine) -> None:
+    """
+    `create_all` no agrega columnas a una tabla que ya existe: para DBs de
+    instancias previas a E5 hay que ALTER TABLE manualmente (idempotente).
+    """
+    async with engine.begin() as conn:
+        result = await conn.exec_driver_sql("PRAGMA table_info(chat_conversations)")
+        columns = {row[1] for row in result.fetchall()}
+        if "search_text" not in columns:
+            await conn.exec_driver_sql(
+                "ALTER TABLE chat_conversations ADD COLUMN search_text TEXT"
+            )
+            logger.info("Migración E5: columna search_text agregada a chat_conversations")
+
+
+async def _backfill_chat_search_text() -> int:
+    """
+    Indexa conversaciones creadas antes de E5. Una vez rellenas quedan con
+    cadena (posiblemente vacía), nunca NULL: el backfill no vuelve a tocarlas
+    en arranques siguientes.
+    """
+    async with get_session() as session:
+        pending = (
+            await session.execute(
+                select(ChatConversationRow.id, ChatConversationRow.messages).where(
+                    ChatConversationRow.search_text.is_(None)
+                )
+            )
+        ).all()
+        for conv_id, raw in pending:
+            await session.execute(
+                update(ChatConversationRow)
+                .where(ChatConversationRow.id == conv_id)
+                .values(search_text=_extract_chat_search_text(_loads_list(raw)))
+            )
+        await session.commit()
+    if pending:
+        logger.info("Migración E5: %d conversaciones indexadas para búsqueda", len(pending))
+    return len(pending)
 
 
 # --------------------------------------------------------------------------

@@ -1,21 +1,23 @@
-# Temas — Glyvex AI Suite
+# Themes — Glyvex AI Suite
 
-5 temas en ciclo desde el botón de paleta del header (o desde Config):
-dark → claro → carbon → metallic → matrix.
+> **Language:** [Español](THEMES_CHANGELOG.es.md)
 
-## Archivos
+5 themes cycled from the header palette button (or from Config):
+dark → light → carbon → metallic → matrix.
+
+## Files
 - `src/lib/theme.js` — THEMES, THEME_META, nextTheme(), cycleTheme()
-- `src/index.css` — tokens de datos (chart-*, load-*) + acabados carbon/metallic/matrix
-- `src/assets/themes/` — texturas generadas por código (sin licencias de terceros)
-- `src/components/MatrixRain.jsx` — lluvia digital (canvas, 24 fps, pausa en pestaña oculta, respeta prefers-reduced-motion)
-- `src/App.jsx` — botón de ciclo, hooks .gx-app/.gx-shell/.gx-nav-on, MatrixRain
-- `src/pages/Monitor.jsx`, `Benchmark.jsx`, `Launcher.jsx` — colores a variables CSS, hooks .gx-bar/.gx-recess/.gx-raised/.gx-range/.gx-chart
-- `src/pages/Config.jsx` — opción Matrix + sincronización con el botón del header
+- `src/index.css` — data tokens (chart-*, load-*) + carbon/metallic/matrix finishes
+- `src/assets/themes/` — code-generated textures (no third-party licenses)
+- `src/components/MatrixRain.jsx` — digital rain (canvas, 24 fps, pauses in a hidden tab, respects prefers-reduced-motion)
+- `src/App.jsx` — cycle button, .gx-app/.gx-shell/.gx-nav-on hooks, MatrixRain
+- `src/pages/Monitor.jsx`, `Benchmark.jsx`, `Launcher.jsx` — colors to CSS variables, .gx-bar/.gx-recess/.gx-raised/.gx-range/.gx-chart hooks
+- `src/pages/Config.jsx` — Matrix option + sync with the header button
 - `src/locales/{es,en}.json` — themeMatrix, themeCycle
 
-## Garantía de regresión
-Dark y claro verificados píxel a píxel contra el build original (0,000 % de diferencia)
-en Chat, Launcher, Benchmark, Monitor, Reports y Config.
+## Regression guarantee
+Dark and light verified pixel-by-pixel against the original build (0.000%
+difference) in Chat, Launcher, Benchmark, Monitor, Reports, and Config.
 
 ## Backend
-Si el backend valida `app.theme` al guardar la config, debe aceptar `"matrix"`.
+If the backend validates `app.theme` when saving the config, it must accept `"matrix"`.

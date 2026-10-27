@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { DollarSign, RotateCcw } from "lucide-react";
 import CollapsiblePanel from "./ui/CollapsiblePanel.jsx";
-import { cloudCost, formatMoney, formatTokens } from "../lib/sessionCost.js";
+import SavingsHero, { SavingsChip } from "./SavingsHero.jsx";
+import { cloudCost, formatTokens } from "../lib/sessionCost.js";
 import { useTranslation } from "react-i18next";
 
 // MON-2: totales de la sesión local vs precios de nube de referencia.
@@ -75,6 +76,9 @@ export default function SessionCostPanel() {
       icon={DollarSign}
       title={t("monitor.sessionCost.title")}
       storageKey="monitor_panel_session_cost"
+      // El ahorro es el dato de marketing del panel: visible en el header aun
+      // colapsado (slot headerRight de CollapsiblePanel).
+      headerRight={hasUsage && provider && cost > 0 ? <SavingsChip cost={cost} currency={pricing.currency} /> : undefined}
     >
       {!hasUsage ? (
         <p className="text-sm text-glyvex-muted">{t("monitor.sessionCost.noUsage")}</p>
@@ -100,19 +104,12 @@ export default function SessionCostPanel() {
                 ))}
               </select>
             </div>
-            {provider ? (
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-                <span className="text-glyvex-text">
-                  {t("monitor.sessionCost.cloudCost", { name: provider.name, cost: formatMoney(cost, pricing.currency) })}
-                </span>
-                <span className="text-glyvex-accent">
-                  {t("monitor.sessionCost.savings", { cost: formatMoney(cost, pricing.currency) })}
-                </span>
-              </div>
-            ) : (
+            {provider ? null : (
               <p className="text-xs text-glyvex-muted">{t("monitor.sessionCost.noPricing")}</p>
             )}
           </div>
+
+          {provider && <SavingsHero savings={cost} reference={cost} providerName={provider.name} currency={pricing.currency} />}
 
           <button
             type="button"

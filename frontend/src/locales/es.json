@@ -809,6 +809,12 @@
       "empty": "No hay procesos de llama-server/ollama corriendo.",
       "colName": "Nombre"
     },
+    "savings": {
+      "label": "Ahorro por usar local — sin nube",
+      "footSame": "lo mismo en {{name}} costaría",
+      "footPaid": "acá pagaste {{local}}",
+      "chip": "{{cost}} ahorrados · local, sin nube"
+    },
     "sessionCost": {
       "title": "Costo de sesión",
       "noUsage": "Sin uso todavía: chateá con un modelo y acá se va acumulando la sesión.",
@@ -817,8 +823,6 @@
       "cached": "Tokens en caché",
       "turns": "Turnos",
       "providerLabel": "Proveedor de referencia",
-      "cloudCost": "Costo en {{name}}: {{cost}}",
-      "savings": "Ahorro de esta sesión (local, sin nube): {{cost}}",
       "noPricing": "Sin proveedores de precios: editá la tabla en Config → Precios de nube.",
       "reset": "Reiniciar sesión",
       "resetConfirm": "¿Reiniciar los totales de esta sesión? Se pierde la comparativa de lo que ya se chateó."
@@ -835,7 +839,6 @@
       "sinceStart": "Acumulado por llama-server desde su arranque, de todos los clientes (chat de la app, OpenCode u otros consumidores de la API).",
       "merged": "Incluye {{n}} arranques mergeados del mismo proceso",
       "providerLabel": "Proveedor de referencia",
-      "cloudCostLabel": "Lo mismo en {{name}} costaría",
       "noPricing": "Sin proveedores de precios: editá la tabla en Config → Precios de nube.",
       "lifetimeTitle": "Total de por vida (todas las instancias)",
       "lifetimeMeta": "Suma del consumo de {{n}} instancia(s) monitoriada(s) por esta instalación, de todos los clientes.",

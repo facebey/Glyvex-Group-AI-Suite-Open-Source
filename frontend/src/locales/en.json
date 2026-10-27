@@ -809,6 +809,12 @@
       "empty": "No llama-server/ollama processes running.",
       "colName": "Name"
     },
+    "savings": {
+      "label": "Saved by running local — no cloud",
+      "footSame": "the same on {{name}} would cost",
+      "footPaid": "you paid {{local}} here",
+      "chip": "{{cost}} saved · local, no cloud"
+    },
     "sessionCost": {
       "title": "Session cost",
       "noUsage": "No usage yet: chat with a model and the session accumulates here.",
@@ -817,8 +823,6 @@
       "cached": "Cached tokens",
       "turns": "Turns",
       "providerLabel": "Reference provider",
-      "cloudCost": "Cost on {{name}}: {{cost}}",
-      "savings": "Saved this session (local, no cloud): {{cost}}",
       "noPricing": "No pricing providers: edit the table in Config → Cloud pricing.",
       "reset": "Reset session",
       "resetConfirm": "Reset this session's totals? The comparison for what was already chatted is lost."
@@ -835,7 +839,6 @@
       "sinceStart": "Accumulated by llama-server since its startup, across all clients (app chat, OpenCode or any other API consumer).",
       "merged": "Includes {{n}} merged startups of the same process",
       "providerLabel": "Reference provider",
-      "cloudCostLabel": "The same on {{name}} would cost",
       "noPricing": "No pricing providers: edit the table in Config → Cloud pricing.",
       "lifetimeTitle": "Lifetime total (all instances)",
       "lifetimeMeta": "Sum of the consumption of {{n}} instance(s) monitored by this installation, across all clients.",

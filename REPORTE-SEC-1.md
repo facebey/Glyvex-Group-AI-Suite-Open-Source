@@ -1,318 +1,328 @@
-# REPORTE-SEC-1 — Auditoría manual: exposición de red y telemetría
+# SEC-1 REPORT — Manual audit: network exposure and telemetry
 
-Fecha: 2026-10-05 (sección a) · 2026-10-06 (sección b) · Pin de binario: `b11349`
-Método: auditoría semántica manual (grep + lectura de código). CodeQL/Dependabot
-quedan fuera de este reporte (SEC-3, cerrado, 0 abiertos).
+> **Language:** [Español](REPORTE-SEC-1.es.md)
 
-## Modelo de amenazas
+Date: 2026-10-05 (section a) · 2026-10-06 (section b) · Binary pin: `b11349`
+Method: manual semantic audit (grep + code reading). CodeQL/Dependabot are
+out of scope for this report (SEC-3, closed, 0 open).
 
-App de escritorio 100% local, un usuario, **sin autenticación** (por diseño).
-El modelo de amenazas real NO es el de una web app: los riesgos reales son
-exposición a LAN (bind `0.0.0.0`), inyección de comandos en el launcher
-(subprocess a llama-server), path traversal, SSRF en descargas y XSS en el
-render de markdown del LLM. Lo que este reporte cubre (sección a) es el
-perímetro de red: qué escucha la app, qué orígenes acepta y a dónde sale.
+## Threat model
 
-## Hallazgos (sección a — exposición de red)
+A 100% local desktop app, single user, **no authentication** (by design).
+The real threat model is NOT the one of a web app: the actual risks are
+LAN exposure (`0.0.0.0` bind), command injection in the launcher
+(subprocess to llama-server), path traversal, SSRF in downloads, and XSS in
+the rendering of LLM markdown. What this report covers (section a) is the
+network perimeter: what the app listens on, which origins it accepts, and
+where it goes out to.
 
-| # | Hallazgo | Severidad | Estado |
+## Findings (section a — network exposure)
+
+| # | Finding | Severity | Status |
 |---|----------|-----------|--------|
-| F-a1 | Fuentes de Google (Exo 2 + JetBrains Mono) cargadas remotamente en cada arranque | Media | Remediado y merged a main (2026-10-05) |
-| F-a2 | Sin autenticación en la API al exponer a LAN (`GLYVEX_HOST=0.0.0.0`) | Info (aceptado) | Documentado |
-| F-a3 | CORS con `allow_credentials=True` y wildcards permitidos en configuración de usuario | Baja | Documentado |
-| F-a4 | Descargas con `follow_redirects=True` | Info (aceptado) | Documentado |
-| F-a5 | Modelos whisper de fuente GitHub de terceros (NoMercy-Entertainment) | Info (aceptado) | Documentado |
+| F-a1 | Google fonts (Exo 2 + JetBrains Mono) loaded remotely on every startup | Medium | Remediated and merged to main (2026-10-05) |
+| F-a2 | No authentication on the API when exposed to LAN (`GLYVEX_HOST=0.0.0.0`) | Info (accepted) | Documented |
+| F-a3 | CORS with `allow_credentials=True` and wildcards allowed in user configuration | Low | Documented |
+| F-a4 | Downloads with `follow_redirects=True` | Info (accepted) | Documented |
+| F-a5 | Whisper models from a third-party GitHub source (NoMercy-Entertainment) | Info (accepted) | Documented |
 
-### F-a1 — Google Fonts en runtime (Media)
+### F-a1 — Google Fonts at runtime (Medium)
 
-`frontend/index.html:8-10` (preconnects + `<link rel="stylesheet">`) y
-`frontend/src/index.css:2` (`@import url(...)`) cargan Exo 2 (300-800) y
-JetBrains Mono (400,600) desde `fonts.googleapis.com` / `fonts.gstatic.com`.
+`frontend/index.html:8-10` (preconnects + `<link rel="stylesheet">`) and
+`frontend/src/index.css:2` (`@import url(...)`) load Exo 2 (300-800) and
+JetBrains Mono (400,600) from `fonts.googleapis.com` / `fonts.gstatic.com`.
 
-Impacto:
-- Contradice el claim "100% local, sin nube" (AGENTS.md, `docs/PRIVACY.md`).
-- Cada arranque envía el IP público del usuario a Google (request + user agent),
-  incluso si la app "no usa nube": es una salida de red automática e involuntaria.
-- Dependencia blanda: sin internet las fuentes caen a fallback de sistema
-  (no rompe la app), pero la solicitud de red igual se intenta.
+Impact:
+- Contradicts the "100% local, no cloud" claim (AGENTS.md, `docs/PRIVACY.md`).
+- Every startup sends the user's public IP to Google (request + user agent),
+  even if the app "does not use cloud": it is an automatic, involuntary
+  network egress.
+- Soft dependency: without internet the fonts fall back to system fonts
+  (the app does not break), but the network request is still attempted.
 
-Recomendación: self-host los woff2 en `frontend/public/fonts/` (el patrón ya
-existe: Poppins del splash, con `OFL.txt`) y borrar los `<link>`/`@import`
-remotos. Mitiga F-a1 completamente y deja el frontend 100% offline.
+Recommendation: self-host the woff2 files in `frontend/public/fonts/` (the
+pattern already exists: the splash's Poppins, with its `OFL.txt`) and remove
+the remote `<link>`/`@import`. This mitigates F-a1 completely and leaves the
+frontend 100% offline.
 
-**Remediación implementada** (merged a main el 2026-10-05): las dos fuentes del brand kit (Exo 2 y JetBrains Mono, ambas OFL 1.1)
-son *variable fonts* en Google Fonts — un solo woff2 por family cubre todos los
-pesos. Se descargó el subset latin de cada una (`frontend/public/fonts/`:
-`exo-2-latin.woff2` 40 KB, `jetbrains-mono-latin.woff2` 31 KB) con su
-`OFL.txt`, se declararon con `@font-face` local en `frontend/src/index.css`
-(reemplazando el `@import` remoto) y se borraron los 3 `<link>` de
-`frontend/index.html`. Ojo con un gotcha del build: el minifier de CSS de
-Vite 8 / Tailwind 4 (lightningcss) corrompe `unicode-range: U+0000-00FF` a
-`U+??` (los caracteres de control 0x00-0x1F se serializan como `?`), invalidando
-la declaración; la solución fue declarar el rango desde `U+0020` (space).
-Verificado: `npm run build` sin ninguna referencia a `googleapis`/`gstatic` en
-el bundle, `npm run test` 14/14, pytest 604/604. Las fuentes también quedaron
-versionadas en el brand kit (`assets/brand/fonts/` y kit oficial fuera del
-repo) y su doc actualizada. El sitio web `glyvex/web` sigue usando Google
-Fonts remoto (proyecto aparte, fuera de este repo).
+**Remediation implemented** (merged to main on 2026-10-05): the two brand-kit
+fonts (Exo 2 and JetBrains Mono, both OFL 1.1) are *variable fonts* on Google
+Fonts — a single woff2 per family covers all weights. The latin subset of each
+was downloaded (`frontend/public/fonts/`: `exo-2-latin.woff2` 40 KB,
+`jetbrains-mono-latin.woff2` 31 KB) along with its `OFL.txt`, declared via a
+local `@font-face` in `frontend/src/index.css` (replacing the remote
+`@import`), and the 3 `<link>` tags were removed from `frontend/index.html`.
+Watch out for a build gotcha: Vite 8 / Tailwind 4's CSS minifier
+(lightningcss) corrupts `unicode-range: U+0000-00FF` into `U+??` (control
+characters 0x00-0x1F get serialized as `?`), invalidating the declaration;
+the solution was to declare the range starting at `U+0020` (space).
+Verified: `npm run build` with no reference to `googleapis`/`gstatic` in the
+bundle, `npm run test` 14/14, pytest 604/604. The fonts are also versioned
+in the brand kit (`assets/brand/fonts/` and the official kit outside the
+repo), and its doc was updated. The `glyvex/web` website still uses remote
+Google Fonts (separate project, outside this repo).
 
-### F-a2 — Sin auth en exposición LAN (Info, riesgo aceptado)
+### F-a2 — No auth on LAN exposure (Info, accepted risk)
 
-Por defecto la app solo escucha en loopback (ver inventario). Exponer a LAN es
-opt-in explícito (`GLYVEX_HOST=0.0.0.0`) y la documentación es honesta al
-respecto: `docs/PRIVACY.md:74-77` dice que en ese caso "requires authentication
-that you would have to implement; it is not included". No hay claim falso de
-seguridad. Riesgo residual aceptado: quien exponga la API a LAN, cualquier
-dispositivo de la red puede usarla (chat, TTS/STT, tools). Sin acción
-requerida; mejora opcional: warn en el log de arranque cuando el host no sea
-loopback (hoy solo se warns CORS con `*`).
+By default the app only listens on loopback (see inventory). Exposing to LAN
+is an explicit opt-in (`GLYVEX_HOST=0.0.0.0`) and the documentation is
+honest about it: `docs/PRIVACY.md:74-77` states that in that case "requires
+authentication that you would have to implement; it is not included". There
+is no false security claim. Residual risk accepted: whoever exposes the API
+to LAN lets any device on the network use it (chat, TTS/STT, tools). No
+action required; optional improvement: warn in the startup log when the host
+is not loopback (today only CORS wildcards `*` are warned about).
 
-### F-a3 — CORS con credentials (Baja)
+### F-a3 — CORS with credentials (Low)
 
 `backend/main.py:128-159`: `allow_credentials=True`, `allow_methods=["*"]`,
-`allow_headers=["*"]`, y orígenes desde `GLYVEX_CORS_ORIGINS` (default
-`http://localhost:5173` para dev). En producción la shell Tauri fija el
-allowlist a `https://tauri.localhost,tauri://localhost`
-(`src-tauri/src/lib.rs:145-148`), sin wildcards. El único camino a wildcard es
-configuración manual del usuario, y el código lo detecta y lo loguea como
-advertencia (`main.py:156-159`). Adicionalmente los navegadores rechazan
-`*` con credentials, así que el impacto real es nulo. Sin cambio.
+`allow_headers=["*"]`, and origins taken from `GLYVEX_CORS_ORIGINS` (default
+`http://localhost:5173` for dev). In production the Tauri shell pins the
+allowlist to `https://tauri.localhost,tauri://localhost`
+(`src-tauri/src/lib.rs:145-148`), no wildcards. The only path to a wildcard
+is manual user configuration, and the code detects it and logs it as a
+warning (`main.py:156-159`). Additionally, browsers reject `*` combined with
+credentials, so the real impact is nil. No change.
 
-### F-a4 — follow_redirects en descargas (Info, riesgo aceptado)
+### F-a4 — follow_redirects in downloads (Info, accepted risk)
 
 `backend/runtime.py:360-361`: `httpx.AsyncClient(..., follow_redirects=True)`.
-Un redirect apuntaría a otro host, pero la integridad del archivo está
-garantizada por verificación sha256 incremental obligatoria (sin sha256 la
-fuente "no existe", `runtime.py:137-148`). Peor caso: se envía un request a un
-host inesperado; el binario descargado no puede ser adulterado. Los redirects
-reales (GitHub/HF) son infraestructura propia de esas CDNs. Sin cambio.
+A redirect could point to another host, but file integrity is guaranteed by
+the mandatory incremental sha256 verification (without a sha256 the source
+"does not exist", `runtime.py:137-148`). Worst case: a request is sent to an
+unexpected host; the downloaded binary cannot be tampered with. The actual
+redirects (GitHub/HF) are part of those CDNs' own infrastructure. No change.
 
-### F-a5 — Modelos whisper de terceros (Info, riesgo aceptado)
+### F-a5 — Third-party whisper models (Info, accepted risk)
 
-`backend/stt_runtime.py:86-103`: los modelos ggml-* vienen de la release
-`NoMercy-Entertainment/nomercy-whisper-models` v2026.08.23 (GitHub de
-terceros, no ggml-org), por desviación documentada de D6 (HF bloqueado en la
-IP del usuario; `stt_runtime.py:88-93`). Mitigación existente: sha256 por
-archivo (y por parte, en large-v3) verificado antes de usar. Cadena de
-confianza = el pin sha256, no el autor del repo. Sin cambio; el pin es la
-garantía y ya está en el catálogo.
+`backend/stt_runtime.py:86-103`: the ggml-* models come from the
+`NoMercy-Entertainment/nomercy-whisper-models` v2026.08.23 release (a
+third-party GitHub repo, not ggml-org), as a documented deviation from D6
+(HF blocked at the user's IP; `stt_runtime.py:88-93`). Existing mitigation:
+per-file sha256 (and per-part, for large-v3) verified before use. The trust
+chain = the sha256 pin, not the repo's author. No change; the pin is the
+guarantee and it is already in the catalog.
 
-## Inventario verificado — entrada (bind)
+## Verified inventory — inbound (bind)
 
-| Punto | Bind | Evidencia |
+| Point | Bind | Evidence |
 |---|---|---|
-| Backend (FastAPI/uvicorn) | `127.0.0.1:7981`, fallback 7981→7990→dinámico | `backend/main.py:265-298` (`_bind_with_fallback`), `main.py:338` |
+| Backend (FastAPI/uvicorn) | `127.0.0.1:7981`, fallback 7981→7990→dynamic | `backend/main.py:265-298` (`_bind_with_fallback`), `main.py:338` |
 | Launcher CLI | `127.0.0.1:7981` | `start.cmd:65-66`, `start.ps1:49-50` |
-| Shell Tauri | spawnea el backend con `GLYVEX_HOST=127.0.0.1`, `GLYVEX_PORT=7981` | `src-tauri/src/lib.rs:138-139` (`SPAWN_PORT` línea 23) |
+| Tauri shell | spawns the backend with `GLYVEX_HOST=127.0.0.1`, `GLYVEX_PORT=7981` | `src-tauri/src/lib.rs:138-139` (`SPAWN_PORT` line 23) |
 
-Exposición a red: opt-in explícito vía `GLYVEX_HOST`, documentado en
-README/PRIVACY con advertencia de que no hay auth incluido.
+Network exposure: explicit opt-in via `GLYVEX_HOST`, documented in
+README/PRIVACY with the warning that no auth is included.
 
-## Inventario verificado — salida (outbound)
+## Verified inventory — outbound
 
-| Destino | Cuándo | Transporte | Integridad | Opt-in |
+| Destination | When | Transport | Integrity | Opt-in |
 |---|---|---|---|---|
-| ~~`fonts.googleapis.com` / `fonts.gstatic.com`~~ | ~~Cada arranque, automático~~ | — | — | — (eliminado por F-a1: self-host) |
-| `github.com/ggml-org/llama.cpp` (b11349) | Botón "Download runtime" | HTTPS (httpx, TLS verificado) | sha256 obligatorio | Sí |
-| `github.com/ggml-org/whisper.cpp` (b5130) | Botón STT | HTTPS | sha256 obligatorio | Sí |
-| `github.com/NoMercy-Entertainment/nomercy-whisper-models` | Botón STT (modelos) | HTTPS | sha256 por archivo | Sí (F-a5) |
-| `github.com/thewh1teagle/kokoro-onnx` (model-files-v1.1) | Botón TTS | HTTPS | sha256 + tamaño | Sí |
-| `huggingface.co/rhasspy/piper-voices` (v1.0.0) | Botón TTS (voces) | HTTPS | sha256 + tamaño | Sí |
-| `github.com/facebey/.../releases/latest.json` (updater) | Check de update del bundle Tauri | HTTPS | firma ed25519 (pubkey en `tauri.conf.json`) | Sí |
-| `api.search.brave.com` / `api.tavily.com` | Tool de búsqueda, solo con API key del usuario | HTTPS | — | Sí (clave en `data/config.json`, fuera de versionado) |
-| SearXNG (`127.0.0.1:8888`) | Tool de búsqueda, self-hosted del usuario | HTTP local | — | Sí |
-| Endpoints chat/benchmark | Solo al endpoint que configura el usuario (default `127.0.0.1:8080`) | HTTP | — | Sí |
-| `*.glyvexgroup.com`, `github.com/facebey/...` (enlaces About) | Clic explícito del usuario | HTTPS | — | Sí |
+| ~~`fonts.googleapis.com` / `fonts.gstatic.com`~~ | ~~Every startup, automatic~~ | — | — | — (removed by F-a1: self-host) |
+| `github.com/ggml-org/llama.cpp` (b11349) | "Download runtime" button | HTTPS (httpx, TLS verified) | sha256 mandatory | Yes |
+| `github.com/ggml-org/whisper.cpp` (b5130) | STT button | HTTPS | sha256 mandatory | Yes |
+| `github.com/NoMercy-Entertainment/nomercy-whisper-models` | STT button (models) | HTTPS | sha256 per file | Yes (F-a5) |
+| `github.com/thewh1teagle/kokoro-onnx` (model-files-v1.1) | TTS button | HTTPS | sha256 + size | Yes |
+| `huggingface.co/rhasspy/piper-voices` (v1.0.0) | TTS button (voices) | HTTPS | sha256 + size | Yes |
+| `github.com/facebey/.../releases/latest.json` (updater) | Tauri bundle update check | HTTPS | ed25519 signature (pubkey in `tauri.conf.json`) | Yes |
+| `api.search.brave.com` / `api.tavily.com` | Search tool, only with the user's API key | HTTPS | — | Yes (key in `data/config.json`, not versioned) |
+| SearXNG (`127.0.0.1:8888`) | Search tool, user's own self-hosted instance | Local HTTP | — | Yes |
+| Chat/benchmark endpoints | Only to the endpoint configured by the user (default `127.0.0.1:8080`) | HTTP | — | Yes |
+| `*.glyvexgroup.com`, `github.com/facebey/...` (About links) | Explicit user click | HTTPS | — | Yes |
 
-## Ausencia de telemetría — verificada
+## Absence of telemetry — verified
 
-- Sin librerías de analytics/telemetry en backend ni frontend: no hay
-  sentry, posthog, mixpanel, segment, plausible, umami, hotjar ni
-  `navigator.sendBeacon` en el código de la app.
-- Todos los WebSocket (`Monitor`, `Benchmark`, `Launcher`, `useLlmStream`) y
-  los streams SSE salen a orígenes propios vía `wsUrlFor(...)` / fetch
-  same-origin. Ninguno apunta a host externo.
-- `@opentelemetry/api` aparece en `package-lock.json` **solo como
-  peerDependency de vitest** (dev-only, no se instala ni se bundtea; es un
-  paquete de interfaces sin exporter y sin red). No es telemetría.
-- Conclusión: la única salida de red automática e involuntaria de la app era
-  Google Fonts (F-a1), ya remediado y merged a main (self-host). La app queda
-  sin salida de red automática: todo lo demás es descargas explícitas por
-  botón, endpoints configurados por el usuario o navegación iniciada por clic.
+- No analytics/telemetry libraries in backend or frontend: there is no
+  sentry, posthog, mixpanel, segment, plausible, umami, hotjar, or
+  `navigator.sendBeacon` anywhere in the app code.
+- All WebSockets (`Monitor`, `Benchmark`, `Launcher`, `useLlmStream`) and SSE
+  streams go to first-party origins via `wsUrlFor(...)` / same-origin fetch.
+  None points to an external host.
+- `@opentelemetry/api` appears in `package-lock.json` **only as a
+  peerDependency of vitest** (dev-only, it is neither installed nor bundled;
+  it is an interfaces-only package with no exporter and no network). It is
+  not telemetry.
+- Conclusion: the only automatic, involuntary network egress the app had was
+  Google Fonts (F-a1), already remediated and merged to main (self-host).
+  The app now has no automatic network egress: everything else is explicit
+  button-triggered downloads, user-configured endpoints, or click-initiated
+  navigation.
 
-## Hallazgos (sección b — backend: inyección de comandos, path traversal, SQL)
+## Findings (section b — backend: command injection, path traversal, SQL)
 
-Fecha: 2026-10-06 · Baseline: pytest 610 en verde antes del cambio.
+Date: 2026-10-06 · Baseline: pytest 610 green before the change.
 
-| # | Hallazgo | Severidad | Estado |
+| # | Finding | Severity | Status |
 |---|----------|-----------|--------|
-| F-b1 | Contención del zip-slip en `_extract_zip` con `str.startswith` (bypass por directorio hermano) | Baja | Remediado en esta rama |
+| F-b1 | zip-slip containment in `_extract_zip` via `str.startswith` (sibling-directory bypass) | Low | Remediated on this branch |
 
-### F-b1 — zip-slip: `startswith` vs `is_relative_to` (Baja)
+### F-b1 — zip-slip: `startswith` vs `is_relative_to` (Low)
 
-`backend/runtime.py:342-344` (antes del fix): el guard validaba
-`str(dest).startswith(str(target.resolve()))`. Una entrada que resuelve en un
-directorio *hermano* cuyo nombre empiece con el del destino
-(`../out-evil/x` con target `.../out`) pasa el `startswith` (`out-evil`
-empieza por `out`) y se escribe fuera del target. Remediado con
-`dest.is_relative_to(target.resolve())` + test de regresión
+`backend/runtime.py:342-344` (before the fix): the guard validated
+`str(dest).startswith(str(target.resolve()))`. An entry resolving into a
+*sibling* directory whose name starts with the destination's (`../out-evil/x`
+with target `.../out`) passes the `startswith` (`out-evil` starts with `out`)
+and gets written outside the target. Remediated with
+`dest.is_relative_to(target.resolve())` + regression test
 (`tests/test_runtime.py::test_extract_zip_rejects_sibling_dir_bypass`).
-Explotabilidad real: baja — todos los zips que pasan por aquí (runtime
-llama.cpp, modelos whisper) provienen de URLs fijas en el manifest con
-verificación sha256 obligatoria; el guard es segunda línea de defensa, no la
-primera. Cubre los 3 call sites (`runtime.py` ×2, `stt_runtime.py` ×1).
+Real exploitability: low — all zips going through here (llama.cpp runtime,
+whisper models) come from fixed manifest URLs with mandatory sha256
+verification; the guard is a second line of defense, not the first. It
+covers the 3 call sites (`runtime.py` ×2, `stt_runtime.py` ×1).
 
-### Auditoría — inyección de comandos (sin hallazgos)
+### Audit — command injection (no findings)
 
-- Todos los subprocess usan `asyncio.create_subprocess_exec` / lista argv,
-  **nunca** `shell=True` ni `Popen` con string: `launcher.py:634` (probe
-  `--help`/`--version`), `launcher.py:1331` (launch), `stt.py:182` (probe
-  whisper-cli), `stt_runtime.py:530`, `tts.py:161` (PowerShell SAPI).
-- El comando de launch (`build_llama_server_command`, `launcher.py:770`) es
-  una lista de argv con cada valor como entrada independiente y prefijado por
-  su flag; la única concatenación es `--lora-scaled PATH:SCALE` (una sola
-  entrada, sin shell). No hay inyección de comandos de SO.
-- `tts.py`: el script PowerShell se escribe en un temp dir con contenido fijo
-  (constantes `_VOICES_SCRIPT`/`_SPEAK_SCRIPT`) y los args van como lista.
-- Nota informativa (sin cambio): valores de config del usuario
-  (`lora_path`, `mmproj_path`, `mtp_draft_model`, `host`, `cache_type_k`,
-  `load_mode`, `reasoning_effort`, `rope_scaling_type`) se pasan como
-  entradas de argv; un valor que empiece por `-` podría reinterpretarse como
-  flag por llama-server (argument injection en el propio binario). Impacto
-  nulo en la práctica: la config es del propio usuario de la máquina local.
+- All subprocesses use `asyncio.create_subprocess_exec` / an argv list,
+  **never** `shell=True` or `Popen` with a string: `launcher.py:634`
+  (`--help`/`--version` probe), `launcher.py:1331` (launch), `stt.py:182`
+  (whisper-cli probe), `stt_runtime.py:530`, `tts.py:161` (PowerShell SAPI).
+- The launch command (`build_llama_server_command`, `launcher.py:770`) is an
+  argv list with each value as its own entry, prefixed by its flag; the only
+  concatenation is `--lora-scaled PATH:SCALE` (a single entry, no shell).
+  There is no OS command injection.
+- `tts.py`: the PowerShell script is written to a temp dir with fixed content
+  (the `_VOICES_SCRIPT`/`_SPEAK_SCRIPT` constants) and the args go as a list.
+- Informational note (no change): user config values (`lora_path`,
+  `mmproj_path`, `mtp_draft_model`, `host`, `cache_type_k`, `load_mode`,
+  `reasoning_effort`, `rope_scaling_type`) are passed as argv entries; a
+  value starting with `-` could be reinterpreted as a flag by llama-server
+  (argument injection in the binary itself). Impact nil in practice: the
+  config belongs to the user of the local machine themselves.
 
-### Auditoría — path traversal (sin hallazgos nuevos)
+### Audit — path traversal (no new findings)
 
-| Punto | Contención | Evidencia |
+| Point | Containment | Evidence |
 |---|---|---|
-| Adjuntos (`/api/chat/attachments/{id}/raw`) | id hex de 32 chars: `isalnum()` + longitud exacta → 400 | `attachments.py:625-631` |
-| Escritura de adjuntos | id generado por la app (`uuid4().hex`) | `attachments.py:559-561` |
-| Fallback SPA | siempre `index.html` fijo; el path del request no toca el FS | `main.py:265-271` |
-| `/assets` | `StaticFiles` de Starlette (sanitiza el path) | `main.py:263` |
-| `log_file` del launcher | `relative_to(DATA_DIR)` → 400 si sale | `launcher.py:541-574` (C3) |
-| Descargas runtime/STT/TTS | destinos fijos en `runtime_dir()` y dirs propios; URL del manifest con sha256 obligatorio | `runtime.py:350-384` |
-| Voz Piper por nombre | `name` debe existir en el registro fijo `PIPER_VOICES` → 404 | `piper_runtime_api.py:42-47` |
-| Lectura de header GGUF | paths desde `models.json` (configurados por el usuario) — lee archivos de la propia máquina local | `models.py:511` (informativo) |
+| Attachments (`/api/chat/attachments/{id}/raw`) | 32-char hex id: `isalnum()` + exact length → 400 | `attachments.py:625-631` |
+| Attachment writes | id generated by the app (`uuid4().hex`) | `attachments.py:559-561` |
+| SPA fallback | always a fixed `index.html`; the request path never touches the filesystem | `main.py:265-271` |
+| `/assets` | Starlette's `StaticFiles` (sanitizes the path) | `main.py:263` |
+| Launcher `log_file` | `relative_to(DATA_DIR)` → 400 if it escapes | `launcher.py:541-574` (C3) |
+| Runtime/STT/TTS downloads | fixed destinations in `runtime_dir()` and dedicated dirs; manifest URL with mandatory sha256 | `runtime.py:350-384` |
+| Piper voices by name | `name` must exist in the fixed `PIPER_VOICES` registry → 404 | `piper_runtime_api.py:42-47` |
+| GGUF header reading | paths from `models.json` (user-configured) — reads files on the user's own local machine | `models.py:511` (informational) |
 
-### Auditoría — SQL (sin hallazgos)
+### Audit — SQL (no findings)
 
-- Todo el acceso a datos pasa por SQLAlchemy ORM con parámetros
+- All data access goes through the SQLAlchemy ORM with parameters
   (`select()`, `.ilike()`, `.order_by(column)`): `database.py:399-412`,
   `benchmark.py:630/1097/1192`.
-- Las únicas f-strings SQL (`metrics_store.py:245/287/322-324`) interpolan
-  nombres de tabla de un diccionario interno fijo (`TABLE[src]`) y
-  placeholders `?`; los valores van siempre como parámetros bound.
+- The only SQL f-strings (`metrics_store.py:245/287/322-324`) interpolate
+  table names from a fixed internal dictionary (`TABLE[src]`) and `?`
+  placeholders; values always go as bound parameters.
 
-## Hallazgos (sección c — secretos y SSRF)
+## Findings (section c — secrets and SSRF)
 
-Fecha: 2026-10-06 · Sin cambios de código (auditoría solo).
+Date: 2026-10-06 · No code changes (audit only).
 
-| # | Hallazgo | Severidad | Estado |
+| # | Finding | Severity | Status |
 |---|----------|-----------|--------|
-| F-c1 | API keys en claro en la API local (loopback) | Baja (aceptado) | Documentado |
-| F-c2 | `--api-key` en la línea de comandos del hijo llama-server | Baja (informativo) | Documentado |
+| F-c1 | API keys in clear text on the local (loopback) API | Low (accepted) | Documented |
+| F-c2 | `--api-key` on the child llama-server's command line | Low (informational) | Documented |
 
-### F-c1 — API keys en claro en la API local (Baja, riesgo aceptado)
+### F-c1 — API keys in clear text on the local API (Low, accepted risk)
 
-`GET /api/config` (`main.py:191-193`) devuelve `config.data` completo, con
-`tools.brave_api_key` / `tools.tavily_api_key` en claro; `GET
-/api/launcher/status` (y `/launch`, `/stop`, `/restart`) devuelven
-`ProcessInfo.launch_config` con `api_key` en claro (`launcher.py:484,1356`).
-El frontend las necesita para poblar/editar los campos de configuración
-(`Config.jsx`, `Launcher.jsx:1273-1279`). Mismo trust boundary que F-a2:
-por defecto todo escucha en loopback y la LAN es opt-in sin auth (aceptado).
-Lo que SÍ está protegido: `command` expuesto por la API y escrito a logs pasa
-por `mask_command` (`launcher.py:754-767`, `--api-key` → `********`) y los
-logs de config usan `_redact_secrets` (`main.py:70-86`). Los mensajes de error
-nunca incluyen la key (`ProviderError` genérico en `tools.py`). Sin cambio.
+`GET /api/config` (`main.py:191-193`) returns the full `config.data`, with
+`tools.brave_api_key` / `tools.tavily_api_key` in clear text; `GET
+/api/launcher/status` (and `/launch`, `/stop`, `/restart`) return
+`ProcessInfo.launch_config` with `api_key` in clear text
+(`launcher.py:484,1356`). The frontend needs them to populate/edit the
+configuration fields (`Config.jsx`, `Launcher.jsx:1273-1279`). Same trust
+boundary as F-a2: by default everything listens on loopback and LAN is an
+opt-in without auth (accepted). What IS protected: the `command` exposed by
+the API and written to logs goes through `mask_command`
+(`launcher.py:754-767`, `--api-key` → `********`), and config logs use
+`_redact_secrets` (`main.py:70-86`). Error messages never include the key
+(generic `ProviderError` in `tools.py`). No change.
 
-### F-c2 — `--api-key` en argv del hijo (Baja, informativo)
+### F-c2 — `--api-key` in the child's argv (Low, informational)
 
-`launcher.py:978-979`: la key va como argumento de línea de comandos de
-llama-server, visible para cualquier proceso local (tasklist/WMI/Process
-Explorer) mientras el server corre. llama-server no ofrece alternativa por
-variable de entorno; en una máquina de un solo usuario la key es del propio
-usuario. Informativo; sin cambio.
+`launcher.py:978-979`: the key is passed as a command-line argument to
+llama-server, visible to any local process (tasklist/WMI/Process Explorer)
+while the server runs. llama-server offers no environment-variable
+alternative; on a single-user machine the key is the user's own.
+Informational; no change.
 
-### Verificado limpio — secretos
+### Verified clean — secrets
 
-- `data/config.json` y `models.json` en `.gitignore`;
-  `data/config.example.json` versionado sin valores (todas las keys/token/
-  password en `""`).
-- Token Prometheus: comparación timing-safe con `hmac.compare_digest`
-  (`metrics_export.py:395-402`), endpoint deshabilitado por defecto
-  (`exports.prometheus_enabled=false`) y 404 si no está activado.
-- Keys de tools con prioridad env > config.json (`tools.py:151-154`):
-  `BRAVE_API_KEY`/`TAVILY_API_KEY` evitan dejarla en disco.
-- `GET /api/llm-metrics/processes` expone solo id/nombre/estado/host/puerto
-  (`llm_metrics.py:808-812`), sin `launch_config`.
-- Updater: el ed25519 en `tauri.conf.json` es la CLAVE PÚBLICA de verificación
-  (no hay secreto que proteger).
+- `data/config.json` and `models.json` in `.gitignore`;
+  `data/config.example.json` is versioned with no values (all keys/tokens/
+  passwords are `""`).
+- Prometheus token: timing-safe comparison with `hmac.compare_digest`
+  (`metrics_export.py:395-402`), endpoint disabled by default
+  (`exports.prometheus_enabled=false`) and 404 when not enabled.
+- Tool keys with env > config.json precedence (`tools.py:151-154`):
+  `BRAVE_API_KEY`/`TAVILY_API_KEY` avoid leaving the key on disk.
+- `GET /api/llm-metrics/processes` exposes only id/name/state/host/port
+  (`llm_metrics.py:808-812`), no `launch_config`.
+- Updater: the ed25519 entry in `tauri.conf.json` is the PUBLIC verification
+  key (there is no secret to protect).
 
-### Verificado limpio — SSRF
+### Verified clean — SSRF
 
-| Superficie | Riesgo | Evidencia |
+| Surface | Risk | Evidence |
 |---|---|---|
-| Tool `fetch_url` (URL sugerida por el LLM) | Guard SSRF completo: resuelve el DNS localmente (no confía en el literal) y bloquea `is_private \| is_loopback \| is_link_local \| is_reserved \| is_multicast` — cubre 169.254.169.254 (metadata cloud) — aplicado a la URL original Y en cada redirect | `tools.py:436-463,534-570`; opt-out explícito `tools.allow_private_hosts` (default `false`) |
-| Brave / Tavily search | URLs fijas en el código (`https://api.search.brave.com`, `https://api.tavily.com`); la key va en header/body y nunca en la URL | `tools.py:284,323-331` |
-| Endpoints chat/benchmark | El usuario configura el endpoint (su propia infraestructura; default `127.0.0.1:8080`) — por diseño, no SSRF | `chat.py:107,1266-1270` |
-| Descargas runtime/STT/TTS | URLs fijas en el manifest + sha256 obligatorio | `runtime.py:350-384` (F-a4) |
-| SearXNG | URL configurada por el usuario (default `127.0.0.1:8888`, self-hosted propio) | `tools.py:143` |
+| `fetch_url` tool (LLM-suggested URL) | Full SSRF guard: resolves DNS locally (does not trust the literal) and blocks `is_private \| is_loopback \| is_link_local \| is_reserved \| is_multicast` — covers 169.254.169.254 (cloud metadata) — applied to the original URL AND on every redirect | `tools.py:436-463,534-570`; explicit opt-out `tools.allow_private_hosts` (default `false`) |
+| Brave / Tavily search | URLs fixed in code (`https://api.search.brave.com`, `https://api.tavily.com`); the key goes in a header/body and never in the URL | `tools.py:284,323-331` |
+| Chat/benchmark endpoints | The user configures the endpoint (their own infrastructure; default `127.0.0.1:8080`) — by design, not SSRF | `chat.py:107,1266-1270` |
+| Runtime/STT/TTS downloads | URLs fixed in the manifest + mandatory sha256 | `runtime.py:350-384` (F-a4) |
+| SearXNG | URL configured by the user (default `127.0.0.1:8888`, their own self-hosted instance) | `tools.py:143` |
 
-Nota (sin cambio): entre el `getaddrinfo` del guard y la resolución que hace
-httpx existe una ventana teórica de DNS rebinding; explotarla requiere control
-del DNS de un dominio que la víctima no administra, fuera del alcance real de
-una app local de un solo usuario.
+Note (no change): between the guard's `getaddrinfo` and httpx's own
+resolution there is a theoretical DNS rebinding window; exploiting it requires
+control over the DNS of a domain the victim does not administer, out of scope
+for a single-user local app.
 
-## Hallazgos (sección d — XSS en el frontend)
+## Findings (section d — XSS in the frontend)
 
-Sin hallazgos que remediar. La superficie de render de contenido
-LLM-controlado quedó verificada limpia capa por capa.
+No findings to remediate. The LLM-controlled content rendering surface was
+verified clean layer by layer.
 
-### Verificado limpio — render de markdown
+### Verified clean — markdown rendering
 
-| Superficie | Riesgo | Evidencia |
+| Surface | Risk | Evidence |
 |---|---|---|
-| `dangerouslySetInnerHTML` / `eval` / `document.write` / `window.open` | Ausentes en todo `frontend/src` | búsqueda directa (0 matches) |
-| HTML crudo en markdown | `react-markdown` **sin** `rehype-raw` → el HTML literal en la respuesta del LLM se escapa y se pinta como texto | `MarkdownMessage.jsx:153` (solo se sobrepone `components`, no plugins de HTML crudo) |
-| URLs peligrosas en `href`/`src` | `urlTransform` **no sobrepuesto** → rige `defaultUrlTransform` de react-markdown 10.1.0: cualquier protocolo fuera de la allowlist (`javascript:`, `file:`, `data:`…) se vacía a `""` ANTES de llegar a los componentes custom | `react-markdown/lib/index.js:320,421-444`; `MarkdownMessage.jsx` no define `urlTransform` |
-| Links externos (componente `a` custom) | Modo navegador: `target="_blank" rel="noopener noreferrer"` (sin reverse tabnabbing). Modo Tauri: `preventDefault()` + `openExternal(href)` | `ExternalLink.jsx:1-27` (únicamente usado por `MarkdownMessage`) |
-| `openExternal` → OS handler | Con permiso `shell:allow-open` concedido (`src-tauri/capabilities/default.json`) PERO sin `plugins.shell.open` en `tauri.conf.json`, el plugin aplica su allowlist por defecto: solo `mailto:`, `tel:`, `https?://` llegan al handler del SO. `file://`, `javascript:` y rutas relativas (p. ej. `/C:/Windows/System32/...`) son **rechazadas por el plugin** antes de ShellExecute — sin vector de ejecución de binarios locales | `tauri-plugin-shell-2.4.0/src/lib.rs:178-196` (`ShellAllowlistOpen::Unset` → regex `^((mailto:\w+)\|(tel:\w+)\|(https?://\w+)).+`) |
-| Reporte HTML de benchmark | En el frontend solo se **descarga** a disco (`downloadBlob`), nunca se renderiza en el browser. El reporte servido por el backend escapa todo valor dinámico con `_esc` | `Benchmark.jsx:446-451`; `benchmark.py:455,460-529` |
+| `dangerouslySetInnerHTML` / `eval` / `document.write` / `window.open` | Absent from all of `frontend/src` | direct search (0 matches) |
+| Raw HTML in markdown | `react-markdown` **without** `rehype-raw` → literal HTML in the LLM response is escaped and rendered as text | `MarkdownMessage.jsx:153` (only `components` are overlaid, no raw-HTML plugins) |
+| Dangerous URLs in `href`/`src` | `urlTransform` **not overridden** → react-markdown 10.1.0's `defaultUrlTransform` rules: any protocol outside the allowlist (`javascript:`, `file:`, `data:`…) is emptied to `""` BEFORE reaching the custom components | `react-markdown/lib/index.js:320,421-444`; `MarkdownMessage.jsx` does not define `urlTransform` |
+| External links (custom `a` component) | Browser mode: `target="_blank" rel="noopener noreferrer"` (no reverse tabnabbing). Tauri mode: `preventDefault()` + `openExternal(href)` | `ExternalLink.jsx:1-27` (used only by `MarkdownMessage`) |
+| `openExternal` → OS handler | The `shell:allow-open` permission is granted (`src-tauri/capabilities/default.json`) BUT with no `plugins.shell.open` in `tauri.conf.json`, the plugin applies its default allowlist: only `mailto:`, `tel:`, `https?://` reach the OS handler. `file://`, `javascript:` and relative paths (e.g. `/C:/Windows/System32/...`) are **rejected by the plugin** before ShellExecute — no local-binary execution vector | `tauri-plugin-shell-2.4.0/src/lib.rs:178-196` (`ShellAllowlistOpen::Unset` → regex `^((mailto:\w+)\|(tel:\w+)\|(https?://\w+)).+`) |
+| Benchmark HTML report | In the frontend it is only **downloaded** to disk (`downloadBlob`), never rendered in the browser. The report served by the backend escapes every dynamic value with `_esc` | `Benchmark.jsx:446-451`; `benchmark.py:455,460-529` |
 
-### Verificado limpio — almacenamiento local
+### Verified clean — local storage
 
-- `localStorage`/`sessionStorage` solo guardan: idioma, tema, estado de
-  paneles colapsables y el `run_id` del benchmark activo (UUID interno,
-  re-validado contra el backend al cargar). Ningún contenido LLM o del
-  usuario pasa por ahí → sin vector de stored XSS.
+- `localStorage`/`sessionStorage` only store: language, theme, collapsible
+  panel state, and the active benchmark's `run_id` (internal UUID,
+  re-validated against the backend on load). No LLM or user content goes
+  through them → no stored-XSS vector.
 
-Observación (sin cambio, defense-in-depth opcional): dejar explícito
-`"plugins": { "shell": { "open": "^https?://..." } }` en `tauri.conf.json`
-hace visible la allowlist que hoy aplica por defecto, y un chequeo de
-esquema en `openExternal` (`lib/tauri.js:45`) protegería también a un
-futuro segundo caller. No es necesario con las dos capas actuales
-(`defaultUrlTransform` + scope del plugin).
+Observation (no change, optional defense-in-depth): making explicit
+`"plugins": { "shell": { "open": "^https?://..." } }` in `tauri.conf.json`
+would make the allowlist the plugin currently applies by default visible, and
+a schema check in `openExternal` (`lib/tauri.js:45`) would also protect a
+future second caller. Not necessary with the two current layers
+(`defaultUrlTransform` + plugin scope).
 
-## Hallazgos (sección e — errores funcionales por módulo)
+## Findings (section e — functional findings per module)
 
-Verificados con file:line. El detalle (hallazgos y fixes propuestos) se
-mantiene en un anexo interno, fuera del repo público.
+Verified with file:line. The detail (findings and proposed fixes) is kept in
+an internal annex, outside the public repo.
 
-## Estado del epic SEC-1
+## Status of epic SEC-1
 
-- a) red/telemetría: ✅ — a.1 (bind) loopback por defecto en todos los
-  puntos; a.2 (CORS) allowlist explícita, sin wildcards en producción;
-  a.3 (outbound + telemetría) 1 hallazgo (F-a1, merged a main), resto
-  documentado/aceptado; a.4 (reporte) este documento.
-- b) comandos/paths/SQL: ✅ (arriba) — 1 hallazgo (F-b1, remediado en rama), resto verificado limpio.
-- c) secretos y SSRF: ✅ — 2 hallazgos documentados (F-c1 aceptado, F-c2
-  informativo), resto verificado limpio. Sin cambios de código.
-- d) XSS en frontend: ✅ — 0 hallazgos que remediar; superficie verificada
-  limpia capa por capa (urlTransform + scope del plugin shell + sin
-  rehype-raw + localStorage sin contenido LLM). 1 observación
-  defense-in-depth opcional documentada.
-- e) errores funcionales por módulo: ✅ — verificados con file:line; el
-  detalle (hallazgos y fixes propuestos) queda en un anexo interno, fuera
-  del repo público.
-- f) cierre: ✅ — documento completo (secciones a–e).
+- a) network/telemetry: ✅ — a.1 (bind) loopback by default at every point;
+  a.2 (CORS) explicit allowlist, no wildcards in production;
+  a.3 (outbound + telemetry) 1 finding (F-a1, merged to main), the rest
+  documented/accepted; a.4 (report) this document.
+- b) commands/paths/SQL: ✅ (above) — 1 finding (F-b1, remediated on a
+  branch), the rest verified clean.
+- c) secrets and SSRF: ✅ — 2 documented findings (F-c1 accepted, F-c2
+  informational), the rest verified clean. No code changes.
+- d) XSS in frontend: ✅ — 0 findings to remediate; surface verified clean
+  layer by layer (urlTransform + shell plugin scope + no rehype-raw +
+  localStorage without LLM content). 1 optional defense-in-depth observation
+  documented.
+- e) functional findings per module: ✅ — verified with file:line; the detail
+  (findings and proposed fixes) lives in an internal annex, outside the
+  public repo.
+- f) close: ✅ — complete document (sections a–e).

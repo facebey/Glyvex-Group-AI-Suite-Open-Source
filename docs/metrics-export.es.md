@@ -205,9 +205,15 @@ Grafana: **Dashboards → Import** → pegá el JSON o cargá el archivo. Los pa
 vienen sin datasource asignado: Grafana te pide elegir tu datasource de InfluxDB
 al importar.
 
-Las consultas usan los valores por defecto (bucket `glyvex`, measurements
-`glyvex_hw` / `glyvex_llm`). Si cambiaste el bucket o el prefijo, reemplazalos
-en cada panel (Editar panel → Query).
+El dashboard trae un desplegable **InfluxDB bucket** arriba: todas las consultas
+leen de la variable `v.bucket`, así que elegís el bucket donde escribe tu export
+(el default del exporter es `glyvex`; si usás otro, alcanza con seleccionarlo).
+El dropdown se llena con `buckets()`, o sea muestra los buckets reales del
+servidor. Las measurements sí están fijas en el JSON (`glyvex_hw` / `glyvex_llm`,
+los defaults del prefijo): si cambiaste `measurement_prefix`, reemplazalas en
+cada panel (Editar panel → Query). Si el desplegable aparece vacío, asignale el
+datasource a la variable en **Dashboard settings → Variables** (el JSON deja el
+datasource sin asignar a propósito, igual que los paneles).
 
 Consulta Flux típica (promedio de una serie):
 
@@ -338,5 +344,6 @@ Telegraf (la UI lo muestra con botón "Copiar"):
 | HTTP 404 | El bucket no existe (crealo en Influx) o la URL Versión no coincide: `v2` apunta a `/api/v2/write`, `v1` a `/write`. |
 | "no se pudo contactar al backend" al probar conexión | El backend de la suite no está corriendo en ese puerto. |
 | Aparece `<prefijo>_test` en el bucket | Es de "Probar conexión". Es seguro borrarlo. |
-| Cambiaste prefijo/bucket después de armar el dashboard | Actualizá las consultas de los paneles (Editar panel → Query). |
+| Cambiaste prefijo/bucket después de armar el dashboard | Cambiá la selección del desplegable **InfluxDB bucket**; el prefijo se corrige en cada panel (Editar panel → Query). |
+| El bucket no aparece en el desplegable | El dropdown consulta al **datasource** asignado a la variable: si tu bucket vive en otro servidor Influx, ese datasource apunta al sitio equivocado (o el bucket todavía no fue creado). |
 | Huecos en los gráficos | Esperado: sensor no disponible o motor ocioso (p. ej. `llm.tg_tps` no tiene valor sin generación en curso). No se rellenan con ceros. |

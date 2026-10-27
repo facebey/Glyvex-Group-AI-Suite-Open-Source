@@ -40,11 +40,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Sin cache: npm (fix/actions-storage): cada hash del package-lock.json
+      # genera una entrada ~40 MB no reemplazable en la cuota de storage.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - uses: actions/setup-python@v5
         with:
@@ -57,7 +57,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
+      # Sin Swatinem/rust-cache (fix/actions-storage): buscaba Cargo.lock en la
+      # raiz (esta esta en src-tauri/) y solo dejaba markers de 777 B por tag;
+      # el cache real de target/ pesaria cientos de MB contra la cuota.
 
       - name: Dependencias del sistema (webkit2gtk para Tauri + fuse para AppImage)
         run: |
@@ -81,6 +83,10 @@ jobs:
           path: |
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/appimage/*.AppImage.sig
+          # 3 dias: el artifact de cada tag es ~220 MB con nombre unico (no se
+          # reemplaza); con la retention default de 90 dias varios tags
+          # saturaban la cuota de storage de la cuenta (0.5 GB).
+          retention-days: 3
 
       - name: Nota de release
         run: |
