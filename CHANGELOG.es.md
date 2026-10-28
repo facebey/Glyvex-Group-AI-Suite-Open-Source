@@ -7,6 +7,55 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-10-28
+
+Primer parche de la serie 0.11.x: una corrección de cara al usuario y
+mejoras de calidad sobre 0.11.0-beta, más mantenimiento de CI y
+dependencias. Publicado en el canal de actualización: las instalaciones
+en 0.11.0-beta lo reciben.
+
+### Añadido
+- **Monitor: ahorro local destacado** (SAV-UI): el ahorro estimado frente
+  a pagar un servicio cloud equivalente ahora tiene una tarjeta hero verde
+  en el Monitor y un chip compacto en el header de ambos paneles de
+  consumo (reemplaza el resaltado débil anterior). Solo presentación — el
+  cálculo del ahorro no cambia.
+- **Docs: README en inglés con capturas de la app en inglés**: el README
+  en inglés ahora incluye capturas de la UI 0.11 tomadas en inglés más una
+  sección "Also new in 0.11" (Visible metrics / Session cost, export a
+  Prometheus + InfluxDB, integración OpenCode, About).
+- **Docs: dashboard de ejemplo de Grafana agnóstico del bucket**: el
+  dashboard de ejemplo ahora elige el bucket de InfluxDB mediante una
+  variable de dashboard que se renderiza como dropdown, por lo que
+  funciona contra cualquier bucket sin editar queries (antes el bucket
+  `glyvex` estaba hardcodeado en 14 queries).
+- **Docs: reporte de seguridad y changelog de temas bilingües**:
+  `REPORTE-SEC-1.md` y `frontend/THEMES_CHANGELOG.md` siguen ahora la
+  convención bilingüe del repo — `.md` principal en inglés con el original
+  en español conservado intacto como `.es.md`.
+
+### Corregido
+- **Chat: búsqueda del historial sobre un índice de texto plano** (E5): la
+  búsqueda de conversaciones ahora coincide contra un índice de texto
+  plano mantenido (título + texto de los mensajes) en lugar del JSON
+  crudo de los mensajes. Antes cualquier palabra común — "user",
+  "content", "text" — coincidía con la estructura JSON y devolvía
+  conversaciones no relacionadas; las imágenes adjuntas (data-URI) también
+  podían generar ruido. Las bases de datos existentes se migran y
+  rellenan automáticamente al arrancar; los bloques de thinking ahora
+  también son buscables.
+
+### Cambiado
+- **CI: storage de GitHub Actions acotado**: retención de artefactos
+  reducida a 3 días y caches de npm/rust eliminados en los tres workflows
+  (CI, NSIS de Windows, AppImage de Linux) — ese storage era el principal
+  motor de la facturación de GitHub Actions. Sin cambio en los builds ni
+  en los releases.
+- **Dependencias: pisos de versión elevados a las últimas versiones
+  verificadas** (fastapi 0.162.0, sqlalchemy 2.1.6, pypdf 6.21.2,
+  ddgs 9.16.1, i18next ^26.5.7, react-i18next ^17.1.5), verificado con
+  la suite completa de tests. Sin cambio de comportamiento de la app.
+
 ## [0.11.0-beta] — 2026-10-25
 
 Primera beta de la serie 0.11.x y release completa del conjunto 0.11.0:

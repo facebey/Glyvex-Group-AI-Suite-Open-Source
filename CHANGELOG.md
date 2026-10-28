@@ -7,6 +7,50 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-10-28
+
+First patch of the 0.11.x series: one user-facing fix and quality-of-life
+additions on top of 0.11.0-beta, plus CI and dependency maintenance.
+Published on the update channel: installs on 0.11.0-beta receive it.
+
+### Added
+- **Monitor: local-savings highlight** (SAV-UI): the estimated savings
+  compared with paying an equivalent cloud service now has a green hero
+  card on the Monitor and a compact chip on the header of both
+  consumption panels (replacing the previous weak highlight). Presentation
+  only — the savings calculation is unchanged.
+- **Docs: README in English with English-app screenshots**: the English
+  README now ships 0.11 UI screenshots captured in English plus an
+  "Also new in 0.11" section (Visible metrics / Session cost, Prometheus +
+  InfluxDB export, OpenCode integration, About).
+- **Docs: bucket-agnostic example Grafana dashboard**: the example
+  dashboard now picks the InfluxDB bucket through a dashboard variable
+  rendered as a dropdown, so it works against any bucket without editing
+  queries (the fixed `glyvex` bucket hardcoded 14 queries before).
+- **Docs: bilingual security report and themes changelog**:
+  `REPORTE-SEC-1.md` and `frontend/THEMES_CHANGELOG.md` now follow the
+  repository bilingual convention — English primary `.md` with the Spanish
+  original preserved intact as `.es.md`.
+
+### Fixed
+- **Chat: history search over a plain-text index** (E5): conversation
+  search now matches against a maintained plain-text index (title +
+  message text) instead of the raw message JSON. Previously any common
+  word — "user", "content", "text" — matched the JSON structure and
+  returned unrelated conversations; image attachments (data-URIs) could
+  also match noise. Existing databases are migrated and backfilled
+  automatically at startup; thinking blocks become searchable too.
+
+### Changed
+- **CI: GitHub Actions storage capped**: artifact retention reduced to 3
+  days and npm/rust caches dropped in the three workflows (CI, Windows
+  NSIS, Linux AppImage) — this storage was the main driver of GitHub
+  Actions billing. No change to the builds or releases.
+- **Dependencies: version floors raised to the latest verified releases**
+  (fastapi 0.162.0, sqlalchemy 2.1.6, pypdf 6.21.2, ddgs 9.16.1,
+  i18next ^26.5.7, react-i18next ^17.1.5), verified with the full test
+  suite. No change in app behavior.
+
 ## [0.11.0-beta] — 2026-10-25
 
 First beta of the 0.11.x series and the full release of the 0.11.0 feature
