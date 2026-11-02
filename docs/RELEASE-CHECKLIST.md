@@ -108,6 +108,32 @@ commits caused the 0.6.0 vs 0.7.1-beta and 0.7.1 vs 0.7.4 drifts):
   download the artifact and follow the same copy → `build-latest-json.ps1`
   steps.
 
+## 3c. Green ZIP (optional) — no-installer distribution
+
+For users who prefer not to run an installer. Built from the NSIS of step 3
+(same version): `package-green-zip.ps1` silent-installs it to a temp dir (the
+exact installed layout), stages it with the usage guide
+`docs/README-PORTABLE.txt` (excluding `uninstall.exe`), zips it, prints the
+SHA-256, then uninstalls the temp copy and restores this machine's uninstall
+registry entry and Start Menu shortcuts.
+
+```powershell
+.\package-green-zip.ps1
+```
+
+- [ ] Output: `src-tauri\target\release\bundle\nsis\Glyvex AI Suite_X.Y.Z_windows-x64-green.zip`
+  (`-Out <dir>` moves the output; `-Installer <path>` picks a specific installer).
+- [ ] Record the ZIP SHA-256 (the script prints it; goes into the release-notes table).
+- [ ] The green ZIP is **not** part of `latest.json` and is not covered by the
+  auto-update: its update is **manual** (download the new ZIP and replace the
+  folder). The ZIP carries `README-PORTABLE.txt` (bilingual) stating this, the
+  SmartScreen note for the unsigned exe (7-Zip extraction does not propagate
+  the web-download mark; Explorer's "Extract All" does), and that green and
+  installed copies of the same user **share** `%LOCALAPPDATA%\Glyvex-AI-Suite\data`
+  and port 7981 → run only one at a time.
+- [ ] Do NOT use Tauri's `portable` target: it re-extracts `resources/glyvex-backend`
+  (hundreds of MB) to `%TEMP%` on every launch.
+
 ## 4. Public sync
 
 - [ ] `.\distribution\sync-oss.ps1` — exports the committed state (without
@@ -129,7 +155,8 @@ commits caused the 0.6.0 vs 0.7.1-beta and 0.7.1 vs 0.7.4 drifts):
 
   `--target` takes a **branch name** (a short SHA fails with HTTP 422).
 - [ ] Upload the assets: `.exe`, `.sig`, `latest.json` (+ `.AppImage` and
-   `.AppImage.sig` when a Linux build was done — step 3b).
+   `.AppImage.sig` when a Linux build was done — step 3b; + the green ZIP when
+   the optional no-installer distribution was built — step 3c).
    (`gh release upload --clobber` on re-releases; if you replace an asset,
    update the SHA-256 table in the notes).
 - [ ] After creating or editing the notes, verify the accents survived:

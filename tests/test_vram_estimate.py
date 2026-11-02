@@ -184,3 +184,88 @@ def test_hibrido_sin_params_ssm_kv_cortado_ssm_cero():
                             cache_type_k="q8_0", cache_type_v="q8_0")
     assert r["n_attn_layers"] == 16   # el corte de KV sigue aplicando
     assert r["ssm_gb"] == 0.0         # sin params SSM se trata como denso en ese término
+
+
+# ---------------------------------------------------------------------------
+# Sliding Window Attention (EST-SWA) — fixture gemma4 tomado del dump de
+# metadata del log real (Files\glyvex-llama-server-…-1793327320847.log), cuyos
+# memory breakdown dan el ground truth: self=18433 MiB = model 16207 +
+# context 1519 + compute 706. Antes de este fix el estimador daba 48.47 GB
+# (KV 31.88): ~21× de error solo en KV.
+# ---------------------------------------------------------------------------
+
+
+def _gemma4_meta() -> dict:
+    # Gemma-4-26B-A4B-it (arch gemma4): 30 capas, sliding_window=1024 con
+    # pattern [true×5, false] (25 capas sliding / 5 full), head_count_kv array
+    # por capa [8×5, 2], dims 256 (key_length_swa) en sliding y 512 en full.
+    cycle = [True, True, True, True, True, False]
+    return {
+        "n_layer": 30, "n_head": 16, "n_embd": 2816,
+        "n_head_kv": 8,  # escalar legado: primer elemento del array
+        "n_head_kv_layers": [8, 8, 8, 8, 8, 2] * 5,
+        "head_dim": 512, "head_dim_swa": 256,
+        "sliding_window": 1024,
+        "sliding_window_pattern": cycle * 5,
+        "is_moe": True,
+    }
+
+
+def test_swa_gemma4_kv_por_capa_coincide_con_log():
+    r = estimate_vram_usage(_gemma4_meta(), model_size_gb=15.84, n_ctx=131072,
+                            cache_type_k="q8_0", cache_type_v="q8_0",
+                            flash_attn=True, gpu_vram_gb=24)
+    assert r["available"] is True
+    # full: 5 capas × 2 heads × (512+512) × 131072 × 1.0625 ≈ 1.33 GiB.
+    # sliding: 25 capas × 8 heads × (256+256) × 1024 × 1.0625 ≈ 0.10 GiB.
+    # Total ≈1.43 GiB vs 1519 MiB medidos por llama.cpp (con su estado
+    # swa_full y redondeos de reserva).
+    assert r["kv_gb"] == 1.43
+    assert r["n_attn_layers"] == 30   # sin SSM: todas son atención (acotada o no)
+    assert r["n_swa_layers"] == 25
+    # pesos 15.84 + KV 1.43 + cómputo 0.75 (FA, como en el run del log) =
+    # 18.02 GB vs 18433 MiB = 18.0 GiB del memory breakdown. El draft MTP no
+    # está incluido: llama.cpp tampoco lo midió en su fit (ctx_other).
+    assert r["total_gb"] == 18.02
+    assert r["state"] == "comodo"
+
+
+def test_swa_la_ventana_no_crece_con_el_ctx():
+    a = estimate_vram_usage(_gemma4_meta(), model_size_gb=15.84, n_ctx=32768,
+                            cache_type_k="q8_0", cache_type_v="q8_0")
+    b = estimate_vram_usage(_gemma4_meta(), model_size_gb=15.84, n_ctx=131072,
+                            cache_type_k="q8_0", cache_type_v="q8_0")
+    assert a["kv_gb"] == 0.44  # 5×32768 full + 25×1024 sliding
+    # ctx ×4 NO es KV ×4: la parte sliding está acotada a la ventana.
+    assert a["kv_gb"] < b["kv_gb"] < a["kv_gb"] * 4
+
+
+def test_swa_uniform_sin_patron_todas_las_capas_sliding():
+    # mistral/gemma2: solo el escalar sliding_window (sin pattern) → todas las
+    # capas deslizan (lo que hace llama.cpp con SWA uniforme).
+    meta = {"n_layer": 8, "n_head": 8, "n_embd": 4096, "n_head_kv": 8,
+            "head_dim": 256, "sliding_window": 4096}
+    r = estimate_vram_usage(meta, model_size_gb=5, n_ctx=8192,
+                            cache_type_k="f16", cache_type_v="f16")
+    # 8 capas × 8 heads × 256 × 4096 (ventana, no 8192) × 2 bytes = 0.25 GiB.
+    assert r["kv_gb"] == 0.25
+    assert r["n_swa_layers"] == 8
+    assert r["swa_window"] == 4096
+
+
+def test_swa_array_de_heads_iguales_no_cambia_el_denso():
+    # head_count_kv como array con todos los valores iguales (lo que ya traían
+    # muchos GGUF) + sin ventana: resultado idéntico al camino escalar.
+    meta = _dense_meta() | {"n_head_kv_layers": [8] * 48}
+    a = estimate_vram_usage(meta, model_size_gb=10, n_ctx=65536,
+                            cache_type_k="f16", cache_type_v="f16")
+    b = estimate_vram_usage(_dense_meta(), model_size_gb=10, n_ctx=65536,
+                            cache_type_k="f16", cache_type_v="f16")
+    assert a["kv_gb"] == b["kv_gb"] == 15.0
+    assert a["n_swa_layers"] == 0 and a["swa_window"] is None
+
+
+def test_denso_reporta_cero_swa():
+    r = estimate_vram_usage(_dense_meta(), model_size_gb=10, n_ctx=8192)
+    assert r["n_swa_layers"] == 0
+    assert r["swa_window"] is None

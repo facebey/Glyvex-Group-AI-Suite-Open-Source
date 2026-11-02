@@ -97,6 +97,9 @@
   "agent_bridge": {
     "enabled": false
   },
+  "logs": {
+    "rotate_keep": 3
+  },
   "model_dirs": [],
   "last_used_model": null,
   "auto_start_last": false

@@ -360,6 +360,27 @@ async def test_vram_estimate_endpoint_with_vram_config(client, tmp_path):
     assert data["state"] == "comodo"
     assert data["pct"] is not None and data["pct"] < 100
     assert data["total_gb"] == data["weights_gb"] + data["kv_gb"] + data["compute_gb"]
+    assert data["mtp_available"] is False  # sin draft embebido ni sidecar en la carpeta
+
+
+async def test_vram_estimate_flags_mtp_sidecar(client, tmp_path):
+    # Draft MTP como archivo sidecar en la misma carpeta (misma regla de
+    # grouping): la tarjeta de estimación debe avisar del margen del draft.
+    model_dir = tmp_path / "models"
+    model_dir.mkdir(exist_ok=True)
+    kv = {"block_count": 32, "attention.head_count": 32, "attention.head_count_kv": 8,
+          "attention.head_size": 128, "embedding_length": 4096}
+    write_gguf(model_dir / "Base-8B-Q4_K_M.gguf", "llama", None, dict(kv))
+    write_gguf(model_dir / "Base-8B-Q4_K_M-mtp.gguf", "llama", None, dict(kv))
+    await client.post("/api/config", json={"model_dirs": [str(model_dir)]})
+    await scan_and_wait(client)
+    models = (await client.get("/api/models")).json()
+    base = next(m for m in models if "mtp" not in m["filename"])
+    res = await client.get(f"/api/models/{base['id']}/vram-estimate",
+                           params={"n_ctx": 8192, "cache_type_k": "q4_0", "cache_type_v": "q4_0"})
+    data = res.json()
+    assert data["available"] is True
+    assert data["mtp_available"] is True
 
 
 async def test_vram_estimate_endpoint_empty_gguf_unavailable(client, sample_model_dir):
@@ -561,6 +582,78 @@ async def test_warmup_refills_memory_cache_for_entries_without_metadata(client, 
     assert str(model_dir / KNOWN_NAME) in models_module._METADATA_CACHE
 
 
+async def test_stale_schema_cache_is_discarded_and_swa_metadata_regenerated(client, tmp_path):
+    # EST-SWA añadió claves SWA por capa derivadas del header SIN subir la
+    # versión de esquema: una ficha escrita antes del fix se reusaba por mtime
+    # para siempre sin esas claves y el estimador de VRAM caía al camino denso
+    # legacy (sugería 16K para gemma4 en 24 GB). El bump de esquema debe
+    # descartar el cache viejo y regenerar las fichas con las claves nuevas.
+    from gguf import GGUFValueType, GGUFWriter
+
+    heads = [8, 8, 8, 8, 8, 2] * 5
+    pattern = [True, True, True, True, True, False] * 5
+    model_dir = tmp_path / "models"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    p = model_dir / "Gemma-4-26B-A4B-it-Q4_K_M.gguf"
+    writer = GGUFWriter(str(p), "gemma4")
+    writer.open_output_file()
+    writer.add_chat_template("{{ messages | join(' ') }}")
+    writer.add_architecture()
+    writer.add_key_value("gemma4.block_count", 30, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.embedding_length", 2816, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.attention.head_count", 16, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.attention.key_length", 512, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.attention.key_length_swa", 256, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.attention.sliding_window", 1024, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.attention.head_count_kv", heads,
+                         GGUFValueType.ARRAY, GGUFValueType.INT32)
+    writer.add_key_value("gemma4.attention.sliding_window_pattern", pattern,
+                         GGUFValueType.ARRAY, GGUFValueType.BOOL)
+    writer.write_header_to_file()
+    writer.write_kv_data_to_file()
+    writer.close()
+
+    SWA_KEYS = ("n_head_kv_layers", "head_dim_swa", "sliding_window",
+                "sliding_window_pattern")
+
+    await client.post("/api/config", json={"model_dirs": [str(model_dir)]})
+    await scan_and_wait(client)
+    listed = (await client.get("/api/models")).json()
+    assert listed[0]["metadata"]["n_head_kv_layers"] == heads  # sanity: el código actual persiste las claves
+
+    # Simular el cache pre-EST-SWA: la entrada persistida SIN claves SWA y el
+    # número de esquema anterior en el archivo de versión. El archivo en disco
+    # NO cambia (mtime intacto): solo la invalidación por esquema puede
+    # regenerar la ficha.
+    entry = models_module.inventory.get(listed[0]["id"])
+    entry.metadata = {k: v for k, v in entry.metadata.items() if k not in SWA_KEYS}
+    await models_module.inventory.save()
+    await models_module._write_cache_schema_version(
+        models_module.MODELS_CACHE_SCHEMA_VERSION - 1
+    )
+
+    # "Restart": se pierde todo el estado en memoria; queda solo el cache
+    # viejo en models.json con la versión de esquema desactualizada.
+    models_module.inventory._by_id = {}
+    models_module.inventory._loaded = False
+    models_module._METADATA_CACHE.clear()
+    models_module._metadata_locks.clear()
+
+    await scan_and_wait(client)
+
+    listed = (await client.get("/api/models")).json()
+    meta = listed[0]["metadata"]
+    assert meta is not None
+    assert meta["n_head_kv_layers"] == heads
+    assert meta["head_dim_swa"] == 256
+    assert meta["sliding_window"] == 1024
+    assert meta["sliding_window_pattern"] == pattern
+    # La versión almacenada quedó sincronizada con la del código.
+    assert await models_module._read_cache_schema_version() == (
+        models_module.MODELS_CACHE_SCHEMA_VERSION
+    )
+
+
 # ---------------------------------------------------------------------------
 # Parser rápido del header GGUF (blob, sin librería) + kv_data persistida
 # ---------------------------------------------------------------------------
@@ -616,7 +709,8 @@ def test_fast_header_skips_large_tokenizer(tmp_path):
 
 def test_fast_header_materializes_small_scalar_array(tmp_path):
     # Arrays de escalar pequeños se materializan como lista y _as_int toma
-    # el primer elemento (head_count_kv por capa: todos iguales).
+    # el primer elemento (el fallback escalar; los valores por capa se
+    # preservan en n_head_kv_layers — ver test_gemma4_swa_arrays_preservados).
     from gguf import GGUFValueType, GGUFWriter
 
     p = tmp_path / "arr.gguf"
@@ -635,6 +729,50 @@ def test_fast_header_materializes_small_scalar_array(tmp_path):
     assert header["kvs"]["llama.attention.head_count_kv"] == [4, 4, 4]
     assert models_module._as_int([4, 4, 4]) == 4
     assert models_module._metadata_from_kv(header)["n_head_kv"] == 4
+    assert models_module._metadata_from_kv(header)["n_head_kv_layers"] == [4, 4, 4]
+
+
+def test_gemma4_swa_arrays_preservados(tmp_path):
+    # Arrays por capa y campos SWA (gemma4): preservados en AMBAS rutas
+    # (parser rápido y librería gguf), y el escalar n_head_kv sigue siendo el
+    # primer elemento (consumidores legacy). Fixture reducido del dump real del
+    # log de Gemma-4-26B-A4B (EST-SWA).
+    from gguf import GGUFReader, GGUFValueType, GGUFWriter
+
+    heads = [8, 8, 8, 8, 8, 2] * 5
+    pattern = [True, True, True, True, True, False] * 5
+    p = tmp_path / "g4.gguf"
+    writer = GGUFWriter(str(p), "gemma4")
+    writer.open_output_file()
+    writer.add_chat_template("{{ messages | join(' ') }}")
+    writer.add_architecture()
+    writer.add_key_value("gemma4.block_count", 30, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.embedding_length", 2816, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.attention.head_count", 16, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.attention.key_length", 512, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.attention.key_length_swa", 256, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.attention.sliding_window", 1024, GGUFValueType.UINT32)
+    writer.add_key_value("gemma4.attention.head_count_kv", heads,
+                         GGUFValueType.ARRAY, GGUFValueType.INT32)
+    writer.add_key_value("gemma4.attention.sliding_window_pattern", pattern,
+                         GGUFValueType.ARRAY, GGUFValueType.BOOL)
+    writer.write_header_to_file()
+    writer.write_kv_data_to_file()
+    writer.close()
+
+    meta_fast = models_module._metadata_from_kv(models_module.read_gguf_header_fast(p))
+    meta_reader = models_module._metadata_from_reader(GGUFReader(str(p), "r"))
+    for meta in (meta_fast, meta_reader):
+        assert meta["n_head_kv"] == 8  # escalar legado: primer elemento
+        assert meta["n_head_kv_layers"] == heads
+        assert meta["head_dim"] == 512
+        assert meta["head_dim_swa"] == 256
+        assert meta["sliding_window"] == 1024
+        assert meta["sliding_window_pattern"] == pattern
+
+    # Paridad total fast vs reader también en las claves nuevas.
+    for key in models_module._METADATA_KEYS:
+        assert meta_fast[key] == meta_reader[key], key
 
 
 def test_fast_header_corrupt_or_truncated_returns_none(tmp_path):

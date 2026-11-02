@@ -110,6 +110,32 @@ causó los desfasajes de 0.6.0 vs 0.7.1-beta y 0.7.1 vs 0.7.4):
   descargar el artifact y seguir los mismos pasos de copiar →
   `build-latest-json.ps1`.
 
+## 3c. ZIP green (opcional) — distribución sin instalador
+
+Para usuarios que prefieren no correr un instalador. Se arma a partir del NSIS
+del paso 3 (misma versión): `package-green-zip.ps1` lo instala en silencio a un
+directorio temporal (el layout instalado exacto), lo etapa con la guía de uso
+`docs/README-PORTABLE.txt` (excluyendo `uninstall.exe`), lo comprime, imprime
+el SHA-256 y después desinstala la copia temporal y restaura la entrada de
+registro de desinstalación y los accesos del Start Menu de esta máquina.
+
+```powershell
+.\package-green-zip.ps1
+```
+
+- [ ] Salida: `src-tauri\target\release\bundle\nsis\Glyvex AI Suite_X.Y.Z_windows-x64-green.zip`
+  (`-Out <dir>` mueve la salida; `-Installer <path>` elige un instalador concreto).
+- [ ] Registrar el SHA-256 del ZIP (el script lo imprime; va a la tabla de las notes).
+- [ ] El ZIP green **no** entra en `latest.json` ni lo cubre el auto-update: su
+  update es **manual** (descargar el ZIP nuevo y reemplazar la carpeta). Dentro
+  del ZIP viaja `README-PORTABLE.txt` (bilingüe) que lo aclara, con la nota de
+  SmartScreen para el exe sin firmar (extraer con 7-Zip no propaga la marca de
+  descarga web; "Extraer todo" del Explorador sí) y de que una copia green y la
+  instalación del mismo usuario **comparten** `%LOCALAPPDATA%\Glyvex-AI-Suite\data`
+  y el puerto 7981 → usar solo una a la vez.
+- [ ] NO usar el target `portable` de Tauri: re-extrae `resources/glyvex-backend`
+  (cientos de MB) a `%TEMP%` en cada arranque.
+
 ## 4. Sync público
 
 - [ ] `.\distribution\sync-oss.ps1` — exporta el estado commiteado (sin
@@ -131,7 +157,8 @@ causó los desfasajes de 0.6.0 vs 0.7.1-beta y 0.7.1 vs 0.7.4):
 
   `--target` toma **nombre de rama** (un SHA corto falla con HTTP 422).
 - [ ] Subir los assets: `.exe`, `.sig`, `latest.json` (+ `.AppImage` y
-   `.AppImage.sig` cuando se hizo el build Linux — paso 3b).
+   `.AppImage.sig` cuando se hizo el build Linux — paso 3b; + el ZIP green
+   cuando se armó la distribución opcional sin instalador — paso 3c).
    (`gh release upload --clobber` en re-releases; si se reemplaza un asset,
    actualizar la tabla SHA-256 de las notes).
 - [ ] Después de crear o editar las notes, verificar que los acentos

@@ -43,6 +43,7 @@ from fastapi.responses import FileResponse
 
 from config import config
 from paths import DATA_DIR
+import pcap_extract
 
 ATTACHMENTS_DIR = DATA_DIR / "attachments"
 
@@ -373,6 +374,25 @@ def _process_sync(filename: str, mime: str, raw: bytes, max_chars: int) -> dict[
             text, note = _extract_xlsx(raw)
         elif suffix in (".csv", ".tsv"):
             text, note = _extract_csv(raw)
+        elif suffix in (".pcap", ".pcapng") or raw[:4] in pcap_extract.PCAP_MAGICS or raw[:4] == pcap_extract.PCAPNG_MAGIC:
+            # L7: el digester de red es stdlib puro (sin scapy/tshark). Los
+            # magic bytes mandan sobre la extensión: un .pcap mal nombrado se
+            # lee igual; un PCAPNG se detecta y se explica, no se erroría.
+            if suffix == ".pcapng" or raw[:4] == pcap_extract.PCAPNG_MAGIC:
+                return _unsupported_descriptor(
+                    filename, mime, len(raw),
+                    reason=(
+                        "es PCAPNG (el formato nuevo de Wireshark): el lector integra "
+                        "solo el pcap clásico. Exportalo a .pcap desde Wireshark "
+                        "(Guardar como → *.pcap) o adjunta su volcado en texto"
+                    ),
+                )
+            try:
+                text, note = pcap_extract.extract_pcap(raw)
+            except ValueError as exc:
+                return _unsupported_descriptor(
+                    filename, mime, len(raw), reason=f"no se pudo leer como pcap: {exc}",
+                )
         elif suffix in TEXT_EXTS or mime.startswith("text/") or _is_texty_mime(mime):
             if _looks_binary(raw):
                 return _unsupported_descriptor(

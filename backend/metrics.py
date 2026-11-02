@@ -27,6 +27,7 @@ MetricsService (histórico persistente):
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import platform
 import time
@@ -39,6 +40,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 import fan_control
+import leak_detect
 import lhm
 import metrics_export
 import nvapi_fan
@@ -778,6 +780,14 @@ class MetricsManager:
         self.history.append(snap)
         return snap
 
+    def leak_status(self) -> list[dict]:
+        """B3: veredictos de "fuga creciente" sobre el ring de historial.
+
+        Vacío si el detector está deshabilitado (monitor.leak_alert.enabled)
+        o si ninguna GPU reúne los umbrales de trepa sostenida.
+        """
+        return leak_detect.evaluate_history(self.history)
+
     # -- servicio de fondo --------------------------------------------------------
 
     def configure_store(self, path: Path | str) -> MetricsStore:
@@ -886,7 +896,10 @@ class MetricsManager:
                         logger.warning("no se pudieron aplicar las curvas de fan: %s", exc)
 
                 if self._clients:
-                    payload = snap.model_dump_json()
+                    # B3: el payload del WS lleva además el veredicto de fuga
+                    # actual, para que el Monitor muestre la trepa sin sondear
+                    # un endpoint aparte.
+                    payload = json.dumps({**snap.model_dump(mode="json"), "leak": self.leak_status()})
                     dead: list[WebSocket] = []
                     for ws in list(self._clients):
                         try:
@@ -1067,6 +1080,13 @@ async def get_cpu() -> dict[str, Any]:
 @router.get("/history", response_model=list[MetricsSnapshot])
 async def get_history() -> list[MetricsSnapshot]:
     return list(manager.history)
+
+
+@router.get("/leak-alert")
+async def get_leak_alert() -> dict[str, Any]:
+    """B3: alertas de "fuga creciente" (trepa sostenida de VRAM) sobre el
+    historial en vivo. Es la misma lista que viaja en el payload del WS."""
+    return {"alerts": manager.leak_status()}
 
 
 @router.get("/series")

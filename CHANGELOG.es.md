@@ -7,6 +7,63 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-02
+
+El primer minor completo publicado como estable: recomendaciones conscientes del
+hardware, estimación de VRAM para funciones modernas de llama.cpp (SWA, MTP,
+MoE), una tarjeta de carga de modelo medida, tendencia de fuga en el Monitor,
+retención de logs, soporte pcap en Chat y una distribución ZIP sin instalador.
+Publicado en el canal de actualización: las instalaciones en 0.11.x lo reciben.
+
+### Añadido
+- **Detección de hardware y recomendaciones (A2/M6)**: sondas de hardware y un
+  motor de recomendación tras las rutas `/api/hardware`; Config muestra un panel
+  de hardware auto-detectado y el Launcher ofrece drafts sugeridos por el
+  hardware. Incluye una escalera adaptativa de contexto y ajuste de costo real
+  para drafts MTP/visión (A2F-1).
+- **Card de carga del modelo (A2F-2)**: una card "cómo levantó el modelo" en el
+  Launcher — deltas reales de RAM/VRAM medidos con NVML/psutil más estadísticas
+  de offload/KV parseadas de los logs de carga con un parser tolerante que cubre
+  formatos modernos y legacy de llama.cpp. Los valores se separan en bloques
+  MEDIDO y ESTIMADO claramente marcados; un campo no parseable se omite, nunca
+  se inventa.
+- **Control de caché GPU de expertos MoE (LL-8)**: nuevo control `moe_cache_mib`
+  en el Launcher que pasa `--moe-cache-mib` al servidor; apagado por defecto y
+  filtrado por la ruta de probe en binarios antiguos.
+- **Estimación de VRAM: Sliding Window Attention + MTP especulativo (EST-SWA)**:
+  modelo KV por capa para modelos SWA y flag de draft MTP con aviso de margen de
+  draft en la card de estimación.
+- **Monitor: alerta de fuga creciente (B3)**: avisa cuando el uso de VRAM sube de
+  forma sostenida en el tiempo, no solo al cruzar un umbral estático.
+- **Chat: adjuntos `.pcap` leídos como resumen de texto** (L7).
+- **Logs completos: rotación con retención + abrir/exportar (L8)**: los logs
+  rotan con retención configurable (`logs.rotate_keep`, default 3, cascada
+  `.1→.2→…`); nuevos endpoints sirven cualquier archivo rotado y el LogTerminal
+  gana botones "Abrir / Exportar log completo".
+- **ZIP green (distribución sin instalador)**: `package-green-zip.ps1` arma un
+  ZIP portable a partir del instalador NSIS construido (el layout instalado real,
+  sin `uninstall.exe`, con `README-PORTABLE.txt` bilingüe). El ZIP green no forma
+  parte de `latest.json`: su actualización es **manual**.
+- **Docs: registro de modelos verificados** (`docs/models-verified`, EN + ES) con
+  enlaces desde ambos READMEs; documentación de `moe_cache_mib` y de la card de
+  carga.
+
+### Cambiado
+- **Schema del caché de inventario de modelos subido a v7**: las entradas con
+  metadata pre-SWA se invalidan y se refrescan.
+
+### Corregido
+- **`sync-oss.ps1` preserva los modos ejecutables (100755)** al espejar al repo
+  OSS; `start.sh` queda versionado como ejecutable (coincide con el uso
+  documentado de `./start.sh`).
+- **Render de la tabla de módulos del README** (líneas en blanco que rompían la
+  tabla).
+
+### Seguridad
+- **rustls 0.23.45 → 0.23.46**: cierra la alerta Dependabot #6 (low — un caso de
+  borde ECH donde datos buffered de la aplicación podían quedar expuestos al
+  servidor outer autenticado antes de la alerta `ech_required`).
+
 ## [0.11.1] — 2026-10-28
 
 Primer parche de la serie 0.11.x: una corrección de cara al usuario y

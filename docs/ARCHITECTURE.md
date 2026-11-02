@@ -63,10 +63,14 @@ routers under `/api`, SPA mount and `/api/info` + `/api/health`.
 | `tools.py` | Model tools: web search + `fetch_url`. |
 | `attachments.py` | Attachments (files/images) and token estimation. |
 | `vram_estimate.py` | VRAM estimation per model/config. |
+| `hardware_detection.py` | **A2** — one-shot hardware probe (CPU vendor/cores, RAM, NVIDIA via NVML, AMD via LibreHardwareMonitor sidecar) with TTL cache; degrades with `degraded` codes, never errors. |
+| `hardware_recommend.py` | **A2** — launch-config draft engine: strict fit (weights+KV+compute ≤ VRAM×0.95), adaptive ctx ladder (base 4k–32k; 65k/131k only when the model card declares `context_length`, which also caps the ladder), auxiliary-component fit (MTP draft and mmproj with real cost, warned when they don't fit), MoE via `n_cpu_moe`, CPU fallback; validated against `LaunchConfig` before returning. |
+| `hardware_api.py` | **A2** — `GET /api/hardware` and `POST /api/hardware/recommend` (probes run in the threadpool). |
 | `logsetup.py` | Logging configuration. |
 
 Routers mounted in `main.py` (`api_router`): `/models`, `/launcher`, `/chat`,
-`/benchmark`, `/metrics` (+`/metrics-export`), `/llm-metrics`, `/stt`.
+`/benchmark`, `/metrics` (+`/metrics-export`), `/llm-metrics`, `/stt`,
+`/hardware`.
 
 ## Frontend — `frontend/src/`
 
@@ -78,19 +82,23 @@ components.
   global toasts, onboarding.
 - **`pages/`** — one per view:
   - `Chat.jsx` (`/`) — streaming, branches, attachments, mic, reasoning, tools.
-  - `Launcher.jsx` (`/launcher`) — Group/List, HW templates, launch/stop,
+  - `Launcher.jsx` (`/launcher`) — Group/List, HW templates (incl. draft
+    "suggest from my hardware" via `POST /api/hardware/recommend`), launch/stop,
     vitals strip. `DEFAULT_LAUNCH_CONFIG` is the mirror of the backend's
     `LaunchConfig`.
   - `Benchmark.jsx` (`/benchmark`) — set selection, cancelable run, progress.
   - `Monitor.jsx` (`/monitor`) — GPU/CPU/RAM + LLM Server section.
   - `Reports.jsx` (`/reports`) — history, Recharts graphs, comparison.
-  - `Config.jsx` (`/config`) — backend, model_dirs, tools, STT, templates, monitor.
+  - `Config.jsx` (`/config`) — backend, model_dirs, tools, STT, templates,
+    monitor, hardware (manual profile + auto-detected snapshot via
+    `GET /api/hardware`).
 - **`components/`** — `ChatComposer`, `MessageBubble`, `MetricsBar`,
   `ToolActivity`, `MicButton`, `StatusWidget`, `ToastNotification`, etc.
 - **`hooks/`** — `useChatStream`, `useLlmStream` (SSE/WS), `useConversations`,
   `useSpeechRecognition`, `useAudioRecorder`, `useAutoScroll`, `useLocalStorage`.
 - **`lib/`** — `sse.js` (SSE reader), `conversationTree.js`, `export.js`,
-  `metricsDisplay.js`, `payload.js`.
+  `metricsDisplay.js`, `payload.js`, `hardware.js` (pure helpers for the
+  detected-hardware panel and draft display).
 
 ## Data flows
 

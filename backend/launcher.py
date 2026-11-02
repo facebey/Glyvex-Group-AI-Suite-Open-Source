@@ -73,6 +73,7 @@ from uuid import uuid4
 import aiofiles
 import httpx
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 
 from config import config
@@ -84,8 +85,10 @@ from database import (
     db_list_templates,
     db_upsert_template,
 )
+from load_stats import LoadStats, MeasuredGpu, parse_load_logs, process_rss_mib
 from models import get_entry_metadata, inventory as model_inventory
 from runtime import resolve_binary
+import metrics as metrics_module
 
 logger = logging.getLogger("glyvex.launcher")
 
@@ -121,24 +124,53 @@ def should_forward_log_line(line: str, previous_was_idle: bool) -> tuple[bool, b
 # Rotación por tamaño de data/logs/*.log: desde que llama-server no recibe
 # --log-file, _pump_output es el único que escribe esos logs, y un proceso
 # que vive mucho tiempo los dejaría crecer sin bound. Se rota a <nombre>.1
-# (se pisa la rotación anterior) al abrir el pump y, durante la escritura,
+# y las rotaciones anteriores se desplazan (.1→.2→…) conservando las
+# logs.rotate_keep más recientes (L8: antes la .1 se pisaba y se perdía el
+# historial de arranques en sesiones largas). Con keep=1 se conserva el
+# comportamiento histórico. Ocurre al abrir el pump y, durante la escritura,
 # cada LOG_ROTATE_CHECK_BYTES escritos.
 LOG_ROTATE_MAX_BYTES = 10 * 1024 * 1024
 LOG_ROTATE_CHECK_BYTES = 256 * 1024
+# Fallback si la config no trae logs.rotate_keep (config.json parcial de una
+# versión anterior se fusiona con los defaults, así que casi nunca pasa).
+LOG_ROTATE_KEEP_DEFAULT = 3
 
 
-def rotate_log_if_needed(log_path: Path) -> bool:
-    """Rota log -> log.1 si supera el tope. Devuelve True si rotó."""
+def log_rotate_keep() -> int:
+    keep = config.get("logs.rotate_keep")
+    try:
+        return max(1, min(int(keep), 10))
+    except (TypeError, ValueError):
+        return LOG_ROTATE_KEEP_DEFAULT
+
+
+def rotate_log_with_retention(log_path: Path, keep: int) -> bool:
+    """Rota log -> log.1 desplazando las rotaciones anteriores hasta keep.
+
+    keep es la cantidad de <nombre>.N conservadas: la cascada borra .keep,
+    mueve .(keep-1)->.keep, …, .1->.2 y por último log->.1. keep=1 equivale
+    al comportamiento antiguo (la .1 se pisa). Nota Windows: si otro proceso
+    tiene el log abierto (varios procesos comparten el log_file default) el
+    rename falla con OSError y no se rota, igual que antes. Devuelve True si
+    rotó."""
     try:
         if log_path.stat().st_size <= LOG_ROTATE_MAX_BYTES:
             return False
-        backup = log_path.with_name(log_path.name + ".1")
-        backup.unlink(missing_ok=True)
-        log_path.rename(backup)
+        for i in range(keep, 1, -1):
+            src = log_path.with_name(f"{log_path.name}.{i - 1}")
+            if src.exists():
+                src.replace(log_path.with_name(f"{log_path.name}.{i}"))
+        log_path.with_name(f"{log_path.name}.1").unlink(missing_ok=True)
+        log_path.rename(log_path.with_name(f"{log_path.name}.1"))
         return True
     except OSError:
         logger.warning("no se pudo rotar %s", log_path)
         return False
+
+
+def rotate_log_if_needed(log_path: Path) -> bool:
+    """Rotación con la retención configurada (logs.rotate_keep)."""
+    return rotate_log_with_retention(log_path, log_rotate_keep())
 
 
 # Nivel de verbosidad de llama-server. 4 = todo el detalle de carga del modelo,
@@ -225,6 +257,14 @@ class LaunchConfig(BaseModel):
     # en GPU (no se emite el flag). Para modelos MoE cuyos expertos no caben
     # en VRAM: la atención/KV sigue en GPU y los expertos corren en RAM.
     n_cpu_moe: int = Field(default=0, ge=0)
+    # Caché en GPU (MiB) para los expertos MoE que se quedan en CPU
+    # (--moe-cache-mib). 0 = no se emite: llama.cpp no mantiene caché de
+    # expertos en GPU. Con n_cpu_moe > 0 los expertos corren en RAM y estos
+    # MiB se reservan en la GPU como caché LRU de los expertos más usados
+    # (los "hot" aceleran sin devolver todos los expertos a VRAM). Con
+    # múltiples GPUs se reparte como --tensor-split. Existe desde b11827; en
+    # builds más viejas el probe de flags lo descarta.
+    moe_cache_mib: int = Field(default=0, ge=0)   # --moe-cache-mib
     gpu_mode: GpuMode = "gpu_only"
     # q8_0 por default: casi calidad f16 a mitad de su VRAM; q4_0 queda
     # disponible para perfiles de VRAM justa (el default de la build es f16).
@@ -498,6 +538,14 @@ class ProcessInfo(BaseModel):
     # que esta instancia no lanzó (otra instancia, huérfano de un --reload).
     # El proceso igual se crea; la UI muestra esto junto al estado.
     warning: str | None = None
+    # A2F-2: "cómo levantó el modelo" — deltas reales de RAM/VRAM medidos por
+    # el launcher (baseline -> ready) + lo que el propio log de llama-server
+    # declara (offload de capas, KV): estimado, marcado como tal en la UI.
+    # Solo llama_server (los logs de ollama/lm_studio tienen otro formato).
+    # Se rellena ANTES de promover el estado a "running" para que cualquier
+    # poll que vea "running" vea también load_stats. Solo en memoria: se
+    # pierde al reiniciar la app, como todo el estado de procesos.
+    load_stats: LoadStats | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -808,6 +856,8 @@ def build_llama_server_command(
     cmd += ["--n-gpu-layers", str(cfg.n_gpu_layers)]
     if cfg.n_cpu_moe > 0:
         cmd += ["--n-cpu-moe", str(cfg.n_cpu_moe)]
+    if cfg.moe_cache_mib > 0:
+        cmd += ["--moe-cache-mib", str(cfg.moe_cache_mib)]
     if cfg.cache_type_k is not None:
         cmd += ["--cache-type-k", cfg.cache_type_k]
     if cfg.cache_type_v is not None:
@@ -1037,6 +1087,9 @@ class ModelProcessManager:
         self._start_monotonic: dict[str, float] = {}
         self._stopping: set[str] = set()  # ids detenidos intencionalmente
         self._background_tasks: set[asyncio.Task] = set()
+        # A2F-2: snapshot de RAM/VRAM tomado antes del spawn, por process_id,
+        # para medir el delta real contra el momento del "ready".
+        self._load_baselines: dict[str, dict] = {}
 
     def _spawn_background(self, coro) -> asyncio.Task:
         """asyncio.create_task + tracking, para poder cancelar todo en shutdown()
@@ -1107,6 +1160,64 @@ class ModelProcessManager:
         except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError):
             return False
 
+    # -- A2F-2: mediciones para la tarjeta de carga ----------------------
+
+    @staticmethod
+    def _usage_snapshot() -> dict:
+        """Instantánea de RAM del sistema y VRAM por GPU usando el collector de
+        metrics (NVML con fallback AMD). Degradable por diseño: sin psutil o
+        sin GPU las claves relevantes quedan None y la tarjeta omite ese bloque
+        en vez de inventar números."""
+        collector = metrics_module.manager.collector
+        gpus, _err = collector.collect_gpu()
+        ram = collector.collect_ram()
+        # metrics.py ya divide por 1024² (MiB) aunque nombre el campo MB, y su
+        # GB es GiB: acá se normaliza todo a MiB, la unidad que usa el log de
+        # llama.cpp y la tarjeta.
+        return {
+            "ram_used_mib": round(ram.used_gb * 1024, 1) if ram else None,
+            "gpus": {
+                g.index: {"name": g.name, "used_mib": round(g.vram_used_mb, 1)}
+                for g in (gpus or [])
+            },
+        }
+
+    def _build_load_stats(self, process_id: str, info: ProcessInfo) -> LoadStats:
+        """Une las dos familias de datos de la tarjeta:
+        - estimado: parse del log propio del server (offload de capas, KV),
+        - medido: delta entre el baseline tomado antes del spawn y el instante
+          en que /health respondió 200, más el RSS real del proceso hijo."""
+        stats = parse_load_logs(self._log_buffers.get(process_id, ()))
+        baseline = self._load_baselines.pop(process_id, None)
+        start = self._start_monotonic.get(process_id)
+        if start is not None:
+            stats.wall_load_seconds = round(time.monotonic() - start, 1)
+        if baseline is not None:
+            post = self._usage_snapshot()
+            before_ram = baseline.get("ram_used_mib")
+            after_ram = post.get("ram_used_mib")
+            if before_ram is not None and after_ram is not None:
+                stats.ram_before_mib = before_ram
+                stats.ram_after_mib = after_ram
+                stats.ram_delta_mib = round(after_ram - before_ram, 1)
+            for idx, after in sorted(post.get("gpus", {}).items()):
+                before = baseline.get("gpus", {}).get(idx)
+                stats.gpus.append(
+                    MeasuredGpu(
+                        index=idx,
+                        name=after.get("name"),
+                        used_before_mib=before.get("used_mib") if before else None,
+                        used_after_mib=after.get("used_mib"),
+                        delta_mib=(
+                            round(after["used_mib"] - before["used_mib"], 1)
+                            if before is not None
+                            else None
+                        ),
+                    )
+                )
+        stats.process_rss_mib = process_rss_mib(info.pid)
+        return stats
+
     async def _monitor_health(self, process_id: str) -> None:
         info = self._info.get(process_id)
         if info is None:
@@ -1119,6 +1230,20 @@ class ModelProcessManager:
             if await self.health_check(info.host, info.port):
                 current = self._info.get(process_id)
                 if current and current.state == "starting":
+                    # A2F-2: la tarjeta de carga se arma ANTES de voltear el
+                    # estado: el frontend consume ProcessInfo tal como lo sirve
+                    # el poll, y el poll que descubre "running" sería ciego a
+                    # load_stats si se adjuntara después. Solo llama_server: el
+                    # parser conoce el formato de log de llama.cpp y el baseline
+                    # solo se toma para ese backend. NVML/psutil son sync ->
+                    # to_thread; un fallo acá nunca puede romper el launch.
+                    if current.backend == "llama_server":
+                        try:
+                            current.load_stats = await asyncio.to_thread(
+                                self._build_load_stats, process_id, current
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("load stats: falla al medir: %s", exc)
                     current.state = "running"
                     # AG-1: server healthy -> publicar su provider en el config
                     # de OpenCode. El bridge nunca puede romper un launch: sus
@@ -1190,6 +1315,9 @@ class ModelProcessManager:
         if info is None:
             return
         self._handles.pop(process_id, None)
+        # A2F-2: si el proceso murió sin llegar a "ready", su baseline de
+        # medición ya no sirve (nunca habrá delta que mostrar).
+        self._load_baselines.pop(process_id, None)
         if process_id in self._stopping:
             info.state = "stopped"
             info.pid = None
@@ -1367,6 +1495,15 @@ class ModelProcessManager:
             cmd = build_ollama_command(binary_path, model.name)
         else:
             raise HTTPException(status_code=400, detail=f"Backend desconocido: {cfg.backend}")
+        # A2F-2: baseline de uso justo antes del spawn, para medir el delta
+        # real cuando el server quede listo. Solo llama_server: el parser de
+        # carga conoce el formato de log de llama.cpp; ollama/lm_studio no.
+        load_baseline: dict | None = None
+        if cfg.backend == "llama_server":
+            try:
+                load_baseline = await asyncio.to_thread(self._usage_snapshot)
+            except Exception as exc:  # noqa: BLE001 — la tarjeta nunca rompe un launch
+                logger.warning("load stats: baseline fallo: %s", exc)
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -1401,6 +1538,8 @@ class ModelProcessManager:
         self._handles[process_id] = process
         self._start_monotonic[process_id] = time.monotonic()
         self._log_buffers[process_id] = deque(maxlen=LOG_BUFFER_MAXLEN)
+        if load_baseline is not None:
+            self._load_baselines[process_id] = load_baseline
         self._spawn_background(self._pump_output(process_id, process, log_path))
         self._spawn_background(self._watch_exit(process_id, process))
         self._spawn_background(self._monitor_health(process_id))
@@ -1624,6 +1763,63 @@ async def get_logs(process_id: str) -> dict[str, Any]:
     if manager.status(process_id) is None:
         raise HTTPException(status_code=404, detail="Proceso no encontrado")
     return {"process_id": process_id, "lines": manager.get_logs(process_id, last_n_lines=200)}
+
+
+def _log_base_for_process(process_id: str) -> Path:
+    """Ruta base del log en disco de un proceso: se reconstruye desde su
+    launch_config.log_file con resolve_log_path, la MISMA validación
+    (dentro de DATA_DIR) y el mismo default ({process_id}.log) que al lanzarlo."""
+    info = manager.status(process_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail="Proceso no encontrado")
+    log_file = str((info.launch_config or {}).get("log_file") or "")
+    return resolve_log_path(log_file, process_id)
+
+
+@router.get("/logs/{process_id}/files")
+async def list_log_files(process_id: str) -> dict[str, Any]:
+    """L8: qué archivos de log hay en disco (corriente + rotaciones
+    conservadas .1..N). La UI usa esto para saber qué puede abrir/exportar.
+    La exportación lee el archivo, no el ring en memoria: el disco conserva
+    todo lo que el proceso escribió, con el tamaño acotado por la rotación."""
+    base = _log_base_for_process(process_id)
+    files = []
+    for n in range(0, log_rotate_keep() + 1):
+        path = base if n == 0 else base.with_name(f"{base.name}.{n}")
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        files.append(
+            {
+                "rotation": n,
+                "name": path.name,
+                "size_bytes": st.st_size,
+                "modified_at": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+            }
+        )
+    return {"process_id": process_id, "files": files}
+
+
+@router.get("/logs/{process_id}/file")
+async def get_log_file(
+    process_id: str, rotation: int = 0, download: bool = False
+) -> FileResponse:
+    """L8: sirve el log completo desde disco, no el ring (should_forward_log_line
+    filtra y el ring muere con el proceso; el archivo es la fuente completa y
+    está acotado por la rotación). Sin filename el navegador muestra el
+    text/plain inline ("Abrir log"); con download=1 fuerza la descarga."""
+    base = _log_base_for_process(process_id)
+    if rotation < 0 or rotation > log_rotate_keep():
+        raise HTTPException(status_code=400, detail="rotation fuera de rango")
+    path = base if rotation == 0 else base.with_name(f"{base.name}.{rotation}")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="El archivo de log no existe")
+    return FileResponse(
+        path,
+        media_type="text/plain; charset=utf-8",
+        filename=path.name if download else None,
+    )
 
 
 @router.websocket("/logs/{process_id}/stream")

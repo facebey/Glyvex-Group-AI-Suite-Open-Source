@@ -26,6 +26,7 @@ def test_build_command_all_params():
         n_ubatch=512,
         n_gpu_layers=-1,
         n_cpu_moe=8,
+        moe_cache_mib=4096,
         gpu_mode="gpu_only",
         cache_type_k="q8_0",
         cache_type_v="q8_0",
@@ -52,6 +53,7 @@ def test_build_command_all_params():
     assert "--ctx-size" in cmd and cmd[cmd.index("--ctx-size") + 1] == "32768"
     assert "--flash-attn" in cmd
     assert "--n-cpu-moe" in cmd and cmd[cmd.index("--n-cpu-moe") + 1] == "8"
+    assert "--moe-cache-mib" in cmd and cmd[cmd.index("--moe-cache-mib") + 1] == "4096"
     # use_mlock/use_mmap ya no existen: se unifican en --load-mode (b11146).
     assert "--load-mode" in cmd and cmd[cmd.index("--load-mode") + 1] == "mlock"
     assert "--spec-type" in cmd and cmd[cmd.index("--spec-type") + 1] == "draft-mtp"
@@ -66,6 +68,16 @@ def test_build_command_all_params():
     # El launcher es el único que escribe el log (_pump_output): llama-server
     # no recibe --log-file, así no hay líneas duplicadas.
     assert "--log-file" not in cmd
+
+
+def test_moe_cache_mib_zero_not_emitted():
+    # 0 = sin caché de expertos en GPU: el builder no emite --moe-cache-mib
+    # (igual que n_cpu_moe=0 no emite --n-cpu-moe). El motor de A2 tampoco lo
+    # emite jamás: es un ajuste fino que el usuario añade sobre un draft hybrid.
+    cfg = launcher_module.LaunchConfig(model_id="m", n_cpu_moe=10)
+    cmd = launcher_module.build_llama_server_command(cfg, "/opt/llama-server", "/models/model.gguf")
+    assert "--n-cpu-moe" in cmd
+    assert "--moe-cache-mib" not in cmd
 
 
 def test_lora_scaled_feature_detect_b11146():
@@ -120,22 +132,167 @@ def test_idle_repetidos_se_colapsan():
 
 
 def test_rotacion_de_log_por_tamano(tmp_path, monkeypatch):
+    # keep=1 = comportamiento histórico de la rotación (el .1 se pisa): L8 lo
+    # conserva como opción configurable (logs.rotate_keep = 1).
     monkeypatch.setattr(launcher_module, "LOG_ROTATE_MAX_BYTES", 100)
     log = tmp_path / "proc.log"
     log.write_text("x" * 150)
 
-    assert launcher_module.rotate_log_if_needed(log) is True
+    assert launcher_module.rotate_log_with_retention(log, 1) is True
     assert not log.exists()
     backup = tmp_path / "proc.log.1"
     assert backup.read_text() == "x" * 150
 
     log.write_text("ok")
-    assert launcher_module.rotate_log_if_needed(log) is False
+    assert launcher_module.rotate_log_with_retention(log, 1) is False
 
-    # Segunda rotación: se pisa la backup anterior.
+    # Segunda rotación con keep=1: se pisa la backup anterior.
     log.write_text("y" * 150)
-    assert launcher_module.rotate_log_if_needed(log) is True
+    assert launcher_module.rotate_log_with_retention(log, 1) is True
     assert backup.read_text() == "y" * 150
+
+
+def test_rotacion_con_retencion_desplaza_y_descarta(tmp_path, monkeypatch):
+    """L8: con keep=N cada rotación desplaza las anteriores (.1→.2→…) y solo
+    se descarta la más vieja: una sesión larga conserva su historial."""
+    monkeypatch.setattr(launcher_module, "LOG_ROTATE_MAX_BYTES", 100)
+    log = tmp_path / "proc.log"
+    for tag in "abcd":
+        log.write_text(tag * 150)
+        assert launcher_module.rotate_log_with_retention(log, 3) is True
+
+    # Cuatro rotaciones con keep=3: .1=d, .2=c, .3=b; 'a' (la .4) fue descartada.
+    assert not log.exists()
+    assert (tmp_path / "proc.log.1").read_text() == "d" * 150
+    assert (tmp_path / "proc.log.2").read_text() == "c" * 150
+    assert (tmp_path / "proc.log.3").read_text() == "b" * 150
+    assert not (tmp_path / "proc.log.4").exists()
+
+
+def test_rotate_keep_desde_config_con_clamp(monkeypatch):
+    class FakeCfg:
+        def __init__(self, value):
+            self._value = value
+
+        def get(self, key, default=None):
+            return self._value
+
+    # 0 no tiene sentido (borraría toda historia al rotar): se clamp a 1.
+    for value, expected in ((5, 5), (1, 1), (0, 1), (99, 10), ("x", 3), (None, 3)):
+        monkeypatch.setattr(launcher_module, "config", FakeCfg(value))
+        assert launcher_module.log_rotate_keep() == expected
+
+
+L8_RUN_LINES = (
+    "l8 fake load: build = 11827",
+    "l8 fake load: offloaded 3/3 layers to GPU device 0",
+    "l8 tail line L8-TAIL-MARKER",
+)
+
+
+async def test_log_file_endpoints_read_disk_not_ring(
+    client, sample_model_dir, make_probeable_binary, mock_llama_server, monkeypatch
+):
+    """L8: /logs/{id}/file y /logs/{id}/files leen el log COMPLETO desde
+    disco (acotado por la rotación), no el ring en memoria: lo agregado al
+    archivo aparece en /file y no en /logs."""
+    monkeypatch.setattr(launcher_module, "HEALTH_CHECK_INTERVAL_S", 0.05)
+
+    log_path = launcher_module.DATA_DIR / "logs" / "l8-test.log"
+    log_path.unlink(missing_ok=True)
+    try:
+        binary = make_probeable_binary(
+            # help mínimo PERO con los CRITICAL_FLAGS (--model/--host/--port/
+            # --ctx-size): el resto de flags del comando serán descartados por
+            # el filtro del probe, comportamiento esperado.
+            [
+                "--model PATH ruta del modelo GGUF",
+                "--host HOST escuchar en HOST",
+                "--port PORT escuchar en PORT",
+                "--ctx-size N size of the prompt context",
+            ],
+            run_lines=L8_RUN_LINES,
+        )
+        await client.post(
+            "/api/config",
+            json={
+                "model_dirs": [str(sample_model_dir)],
+                "backends": {"llama_server": {"binary_path": binary, "default_port": 8080, "enabled": True}},
+            },
+        )
+        await scan_and_wait(client)
+        model_id = (await client.get("/api/models")).json()[0]["id"]
+
+        launched = (
+            await client.post(
+                "/api/launcher/launch",
+                json={
+                    "model_id": model_id,
+                    "backend": "llama_server",
+                    "host": "127.0.0.1",
+                    "port": 18080,
+                    "log_file": "logs/l8-test.log",
+                },
+            )
+        ).json()
+        process_id = launched["process_id"]
+
+        async def is_running():
+            s = (await client.get(f"/api/launcher/status/{process_id}")).json()
+            return s["state"] == "running"
+
+        assert await wait_until(is_running, timeout=15.0)
+        # Stop primero: _pump_output hace flush/close al terminar el proceso,
+        # y recién ahí el log del buffer del pump llega completo al disco.
+        await client.post(f"/api/launcher/stop/{process_id}")
+
+        async def file_flushed():
+            try:
+                return "L8-TAIL-MARKER" in log_path.read_text(encoding="utf-8")
+            except OSError:
+                return False
+
+        assert await wait_until(file_flushed, timeout=15.0)
+
+        # El listado muestra solo lo que existe: el corriente, sin rotaciones.
+        listed = (await client.get(f"/api/launcher/logs/{process_id}/files")).json()
+        assert [f["rotation"] for f in listed["files"]] == [0]
+        assert listed["files"][0]["name"] == "l8-test.log"
+        assert listed["files"][0]["size_bytes"] == log_path.stat().st_size
+        assert listed["files"][0]["size_bytes"] > 0
+
+        # El archivo completo, idéntico a lo que hay en disco (se lee con
+        # newline="": el pump escribe en modo texto de Windows y el disco
+        # tiene \r\n; sin eso read_text normalizaría y la comparación miente).
+        res = await client.get(f"/api/launcher/logs/{process_id}/file")
+        assert res.status_code == 200
+        assert res.headers["content-type"].startswith("text/plain")
+        # Sin download: sin Content-Disposition -> el navegador lo muestra inline.
+        assert "content-disposition" not in res.headers
+        assert res.text == log_path.read_text(encoding="utf-8", newline="")
+        assert "L8-TAIL-MARKER" in res.text
+
+        # Prueba de que la fuente es el archivo y no el ring: una línea escrita
+        # directo en disco aparece en /file y NO en /logs (el ring).
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("L8-DISCO-ONLY\n")
+        body = (await client.get(f"/api/launcher/logs/{process_id}/file")).text
+        assert "L8-DISCO-ONLY" in body
+        ring = (await client.get(f"/api/launcher/logs/{process_id}")).json()
+        assert not any("L8-DISCO-ONLY" in line for line in ring["lines"])
+
+        # download=1 fuerza la descarga con el nombre del archivo.
+        att = await client.get(f"/api/launcher/logs/{process_id}/file?download=1")
+        disp = att.headers.get("content-disposition", "")
+        assert "attachment" in disp and "l8-test.log" in disp
+
+        # Errores: rotación inexistente 404, fuera de rango 400, proceso
+        # desconocido 404 (la validación de ruta sigue siendo resolve_log_path).
+        assert (await client.get(f"/api/launcher/logs/{process_id}/file?rotation=1")).status_code == 404
+        assert (await client.get(f"/api/launcher/logs/{process_id}/file?rotation=99")).status_code == 400
+        assert (await client.get("/api/launcher/logs/no-existe/file")).status_code == 404
+    finally:
+        log_path.unlink(missing_ok=True)
 
 
 def test_build_command_metrics_flag():
@@ -514,6 +671,7 @@ FRONTEND_LAUNCH_PAYLOAD = {
     "n_ubatch": 512,
     "n_gpu_layers": -1,
     "n_cpu_moe": 0,
+    "moe_cache_mib": 0,
     "gpu_mode": "gpu_only",
     "cache_type_k": "q8_0",
     "cache_type_v": "q8_0",
@@ -1605,7 +1763,15 @@ async def test_launch_with_probe_filters_flags_and_masks_command(client, sample_
     launched = (
         await client.post(
             "/api/launcher/launch",
-            json={"model_id": model_id, "api_key": "sekret123", "port": 39997},
+            json={
+                "model_id": model_id,
+                "api_key": "sekret123",
+                "port": 39997,
+                # MoE offload + su caché GPU: los dos flags son modernos y la
+                # "build" del fixture no los conoce -> el probe debe descartarlos.
+                "n_cpu_moe": 8,
+                "moe_cache_mib": 2048,
+            },
         )
     ).json()
     process_id = launched["process_id"]
@@ -1621,6 +1787,10 @@ async def test_launch_with_probe_filters_flags_and_masks_command(client, sample_
     assert "--ctx-checkpoints" not in cmd
     assert "--checkpoint-min-step" not in cmd
     assert "--cache-ram" not in cmd
+    # MoE moderno (--n-cpu-moe desde b11272, --moe-cache-mib desde b11827):
+    # pedidos explícitamente en el payload, la build del fixture no los conoce.
+    assert "--n-cpu-moe" not in cmd
+    assert "--moe-cache-mib" not in cmd
     # Clásicos intactos.
     assert "--model" in cmd
     assert "--metrics" in cmd

@@ -58,7 +58,13 @@ MAX_SCAN_DEPTH = 3
 # SUBIR ESTE NÚMERO cada vez que se agregue/cambie un campo de ModelEntry que
 # dependa de leer el header GGUF (no hace falta para campos derivados solo del
 # nombre de archivo, que se recalculan igual de rápido).
-MODELS_CACHE_SCHEMA_VERSION = 6
+#
+# Historial: 7 — EST-SWA añadió claves SWA por capa derivadas del header
+# (n_head_kv_layers, head_dim_swa, sliding_window, sliding_window_pattern) sin
+# subir la versión; las fichas escaneadas antes del fix se reusaban por mtime
+# sin esas claves y el estimador de VRAM caía al camino denso legacy (sugería
+# 16K para gemma4 en 24 GB). 6 — metadata kv_data/kv-arrays del header.
+MODELS_CACHE_SCHEMA_VERSION = 7
 
 # --------------------------------------------------------------------------
 # Schema (Pydantic v2)
@@ -238,6 +244,10 @@ _METADATA_KEYS = (
     "suggested_preset",
     "n_head_kv",
     "head_dim",
+    "n_head_kv_layers",
+    "head_dim_swa",
+    "sliding_window",
+    "sliding_window_pattern",
     "is_moe",
     "ffn_expert_count",
     "ffn_expert_shared_count",
@@ -541,10 +551,29 @@ def _as_int(value: Any) -> int | None:
     if isinstance(value, (int, float)):
         return int(value)
     if isinstance(value, (list, tuple)) and value:
-        # Array de escalar (p. ej. attention.head_count_kv por capa): se toma
-        # el primer elemento (todos iguales en la práctica).
+        # Array de escalar: los consumidores escalares toman el primer
+        # elemento. Cuando los valores difieren por capa (head_count_kv 8/2
+        # en gemma4) el estimador usa n_head_kv_layers, preservado por
+        # _as_int_array.
         return _as_int(value[0])
     return None
+
+
+def _as_int_array(value: Any) -> list[int] | None:
+    """Array de enteros por capa preservado (attention.head_count_kv). None
+    si es escalar: el consumidor cae al n_head_kv escalar uniforme."""
+    if not isinstance(value, (list, tuple)):
+        return None
+    out = [_as_int(v) for v in value]
+    return out if all(v is not None for v in out) else None
+
+
+def _as_bool_array(value: Any) -> list[bool] | None:
+    """Array de bools preservado (sliding_window_pattern: True=capa con
+    ventana deslizante, False=atención completa). None si es escalar."""
+    if not isinstance(value, (list, tuple)):
+        return None
+    return [bool(v) for v in value]
 
 
 # Claves de general.sampling que la app sabe aplicar (espejo de LaunchConfig
@@ -629,6 +658,21 @@ def _metadata_from_kv(header: dict[str, Any]) -> dict[str, Any]:
             or kvs.get(f"{arch}.attention.key_length")
             or kvs.get(f"{arch}.attention.value_length")
         ),
+        # SWA (Sliding Window Attention) y arrays por capa: gemma4/gemma3
+        # declaran head_count_kv POR CAPA (8 en las capas con ventana, 2 en las
+        # de atención completa) y sliding_window_pattern marca qué capas guardan
+        # KV acotado a la ventana. El estimador modela el KV por capa con estos
+        # arrays (EST-SWA); head_dim_swa son las dims KV de las capas sliding
+        # (key_length_swa, 256 en gemma4 vs 512 full).
+        "n_head_kv_layers": _as_int_array(kvs.get(f"{arch}.attention.head_count_kv")),
+        "head_dim_swa": (
+            _as_int(kvs.get(f"{arch}.attention.key_length_swa"))
+            or _as_int(kvs.get(f"{arch}.attention.value_length_swa"))
+        ),
+        "sliding_window": _as_int(kvs.get(f"{arch}.attention.sliding_window")),
+        "sliding_window_pattern": _as_bool_array(
+            kvs.get(f"{arch}.attention.sliding_window_pattern")
+        ),
         # Híbrido SSM/atención (Qwen3-Next/Qwen3.5): solo 1 de cada
         # full_attention_interval capas tiene KV que crece con el contexto;
         # ssm.* alimenta el estado recurrente fijo del estimador de VRAM.
@@ -708,6 +752,11 @@ def _metadata_from_reader(reader: Any) -> dict[str, Any]:
     n_embd = _field_int(fields.get(f"{arch}.embedding_length"))
     ffn_expert_count = _field_int(fields.get(f"{arch}.ffn_expert_count"))
 
+    # KVs escalares del archivo (misma forma que kv_data del parser rápido):
+    # los arrays por capa del estimador (head_count_kv, sliding_window_pattern)
+    # se extraen de acá, igual que en _metadata_from_kv.
+    kv_data = _reader_kv_data(fields)
+
     return {
         "context_length": ctx,
         "architecture": arch or None,
@@ -715,11 +764,22 @@ def _metadata_from_reader(reader: Any) -> dict[str, Any]:
         "n_layer": _field_int(fields.get(f"{arch}.block_count")),
         "n_head": n_head,
         "n_embd": n_embd,
-        "n_head_kv": _field_int(fields.get(f"{arch}.attention.head_count_kv")),
+        "n_head_kv": _as_int(kv_data.get(f"{arch}.attention.head_count_kv")),
         "head_dim": (
             _field_int(fields.get(f"{arch}.attention.head_size"))
             or _field_int(fields.get(f"{arch}.attention.key_length"))
             or _field_int(fields.get(f"{arch}.attention.value_length"))
+        ),
+        # SWA y arrays por capa: misma extracción que _metadata_from_kv (ver
+        # comentario allí). vram_estimate.py consume estos campos (EST-SWA).
+        "n_head_kv_layers": _as_int_array(kv_data.get(f"{arch}.attention.head_count_kv")),
+        "head_dim_swa": (
+            _as_int(kv_data.get(f"{arch}.attention.key_length_swa"))
+            or _as_int(kv_data.get(f"{arch}.attention.value_length_swa"))
+        ),
+        "sliding_window": _as_int(kv_data.get(f"{arch}.attention.sliding_window")),
+        "sliding_window_pattern": _as_bool_array(
+            kv_data.get(f"{arch}.attention.sliding_window_pattern")
         ),
         "full_attention_interval": _field_int(fields.get(f"{arch}.full_attention_interval")),
         "ssm_inner_size": _field_int(fields.get(f"{arch}.ssm.inner_size")),
@@ -738,7 +798,7 @@ def _metadata_from_reader(reader: Any) -> dict[str, Any]:
         "suggested_preset": "thinking" if thinking_support else "instruct",
         "suggested_sampling": _parse_general_sampling(_field_str(fields.get("general.sampling"))),
         "tensor_count": _field_int(fields.get("GGUF.tensor_count")),
-        "kv_data": _reader_kv_data(fields),
+        "kv_data": kv_data,
         "error": None,
     }
 
@@ -1488,6 +1548,17 @@ async def get_model_metadata(model_id: str) -> dict[str, Any]:
     return await get_entry_metadata(entry)
 
 
+def mtp_companion_file(entry: ModelEntry) -> str | None:
+    """Archivo draft MTP que acompaña a este modelo: cualquier .gguf con "mtp"
+    en el nombre en la MISMA carpeta (la misma regla "contiene mtp" que usan
+    build_groups y el aviso mtp_available del semáforo). None si no hay."""
+    folder = str(Path(entry.path).parent)
+    for o in inventory.list():
+        if o.id != entry.id and "mtp" in o.filename.lower() and str(Path(o.path).parent) == folder:
+            return o.path
+    return None
+
+
 @router.get("/{model_id}/vram-estimate")
 async def get_model_vram_estimate(
     model_id: str,
@@ -1537,6 +1608,14 @@ async def get_model_vram_estimate(
         gpu_vram_gb=gpu_vram_gb,
     )
     if result.get("available"):
+        # Margen del draft MTP (documentado en EST-SWA): ni esta estimación ni
+        # el fit de llama.cpp (--fit) cuentan el draft, así que con MTP activo
+        # el uso real es ~1–2 GB mayor que la proyección. Se marca cuando el
+        # modelo trae el draft embebido o hay un archivo draft en su carpeta
+        # (regla compartida mtp_companion_file) para que la UI avise.
+        result["mtp_available"] = bool(entry.mtp_embedded) or (
+            mtp_companion_file(entry) is not None
+        )
         result["legend"] = estimate_vram_legend(
             meta,
             model_size_gb=entry.size_gb,

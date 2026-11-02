@@ -29,6 +29,7 @@ Two concepts that recur:
 | `n_ubatch` | `--ubatch-size` | 512 | Toggle. Kept at 512 to not inflate the compute buffer. |
 | `n_gpu_layers` | `-ngl` | -1 (all) | `gpu_mode="cpu_only"` forces it to 0. |
 | `n_cpu_moe` | `--n-cpu-moe` | 0 (none) | Only emitted when > 0. Moves MoE expert layers to system RAM for models that don't fit in VRAM. |
+| `moe_cache_mib` | `--moe-cache-mib` | 0 (none) | Only emitted when > 0. Companion of `n_cpu_moe`: reserves N MiB of VRAM as a GPU cache for the most-used experts (the rest stay in system RAM). With multiple GPUs it is split like `--tensor-split`. Exists from b11827; the binary probe drops it on older builds. |
 | `gpu_mode` | — | `gpu_only` | `gpu_only` \| `cpu_only` \| `hybrid`. `gpu_only` + `n_gpu_layers=0` is invalid (use `-1` or hybrid). |
 | `cache_type_k` / `cache_type_v` | `--cache-type-k/-v` | `q8_0` | With Flash Attention **symmetric pairs only**: `q4_0-q4_0`, `q8_0-q8_0`, `f16-f16`, `bf16-bf16`. Any other combination ends in a crash or a silent fallback to f16. |
 | `flash_attn` | `--flash-attn` | `on` | Accepts `on`/`off`/`auto` (not 1/0). |
@@ -135,6 +136,42 @@ is ~16k tokens (~12–16 s at pp ~1300 t/s), almost never noticeable.
 `auto_mode = True` → strict command: only model + port (+ host if different
 from 127.0.0.1). Everything else uses the build default. The app's
 infrastructure is kept (`--verbosity` for logs, `--metrics` for the Monitor).
+
+## Suggest from my hardware (A2)
+
+In the Template panel, **"Suggest from my hardware"** calls
+`POST /api/hardware/recommend` (with `{model_id}` when a model is selected,
+empty body otherwise) and fills only these fields in the form: `gpu_mode`,
+`n_gpu_layers`, `n_ctx`, `n_cpu_moe`, `cache_type_k/-v`, `n_threads`,
+`mtp_embedded` / `mtp_draft_model`, `mmproj_path`. Engine rules:
+
+- **Full fit (`gpu_only`)** — the largest context in the ladder whose
+  weights + KV + compute estimation stays under 95% of the VRAM. The base
+  ladder is 4k–32k; when the model card declares `context_length` the
+  extended steps 65k and 131k become available, and the ladder is also capped
+  there: the engine never proposes more context than the declared training
+  length. With wide margin it proposes KV in `f16` (re-estimating the whole
+  bundle rather than a fixed threshold). If the model ships an MTP draft
+  (embedded head or `mtp-*.gguf` sidecar) or vision (`mmproj`), they are
+  emitted only when their real cost fits the budget of the chosen ctx;
+  otherwise the engine warns (`mtp_no_room` / `vision_no_room`) and the
+  context is NOT lowered to make room. Boards of ≤12 GB cap the ladder at 16k
+  (drivers/desktop overhead).
+- **Partial fit (`hybrid`)** — when the model does not fully fit: dense
+  models offload the maximum number of layers; MoE models keep attention and
+  KV on GPU and move expert layers to RAM via `n_cpu_moe`. As an optional
+  fine-tune on top of that draft, `moe_cache_mib` can cache the hot experts
+  partially back in VRAM.
+- **CPU fallback (`cpu_only`)** — fit against *available* RAM; `n_threads` =
+  physical cores.
+- The draft passes the `LaunchConfig` validation before being returned, and
+  every parameter comes with a human-readable **rationale** plus a
+  **warnings** list. Nothing is persisted until the user saves it as a
+  template.
+
+`n_threads` is not part of saved templates on purpose (it is a machine
+runtime property, not a recipe one). Intel GPUs are detected but stay out of
+the engine: under WDDM there is no reliable local VRAM source.
 
 ## General
 

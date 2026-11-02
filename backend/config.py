@@ -155,6 +155,24 @@ class TTSConfig(BaseModel):
     kokoro_voice: str = "ef_dora"
 
 
+class LeakAlertConfig(BaseModel):
+    """B3: alerta de "fuga creciente" (backend/leak_detect.py).
+
+    Dispara por TREPA sostenida de VRAM con la GPU en reposo, no por nivel
+    absoluto (para eso ya está la alerta de >95% del Monitor). Los umbrales
+    son deliberadamente conservadores: es una pista ámbar, no una alarma roja.
+    """
+
+    enabled: bool = True
+    window_min: float = 4.0
+    slope_min_mb_per_min: float = 32.0
+    growth_min_mb: float = 256.0
+    monotonic_min_ratio: float = 0.85
+    busy_util_pct: float = 25.0
+    max_gap_s: float = 30.0
+    min_points: int = 8
+
+
 class MonitorConfig(BaseModel):
     """Histórico del Monitor (MetricsService, <DATA_DIR>/metrics.db)."""
     # Poller en segundo plano desde que arranca la app. En false, el Monitor
@@ -164,6 +182,7 @@ class MonitorConfig(BaseModel):
     retention_raw_h: int = 48
     retention_1m_d: int = 30
     retention_1h_d: int = 365
+    leak_alert: LeakAlertConfig = Field(default_factory=LeakAlertConfig)
 
 
 # Elementos ocultos por defecto (plantilla "Predeterminada"). Tiene que
@@ -339,6 +358,18 @@ class RuntimeConfig(BaseModel):
     accel: Literal["vulkan", "rocm"] | None = None
 
 
+class LogsConfig(BaseModel):
+    """L8: retención de la rotación por tamaño de los logs del launcher.
+
+    rotate_keep = cantidad de archivos <log>.N que se conservan al rotar
+    (1 = comportamiento histórico: la rotación nueva pisa a la .1). Con N>1
+    cada rotación desplaza las anteriores (.1→.2→…) y se descarta solo la
+    más vieja, así una sesión larga no pierde su historial de arranques.
+    """
+
+    rotate_keep: int = 3
+
+
 class AgentBridgeConfig(BaseModel):
     """(AG-1) Integracion con OpenCode: mientras un server lanzado por la suite
     esta 'running', su bloque de provider se publica en el config de OpenCode
@@ -361,6 +392,7 @@ class ConfigSchema(BaseModel):
     tts: TTSConfig = Field(default_factory=TTSConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     agent_bridge: AgentBridgeConfig = Field(default_factory=AgentBridgeConfig)
+    logs: LogsConfig = Field(default_factory=LogsConfig)
     monitor: MonitorConfig = Field(default_factory=MonitorConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     exports: ExportsConfig = Field(default_factory=ExportsConfig)

@@ -26,6 +26,7 @@ from database import db_all_attachment_ids, init_db
 import benchmark
 import chat
 import agent_bridge
+import hardware_api
 import launcher
 import llm_metrics
 import logsetup
@@ -60,7 +61,7 @@ if sys.platform == "win32":
 # (glyvex.spec, datas → _internal/frontend/dist).
 FRONTEND_DIST = BUNDLE_DIR / "frontend" / "dist"
 
-APP_VERSION = "0.11.1"
+APP_VERSION = "0.12.0"
 APP_NAME = "Glyvex-AI-Suite"
 APP_START_MONOTONIC = time.monotonic()
 
@@ -269,6 +270,7 @@ api_router.include_router(tts.router, prefix="/tts", tags=["tts"])
 api_router.include_router(piper_runtime_api.router, prefix="/tts/piper", tags=["tts-piper"])
 api_router.include_router(kokoro_runtime_api.router, prefix="/tts/kokoro", tags=["tts-kokoro"])
 api_router.include_router(runtime_api.router, prefix="/runtime", tags=["runtime"])
+api_router.include_router(hardware_api.router, prefix="/hardware", tags=["hardware"])
 api_router.include_router(agent_bridge.router, prefix="/agent-bridge", tags=["agent-bridge"])
 api_router.include_router(themes.router, prefix="/themes", tags=["themes"])
 

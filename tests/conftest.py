@@ -431,25 +431,37 @@ def fake_llama_binary(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def _write_probeable_script(tmp_path: Path, name: str, help_lines: list[str], version_lines: list[str]) -> str:
+def _write_probeable_script(
+    tmp_path: Path,
+    name: str,
+    help_lines: list[str],
+    version_lines: list[str],
+    run_lines: list[str] | None = None,
+) -> str:
     """
     Escrib un "binario" fake con dos comportamientos:
     - argv[1] == "--help"    -> imprime help_lines y sale.
     - argv[1] == "--version" -> imprime version_lines y sale.
-    - cualquier otro argv    -> busy-loop (como fake_llama_binary), para que
-      el launcher pueda lanzarlo y dejarlo "corriendo" si el test lo necesita.
+    - cualquier otro argv    -> imprime run_lines (si el test las pide; p. ej.
+      un log de carga estilo llama.cpp para la card A2F-2) y sigue en un
+      busy-loop (como fake_llama_binary), para que el launcher pueda lanzarlo
+      y dejarlo "corriendo" si el test lo necesita.
 
     El texto de --help define qué flags esa "build" soporta: probe_binary
     extrae con regex todos los tokens --xxx de la salida. Multiplataforma
     como fake_llama_binary (.bat en Windows, sh con shebang en POSIX).
+    Las run_lines se emiten a nivel top-level (fuera de bloques if): en .bat
+    los paréntesis y comas se imprimen literalmente ahí; y ni run_lines ni
+    help/version deben contener '%' (en .bat es escape de variable).
     """
     if platform.system() == "Windows":
         lines = ["@echo off", 'if "%~1"=="--help" (']
         lines += [f"  echo {h}" for h in help_lines]
         lines += ["  exit /b 0", ")", 'if "%~1"=="--version" (']
         lines += [f"  echo {v}" for v in version_lines]
-        lines += ["  exit /b 0", ")",
-                  "echo probeable fake llama-server: starting", ":loop", "goto loop"]
+        lines += ["  exit /b 0", ")"]
+        lines += [f"echo {r}" for r in (run_lines or [])]
+        lines += ["echo probeable fake llama-server: starting", ":loop", "goto loop"]
         script = tmp_path / name
         script.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
         return str(script)
@@ -458,8 +470,9 @@ def _write_probeable_script(tmp_path: Path, name: str, help_lines: list[str], ve
     lines += [f"    echo '{h}'" for h in help_lines]
     lines += ["    exit 0 ;;", "  --version)"]
     lines += [f"    echo '{v}'" for v in version_lines]
-    lines += ["    exit 0 ;;", "esac",
-              "echo 'probeable fake llama-server: starting'", "while true; do :; done"]
+    lines += ["    exit 0 ;;", "esac"]
+    lines += [f'echo "{r}"' for r in (run_lines or [])]
+    lines += ["echo 'probeable fake llama-server: starting'", "while true; do :; done"]
     script = tmp_path / name
     script.write_text("\n".join(lines) + "\n", encoding="utf-8")
     script.chmod(0o755)
@@ -481,6 +494,7 @@ def make_probeable_binary(tmp_path):
     def _make(
         help_lines: list[str],
         version_lines: tuple[str, ...] = ("llama.cpp version b11827",),
+        run_lines: tuple[str, ...] | None = None,
     ) -> str:
         n = next(counter)
         # La extensión importa: Windows ejecuta .bat vía CreateProcess
@@ -488,7 +502,11 @@ def make_probeable_binary(tmp_path):
         # necesita el shebang con bit +x.
         suffix = ".bat" if platform.system() == "Windows" else ".sh"
         return _write_probeable_script(
-            tmp_path, f"probeable_{n}{suffix}", list(help_lines), list(version_lines)
+            tmp_path,
+            f"probeable_{n}{suffix}",
+            list(help_lines),
+            list(version_lines),
+            list(run_lines) if run_lines is not None else None,
         )
 
     return _make

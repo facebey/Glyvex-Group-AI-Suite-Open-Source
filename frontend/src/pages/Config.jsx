@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, Trash2, Save, RotateCcw, ScanSearch } from "lucide-react";
+import { Plus, Trash2, Save, RotateCcw, ScanSearch, Copy } from "lucide-react";
 import Section from "../components/ui/Section.jsx";
 import Field from "../components/ui/Field.jsx";
 import BrowseButton from "../components/ui/BrowseButton.jsx";
@@ -14,6 +14,7 @@ import { CONFIG_SAVED_EVENT, PRESETS } from "../lib/metricsDisplay.js";
 import { useTranslation } from "react-i18next";
 import { formInputClasses as inputClasses } from "../lib/styles.js";
 import { applyTheme, getStoredTheme, THEME_CHANGED_EVENT } from "../lib/theme.js";
+import { describeDegraded, hardwareToConfigFields, snapshotLines } from "../lib/hardware.js";
 
 // Los ejemplos de ruta siguen al SO: la app es Windows-first y ver rutas de
 // Linux en Windows (o al revés) confunde a quien configura por primera vez.
@@ -148,6 +149,13 @@ export default function Config() {
   const [scanSummary, setScanSummary] = useState(null); // evento "complete"
   const scanAbortRef = useRef(null);
 
+  // M6 / A2: foto de hardware detectado (solo lectura). Se carga al montar y
+  // solo se refresca con el botón explícito (?refresh=1); nunca re-sondea al
+  // guardar/cargar la config para no repetir sondas costosas sin pedido.
+  const [hwSnapshot, setHwSnapshot] = useState(null);
+  const [hwBusy, setHwBusy] = useState(false);
+  const [hwError, setHwError] = useState(false);
+
   // Cleanup: si el componente se desmonta mientras hay un scan en curso,
   // se aborta el fetch en progreso para no dejar el stream colgado.
   useEffect(() => {
@@ -182,6 +190,26 @@ export default function Config() {
       scanAbortRef.current = null;
     }
   }
+
+  async function loadHardware(force = false) {
+    setHwBusy(true);
+    setHwError(false);
+    try {
+      const res = await fetch(`/api/hardware${force ? "?refresh=true" : ""}`);
+      if (!res.ok) throw new Error(`hardware ${res.status}`);
+      setHwSnapshot(await res.json());
+    } catch {
+      setHwError(true);
+    } finally {
+      setHwBusy(false);
+    }
+  }
+
+  // La foto se toma una sola vez al montar (sale del cache TTL del backend);
+  // "Volver a detectar" es la única vía que fuerza sondas nuevas.
+  useEffect(() => {
+    loadHardware();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -527,6 +555,75 @@ export default function Config() {
             />
           </Field>
         </div>
+
+        {/* M6 / A2: foto detectada (solo lectura) junto a los campos manuales.
+            El fetch falla solo si el backend no expone /api/hardware; en ese
+            caso el bloque no se muestra y la sección manual queda intacta. */}
+        {(hwSnapshot || hwBusy) && (
+          <div className="mt-4 rounded-md border border-glyvex-border-soft bg-glyvex-veil p-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h3 className="text-sm font-semibold text-glyvex-text">
+                {t("hardware.autoTitle")}
+              </h3>
+              <div className="flex items-center gap-2">
+                {hwSnapshot && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfig((prev) => ({
+                        ...prev,
+                        hardware: { ...prev.hardware, ...hardwareToConfigFields(hwSnapshot) },
+                      }))
+                    }
+                    className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card"
+                  >
+                    <Copy size={16} />
+                    {t("hardware.copyToFields")}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => loadHardware(true)}
+                  disabled={hwBusy}
+                  className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-50"
+                >
+                  <RotateCcw size={16} className={hwBusy ? "animate-spin" : ""} />
+                  {hwBusy ? t("hardware.detecting") : t("hardware.redetect")}
+                </button>
+              </div>
+            </div>
+
+            {hwSnapshot && (
+              <>
+                <dl className="mt-2 space-y-1">
+                  {snapshotLines(hwSnapshot, t).map((line, i) => (
+                    <div key={i} className="flex gap-2 text-sm">
+                      <dt className="w-14 shrink-0 text-glyvex-muted">{line.label}</dt>
+                      <dd className="text-glyvex-text">{line.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                {describeDegraded(hwSnapshot.degraded, t).length > 0 && (
+                  <ul className="mt-2 space-y-0.5">
+                    {describeDegraded(hwSnapshot.degraded, t).map((msg, i) => (
+                      <li key={i} className="text-xs text-amber-400">{msg}</li>
+                    ))}
+                  </ul>
+                )}
+                {hwSnapshot.detected_at && (
+                  <p className="mt-2 text-xs text-glyvex-muted">
+                    {t("hardware.detectedAt", {
+                      when: new Date(hwSnapshot.detected_at).toLocaleString(),
+                    })}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        {hwError && (
+          <p className="mt-3 text-sm text-amber-400">{t("hardware.detectError")}</p>
+        )}
       </Section>
 
       <Section title={t("config.appPrefs.section")}>

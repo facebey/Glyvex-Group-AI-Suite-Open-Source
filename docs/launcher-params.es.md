@@ -29,6 +29,7 @@ Dos conceptos que se repiten:
 | `n_ubatch` | `--ubatch-size` | 512 | Toggle. Se deja en 512 para no inflar el compute buffer. |
 | `n_gpu_layers` | `-ngl` | -1 (todas) | `gpu_mode="cpu_only"` lo fuerza a 0. |
 | `n_cpu_moe` | `--n-cpu-moe` | 0 (ninguna) | Solo se emite cuando > 0. Mueve las capas de expertos MoE a la RAM del sistema para modelos que no caben en VRAM. |
+| `moe_cache_mib` | `--moe-cache-mib` | 0 (ninguna) | Solo se emite cuando > 0. Compañero de `n_cpu_moe`: reserva N MiB de VRAM como caché en GPU de los expertos más usados (el resto queda en RAM del sistema). Con múltiples GPUs se reparte como `--tensor-split`. Existe desde b11827; el probe del binario lo descarta en builds más viejas. |
 | `gpu_mode` | — | `gpu_only` | `gpu_only` \| `cpu_only` \| `hybrid`. `gpu_only` + `n_gpu_layers=0` es inválido (usar `-1` o hybrid). |
 | `cache_type_k` / `cache_type_v` | `--cache-type-k/-v` | `q8_0` | Con Flash Attention **solo pares simétricos**: `q4_0-q4_0`, `q8_0-q8_0`, `f16-f16`, `bf16-bf16`. Cualquier otra combinación termina en crash o fallback silencioso a f16. |
 | `flash_attn` | `--flash-attn` | `on` | Acepta `on`/`off`/`auto` (no 1/0). |
@@ -135,6 +136,41 @@ tokens (~12–16 s a pp ~1300 t/s), casi nunca perceptible.
 `auto_mode = True` → comando estricto: solo modelo + puerto (+ host si difiere
 de 127.0.0.1). Todo lo demás usa el default de la build. Se conserva la
 infra de la app (`--verbosity` para logs, `--metrics` para el Monitor).
+
+## Sugerir desde mi hardware (A2)
+
+En el panel Template, **"Sugerir a partir de mi hardware"** llama a
+`POST /api/hardware/recommend` (con `{model_id}` si hay un modelo seleccionado,
+body vacío si no) y rellena en el formulario solo estos campos: `gpu_mode`,
+`n_gpu_layers`, `n_ctx`, `n_cpu_moe`, `cache_type_k/-v`, `n_threads`,
+`mtp_embedded` / `mtp_draft_model`, `mmproj_path`. Reglas del motor:
+
+- **Fit completo (`gpu_only`)** — el contexto más grande de la escalera cuya
+  estimación de pesos + KV + compute queda bajo el 95% de la VRAM. La escalera
+  base es 4k–32k; si la ficha del modelo declara `context_length` se habilitan
+  los peldaños extendidos 65k y 131k, y a la vez la escalera se corta ahí:
+  nunca se propone más contexto que el entrenamiento declarado. Con margen
+  amplio propone KV en `f16` (re-estimando el bundle completo, no un umbral
+  fijo). Si el modelo trae draft MTP (cabeza embebida o sidecar `mtp-*.gguf`)
+  o visión (`mmproj`), se emiten solo si su coste real cabe en el presupuesto
+  del ctx elegido; si no cabe se avisa (`mtp_no_room` / `vision_no_room`) y el
+  contexto NO baja para hacerlo caber. Las placas de ≤12 GB cortan la escalera
+  en 16k (colchón de drivers/escritorio).
+- **Fit parcial (`hybrid`)** — cuando el modelo no cabe completo: en densos
+  se descargan a GPU la mayor cantidad de capas posible; en MoE la atención y
+  el KV quedan en GPU y las capas de expertos se mueven a RAM vía
+  `n_cpu_moe`. Como ajuste opcional sobre ese draft, `moe_cache_mib` puede
+  cachear parcialmente en VRAM los expertos más usados.
+- **Fallback CPU (`cpu_only`)** — el fit se calcula contra la RAM
+  *disponible*; `n_threads` = núcleos físicos.
+- El draft pasa la validación de `LaunchConfig` antes de devolverse, y cada
+  parámetro viene con un **rationale** legible y una lista de **warnings**.
+  Nada se persiste hasta que el usuario lo guarda como template.
+
+`n_threads` no forma parte de los templates guardados a propósito (es una
+propiedad de la máquina en tiempo de ejecución, no de la receta). Las GPUs
+Intel se detectan pero quedan fuera del motor: bajo WDDM no hay fuente local
+fiable de su VRAM.
 
 ## General
 

@@ -7,6 +7,60 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-02
+
+The first full minor published as stable: hardware-aware recommendations, VRAM
+estimation for modern llama.cpp features (SWA, MTP, MoE), a measured model-load
+card, Monitor leak trending, log retention, chat pcap support, and a
+no-installer ZIP distribution. Published on the update channel: installs on
+0.11.x receive it.
+
+### Added
+- **Hardware detection & recommendations (A2/M6)**: hardware probes and a
+  recommendation engine behind `/api/hardware` routes; Config shows an
+  auto-detected hardware panel and the Launcher offers hardware-suggested draft
+  configs. Includes an adaptive context ladder and real-cost fit for MTP/vision
+  drafts (A2F-1).
+- **Model load card (A2F-2)**: a "how the model loaded" card in the Launcher —
+  real RAM/VRAM deltas measured via NVML/psutil plus offload/KV stats parsed
+  from the load logs with a tolerant parser covering both modern and legacy
+  llama.cpp formats. Values are split into clearly-marked MEASURED and ESTIMATED
+  blocks; a non-parseable field is omitted, never invented.
+- **MoE expert GPU cache control (LL-8)**: new `moe_cache_mib` control in the
+  Launcher passes `--moe-cache-mib` to the server; default-off and filtered by
+  the probe path on older binaries.
+- **VRAM estimation: Sliding Window Attention + speculative MTP (EST-SWA)**:
+  per-layer KV model for SWA models and an MTP draft flag with a draft-margin
+  warning on the estimate card.
+- **Monitor: rising-leak alert (B3)**: warns when VRAM usage keeps climbing
+  over time, not only when it crosses a static threshold.
+- **Chat: `.pcap` attachments read as a text digest** (L7).
+- **Full logs: rotation with retention + open/export (L8)**: log files now
+  rotate with configurable retention (`logs.rotate_keep`, default 3, cascade
+  `.1→.2→…`); new endpoints serve any rotated file and the LogTerminal gains
+  "Open / Export full log" buttons.
+- **Green ZIP (no-installer distribution)**: `package-green-zip.ps1` builds a
+  portable ZIP from the built NSIS installer (the real installed layout, without
+  `uninstall.exe`, carrying a bilingual `README-PORTABLE.txt`). The green ZIP is
+  not part of `latest.json`: its update is **manual**.
+- **Docs: verified-models registry** (`docs/models-verified`, EN + ES) with
+  links from both READMEs; documentation for `moe_cache_mib` and the load card.
+
+### Changed
+- **Model inventory cache schema bumped to v7**: entries with pre-SWA metadata
+  are invalidated and refreshed.
+
+### Fixed
+- **`sync-oss.ps1` preserves executable file modes (100755)** when mirroring to
+  the OSS repo; `start.sh` is tracked executable (matches the documented
+  `./start.sh` usage).
+- **README modules-table rendering** (stray blank lines breaking the table).
+
+### Security
+- **rustls 0.23.45 → 0.23.46**: closes Dependabot alert #6 (low — an ECH edge
+  case where buffered application data could be exposed to an authenticated
+  outer server before the `ech_required` alert).
+
 ## [0.11.1] — 2026-10-28
 
 First patch of the 0.11.x series: one user-facing fix and quality-of-life

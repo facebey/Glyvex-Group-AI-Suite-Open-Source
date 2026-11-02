@@ -4,7 +4,9 @@ vram_estimate.py — Estimación de uso de VRAM para un lanzamiento (soporte de 
 Cálculo deliberadamente simple y conservador (todo en GPU, sin offload):
 
     total = pesos (tamaño del .gguf en disco)
-          + KV cache (2 × n_attn × n_head_kv × head_dim × n_ctx × slots × bytes/elemento)
+          + KV cache (Σ por capa de atención: ventana × kv_heads × head_dim ×
+            bytes — full n_ctx en atención completa, sliding_window en capas
+            marcadas por sliding_window_pattern)
           + estado recurrente SSM (fijo, solo en modelos híbridos)
           + buffer de cómputo fijo
 
@@ -12,6 +14,14 @@ Los modelos híbridos SSM/atención (Qwen3-Next/Qwen3.5: full_attention_interval
 solo tienen KV que crece con el contexto en 1 de cada N capas; el resto son SSM
 con estado recurrente FIJO (no crece con n_ctx). Contar todas las capas como
 atención sobreestimaba el KV ~4× (ver _ssm_state_bytes).
+
+Los modelos con Sliding Window Attention (gemma4/gemma3, mistral) tienen capas
+cuyo KV NUNCA supera la ventana (1024 tokens en gemma4) y además cambian
+cabezales y dims KV POR CAPA (head_count_kv es un array; las capas sliding usan
+key_length_swa=256 y las full key_length=512). Contar todo al ctx completo con
+el primer elemento del array sobreestimaba el KV de Gemma-4 a 128k ~21×
+(31.9 GB estimados vs 1.5 GB medidos por llama.cpp). Sin esos campos el
+comportamiento es idéntico al anterior: modelo denso (EST-SWA).
 
 La clasificación (comodo / justo / no cabe) compara el total con la VRAM de la
 GPU declarada en config (hardware.vram_gb). Con VRAM sin declarar el resultado
@@ -113,18 +123,43 @@ def estimate_vram_usage(
     bytes_v = CACHE_TYPE_BYTES.get(cache_type_v, DEFAULT_CACHE_BYTES)
     slots = max(1, int(n_parallel))
 
-    # Híbrido SSM/atención: con full_attention_interval=N solo 1 de cada N capa
-    # lleva KV que crece con el contexto; las demás son SSM con estado recurrente
-    # FIJO (no crece). Sin el campo → modelo denso clásico (todas de atención).
+    # Mapa por capa. Híbrido SSM (full_attention_interval=N → 1 de cada N capa
+    # es atención) y Sliding Window Attention (sliding_window +
+    # sliding_window_pattern + arrays head_count_kv/head_dim_swa): las capas
+    # marcadas True reservan KV de min(n_ctx, window) tokens con sus cabezales
+    # y dims SWA; las full reservan n_ctx con las dims completas. Sin esos
+    # campos el resultado es idéntico al cálculo anterior: modelo denso.
     interval = meta.get("full_attention_interval")
-    n_attn = n_layer
+    kv_heads_layers = meta.get("n_head_kv_layers")
+    swa_window = meta.get("sliding_window")
+    swa_pattern = meta.get("sliding_window_pattern")
+    head_dim_swa = meta.get("head_dim_swa")
+
+    n_attn = 0
     n_ssm = 0
-    if interval and int(interval) > 1:
-        n_attn = n_layer // int(interval)
-        n_ssm = n_layer - n_attn
+    n_swa = 0
+    kv_units = 0  # Σ window × kv_heads × head_dim sobre capas de atención
+    for i in range(n_layer):
+        if interval and int(interval) > 1 and (i + 1) % int(interval) != 0:
+            n_ssm += 1  # capa SSM: estado recurrente fijo, no KV que crece
+            continue
+        n_attn += 1
+        # Sin patrón por capa, SWA uniforme (mistral/gemma2: solo el escalar
+        # sliding_window) desliza en todas las capas. Un patrón más corto que
+        # n_layer se completa como atención completa (no inventar patrones).
+        if swa_pattern is not None and i < len(swa_pattern):
+            sliding = bool(swa_pattern[i])
+        else:
+            sliding = swa_window is not None and int(swa_window) > 0
+        window = min(int(n_ctx), int(swa_window)) if sliding and swa_window else int(n_ctx)
+        kv_heads = kv_heads_layers[i] if kv_heads_layers and i < len(kv_heads_layers) else n_head_kv
+        dim = head_dim_swa if (sliding and swa_window and head_dim_swa) else head_dim
+        if sliding and swa_window:
+            n_swa += 1
+        kv_units += window * int(kv_heads) * int(dim)
 
     # 2 = K + V; solo las capas de atención; cada slot lleva su KV completo.
-    kv_bytes = 2 * n_attn * n_head_kv * head_dim * int(n_ctx) * slots * ((bytes_k + bytes_v) / 2.0)
+    kv_bytes = 2 * kv_units * slots * ((bytes_k + bytes_v) / 2.0)
     ssm_bytes = _ssm_state_bytes(meta, n_ssm)
 
     weights_gb = float(model_size_gb)
@@ -154,6 +189,8 @@ def estimate_vram_usage(
         "is_hybrid": n_ssm > 0,
         "n_attn_layers": int(n_attn),
         "n_ssm_layers": int(n_ssm),
+        "n_swa_layers": int(n_swa),
+        "swa_window": int(swa_window) if (n_swa and swa_window) else None,
         "n_ctx": int(n_ctx),
         "n_parallel": slots,
         "flash_attn": bool(flash_attn),

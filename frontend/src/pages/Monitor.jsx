@@ -958,6 +958,9 @@ export default function Monitor() {
   const { addToast } = useToast();
   const [snapshot, setSnapshot] = useState(null);
   const [history, setHistory] = useState([]);
+  // B3: veredictos de "fuga creciente" (backend/leak_detect.py) que llegan
+  // con cada snapshot del WS; el fetch inicial los trae de /leak-alert.
+  const [leakAlerts, setLeakAlerts] = useState([]);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef(null);
 
@@ -1152,6 +1155,14 @@ export default function Monitor() {
       })
       .catch(() => {});
 
+    // B3: backfill de la alerta de fuga; el flujo vivo llega con el WS.
+    fetch("/api/metrics/leak-alert")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled && Array.isArray(data.alerts)) setLeakAlerts(data.alerts);
+      })
+      .catch(() => {});
+
     // Sin reconexión, un reinicio del backend deja las métricas congeladas
     // hasta recargar la página: backoff 1→15 s como el WS de progreso del
     // benchmark.
@@ -1185,6 +1196,8 @@ export default function Monitor() {
         try { snap = JSON.parse(event.data); } catch { return; }
         armWatchdog(ws);
         setSnapshot(snap);
+        // B3: el payload trae el veredicto de fuga actual junto al snapshot.
+        setLeakAlerts(Array.isArray(snap.leak) ? snap.leak : []);
         setHistory((prev) => {
           const next = [...prev, snapToSparkPoint(snap, prev.length)];
           return next.length > SPARKLINE_POINTS ? next.slice(next.length - SPARKLINE_POINTS) : next;
@@ -1263,6 +1276,22 @@ export default function Monitor() {
             <AlertTriangle size={12} /> {t("monitor.alerts.alert")}: {alertReasons.join(" · ")}
           </span>
         )}
+        {/* B3: pista ámbar por "fuga creciente": la VRAM sube sostenida con la
+            GPU en reposo. No es la alerta roja de >95% (nivel): es la tendencia. */}
+        {leakAlerts.map((a) => (
+          <span
+            key={`leak-${a.gpu_index}`}
+            className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 font-medium"
+            title={t("monitor.alerts.leakDetail", {
+              slope: a.slope_mb_per_min,
+              growth: Math.round(a.growth_mb),
+              window: Math.max(1, Math.round(a.span_s / 60)),
+              level: Math.round(a.vram_percent),
+            })}
+          >
+            <AlertTriangle size={12} /> {t("monitor.alerts.leak")}{gpus.length > 1 ? ` ${t("monitor.gpu.index", { index: a.gpu_index })}` : ""}: +{a.slope_mb_per_min} MB/min
+          </span>
+        ))}
       </div>
       )}
 

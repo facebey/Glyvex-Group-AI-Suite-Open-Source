@@ -32,6 +32,7 @@ import {
   Database,
   ExternalLink,
   Bot,
+  Wand2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useLlmStream } from "../hooks/useLlmStream.js";
@@ -86,6 +87,9 @@ const DEFAULT_LAUNCH_CONFIG = {
   // 0 = todo en GPU (no se emite --n-cpu-moe). >0 mueve esas capas de
   // expertos a la CPU (modelos MoE que no caben en VRAM).
   n_cpu_moe: 0,
+  // Caché en GPU (MiB) de los expertos MoE "hot" cuando n_cpu_moe > 0.
+  // 0 = no se emite --moe-cache-mib: los expertos quedan solo en RAM.
+  moe_cache_mib: 0,
   gpu_mode: "gpu_only",
   // q8_0 por default: casi calidad f16 a mitad de su VRAM; q4_0 queda
   // disponible en el select para perfiles de VRAM justa.
@@ -209,7 +213,7 @@ const TEMPLATE_FIELDS = [
   // (al reaplicarlo volvía el default 127.0.0.1:8080).
   "host", "port",
   "auto_mode",
-  "n_ctx", "n_batch", "n_ubatch", "n_gpu_layers", "n_cpu_moe", "gpu_mode",
+  "n_ctx", "n_batch", "n_ubatch", "n_gpu_layers", "n_cpu_moe", "moe_cache_mib", "gpu_mode",
   "cache_type_k", "cache_type_v", "flash_attn", "load_mode",
   "n_draft", "n_parallel", "cache_type_k_draft", "cache_type_v_draft",
   // Especulación/MTP: sin mtp_embedded/mtp_draft_model el template guardaba
@@ -1074,13 +1078,183 @@ function ServerVitalsStrip({ processId, state }) {
   );
 }
 
+// A2F-2: "cómo levantó el modelo". Muestra dos familias DELIBERADAMENTE
+// separadas: lo MEDIDO (deltas reales de RAM/VRAM que tomó el launcher entre
+// el spawn y el /health 200) y lo ESTIMADO (lo que llama-server declara en su
+// propio log: offload de capas, KV, buffers). Los campos que no se pudieron
+// determinar se omiten: la card nunca inventa números.
+function LoadCard({ loadStats }) {
+  const { t } = useTranslation();
+  if (!loadStats) return null;
+
+  // Las dos fuentes (log de llama.cpp y metrics.py) trabajan en MiB reales;
+  // la UI los muestra en GiB como el resto de la suite.
+  const gib = (mib) => (mib / 1024).toFixed(1);
+  const signedGib = (mib) => `${mib >= 0 ? "+" : "−"}${gib(Math.abs(mib))}`;
+  const secs = (s) => (s < 90 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
+
+  const measuredGpus = Array.isArray(loadStats.gpus) ? loadStats.gpus : [];
+  const hasMeasured =
+    loadStats.ram_delta_mib != null ||
+    loadStats.process_rss_mib != null ||
+    loadStats.wall_load_seconds != null ||
+    measuredGpus.length > 0;
+
+  const devices = Array.isArray(loadStats.devices) ? loadStats.devices : [];
+  const hasEstimated =
+    loadStats.total_layers != null ||
+    loadStats.gpu_layers != null ||
+    loadStats.cpu_layers != null ||
+    devices.length > 0 ||
+    loadStats.cpu_model_buffer_mib != null ||
+    loadStats.kv_cache_mib != null ||
+    loadStats.compute_mib != null ||
+    loadStats.cpu_buffer_mib != null ||
+    loadStats.log_load_seconds != null ||
+    Boolean(loadStats.model_filename);
+
+  if (!hasMeasured && !hasEstimated) return null;
+
+  const tile = (label, value, sub) => (
+    <div className="rounded-md border border-glyvex-border-soft bg-glyvex-veil-box p-2">
+      <p className="text-[11px] text-glyvex-muted">{label}</p>
+      <p className="text-sm font-medium tabular-nums text-emerald-300">{value}</p>
+      {sub && <p className="text-[11px] text-glyvex-muted-2 tabular-nums">{sub}</p>}
+    </div>
+  );
+  const estRow = (label, value) => (
+    <div className="flex items-baseline gap-2 text-xs">
+      <span className="text-glyvex-muted">{label}</span>
+      <span className="font-medium tabular-nums text-glyvex-text">{value}</span>
+    </div>
+  );
+
+  return (
+    <Panel icon={MemoryStick} title={t("launcher.loadCard")}>
+      <div className="space-y-3">
+        {hasMeasured && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-0.5 rounded border text-[11px] font-medium border-emerald-500/40 text-emerald-300 bg-emerald-500/10">
+                {t("launcher.loadCardMeasured")}
+              </span>
+              <span className="text-[11px] text-glyvex-muted">{t("launcher.loadCardMeasuredHint")}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {loadStats.ram_delta_mib != null &&
+                tile(
+                  t("launcher.loadCardRamDelta"),
+                  signedGib(loadStats.ram_delta_mib),
+                  `${gib(loadStats.ram_before_mib)} → ${gib(loadStats.ram_after_mib)} GiB`
+                )}
+              {loadStats.process_rss_mib != null &&
+                tile(t("launcher.loadCardProcessRss"), `${gib(loadStats.process_rss_mib)} GiB`)}
+              {loadStats.wall_load_seconds != null &&
+                tile(t("launcher.loadCardLoadTime"), secs(loadStats.wall_load_seconds))}
+              {measuredGpus.map((g) =>
+                tile(
+                  t("launcher.loadCardGpu", { name: g.name || `GPU ${g.index}` }),
+                  g.delta_mib != null ? signedGib(g.delta_mib) : `${gib(g.used_after_mib)} GiB`,
+                  g.used_after_mib != null ? `→ ${gib(g.used_after_mib)} GiB` : null
+                )
+              )}
+            </div>
+          </div>
+        )}
+
+        {hasEstimated && (
+          <div className="space-y-1.5 pt-2 border-t border-glyvex-border-soft">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-0.5 rounded border text-[11px] font-medium border-amber-500/40 text-amber-300 bg-amber-500/10">
+                {t("launcher.loadCardEstimated")}
+              </span>
+              <span className="text-[11px] text-glyvex-muted">{t("launcher.loadCardEstimatedHint")}</span>
+            </div>
+            {(loadStats.total_layers != null || loadStats.gpu_layers != null || loadStats.cpu_layers != null) && (
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+                {loadStats.total_layers != null && (
+                  <span className="font-medium text-glyvex-text">{t("launcher.loadCardTotalLayers", { total: loadStats.total_layers })}</span>
+                )}
+                {loadStats.gpu_layers != null && (
+                  <span className="text-glyvex-muted">{t("launcher.loadCardGpuLayers", { gpu: loadStats.gpu_layers })}</span>
+                )}
+                {loadStats.cpu_layers != null && (
+                  <span className="text-glyvex-muted">{t("launcher.loadCardCpuLayers", { cpu: loadStats.cpu_layers })}</span>
+                )}
+              </div>
+            )}
+            {devices.map((d, i) =>
+              estRow(
+                d.device_name || `GPU ${d.device_index ?? i}`,
+                [
+                  d.layers != null ? t("launcher.loadCardDeviceLayers", { layers: d.layers }) : null,
+                  // pesos declarados por el log para ese device ("CUDA0 model
+                  // buffer size"); si faltan las capas se muestran solos
+                  d.model_buffer_mib != null
+                    ? t("launcher.loadCardDeviceWeights", { gib: gib(d.model_buffer_mib) })
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              )
+            )}
+            {loadStats.cpu_model_buffer_mib != null &&
+              estRow(t("launcher.loadCardCpuModelWeights"), `${gib(loadStats.cpu_model_buffer_mib)} GiB`)}
+            {loadStats.kv_cache_mib != null &&
+              estRow(t("launcher.loadCardKv"), `${gib(loadStats.kv_cache_mib)} GiB`)}
+            {loadStats.compute_mib != null &&
+              estRow(t("launcher.loadCardCompute"), `${gib(loadStats.compute_mib)} GiB`)}
+            {loadStats.cpu_buffer_mib != null &&
+              estRow(t("launcher.loadCardCpuBuffer"), `${gib(loadStats.cpu_buffer_mib)} GiB`)}
+            {loadStats.log_load_seconds != null &&
+              estRow(t("launcher.loadCardLoadTimeLog"), secs(loadStats.log_load_seconds))}
+            {(loadStats.model_filename || loadStats.build) && (
+              <p className="text-[11px] text-glyvex-muted-2">
+                {loadStats.model_filename}
+                {loadStats.build ? ` · ${loadStats.build}` : ""}
+              </p>
+            )}
+          </div>
+        )}
+
+        {(loadStats.notes || []).map((note, i) => (
+          <p key={i} className="text-[11px] text-amber-400">
+            {note === "unrecognized_format" ? t("launcher.loadCardNoParse") : note}
+          </p>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 function LogTerminal({ processId }) {
   const { t } = useTranslation();
   const [lines, setLines] = useState([]);
+  // L8: qué archivos de log hay en disco para este proceso (corriente +
+  // rotaciones conservadas). La apertura/exportación completos leen el
+  // ARCHIVO servido por el backend, no este buffer de 500 líneas.
+  const [logFiles, setLogFiles] = useState([]);
+  const [logRotation, setLogRotation] = useState(0);
+  const filesFetchedRef = useRef(false);
   const containerRef = useRef(null);
+
+  const fetchLogFiles = useCallback(async (pid) => {
+    try {
+      const res = await fetch(`/api/launcher/logs/${pid}/files`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setLogFiles(Array.isArray(data.files) ? data.files : []);
+    } catch {
+      // Sin backend o proceso desconocido: el terminal sigue valiendo solo
+      // con el stream; Abrir/Exportar quedan deshabilitados.
+    }
+  }, []);
 
   useEffect(() => {
     setLines([]);
+    setLogFiles([]);
+    setLogRotation(0);
+    filesFetchedRef.current = false;
     if (!processId) return undefined;
     const ws = new WebSocket(wsUrlFor(`/api/launcher/logs/${processId}/stream`));
     ws.onmessage = (event) => {
@@ -1088,11 +1262,17 @@ function LogTerminal({ processId }) {
         const next = [...prev, event.data];
         return next.length > 500 ? next.slice(next.length - 500) : next;
       });
+      // El archivo en disco recién existe cuando el pump escribe la primera
+      // línea: se consulta una vez, justo cuando el log empieza a fluir.
+      if (!filesFetchedRef.current) {
+        filesFetchedRef.current = true;
+        fetchLogFiles(processId);
+      }
     };
     ws.onerror = () => {};
     // cleanup: cerrar el socket al desmontar o al cambiar de proceso
     return () => { try { ws.close(); } catch { /* ya cerrado */ } };
-  }, [processId]);
+  }, [processId, fetchLogFiles]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -1101,7 +1281,7 @@ function LogTerminal({ processId }) {
 
   function handleDownload() {
     // Solo baja lo que está en el buffer del terminal (últimas 500 líneas).
-    // El log completo de la corrida vive en el log_file del backend.
+    // El log completo de la corrida es "Exportar log" (lee el archivo en disco).
     const content = lines.join("\n");
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1112,19 +1292,78 @@ function LogTerminal({ processId }) {
     URL.revokeObjectURL(url);
   }
 
+  function logFileUrl(download) {
+    const params = new URLSearchParams();
+    if (logRotation > 0) params.set("rotation", String(logRotation));
+    if (download) params.set("download", "1");
+    const qs = params.toString();
+    return `/api/launcher/logs/${processId}/file${qs ? `?${qs}` : ""}`;
+  }
+
+  function handleOpenFull() {
+    // El backend sirve el text/plain sin Content-Disposition -> pestaña nueva.
+    window.open(logFileUrl(false), "_blank", "noopener");
+  }
+
+  function handleExportFull() {
+    // download=1 -> attachment con el nombre real del archivo: el navegador
+    // descarga el log tal cual está en disco (con su tamaño y formato).
+    const a = document.createElement("a");
+    a.href = logFileUrl(true);
+    a.click();
+  }
+
+  const btnClass =
+    "flex items-center gap-1 px-2 py-1 rounded text-xs border border-glyvex-border text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-40 disabled:cursor-not-allowed";
+
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-glyvex-muted">{t("logTerminal.title")}</span>
-        <button
-          type="button"
-          onClick={handleDownload}
-          disabled={lines.length === 0}
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs border border-glyvex-border text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Download size={12} />
-          {t("logTerminal.download")}
-        </button>
+        <div className="flex items-center gap-2">
+          {logFiles.length > 1 && (
+            <select
+              value={logRotation}
+              onChange={(e) => setLogRotation(Number(e.target.value))}
+              className="bg-glyvex-surface-code border border-glyvex-border rounded px-1.5 py-1 text-xs text-glyvex-muted"
+            >
+              {logFiles.map((f) => (
+                <option key={f.rotation} value={f.rotation}>
+                  {f.rotation === 0
+                    ? t("logTerminal.rotationCurrent")
+                    : t("logTerminal.rotationRotated", { name: f.name })}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={handleOpenFull}
+            disabled={!processId || logFiles.length === 0}
+            className={btnClass}
+          >
+            <ExternalLink size={12} />
+            {t("logTerminal.openFull")}
+          </button>
+          <button
+            type="button"
+            onClick={handleExportFull}
+            disabled={!processId || logFiles.length === 0}
+            className={btnClass}
+          >
+            <Download size={12} />
+            {t("logTerminal.exportFull")}
+          </button>
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={lines.length === 0}
+            className={btnClass}
+          >
+            <Download size={12} />
+            {t("logTerminal.download")}
+          </button>
+        </div>
       </div>
       <div ref={containerRef} className="bg-glyvex-surface-code border border-glyvex-border-soft rounded-md p-3 h-64 overflow-y-auto font-mono text-xs text-glyvex-muted space-y-0.5">
         {lines.length === 0 ? <p className="text-glyvex-muted/60">{t("logTerminal.empty")}</p> : lines.map((line, i) => <div key={i}>{line}</div>)}
@@ -1149,6 +1388,11 @@ export default function Launcher() {
   const [selectedTemplate, setSelectedTemplate] = useState("");
   const [templateOpen, setTemplateOpen] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState("");
+  // M6 / A2: último draft sugerido por hardware ({params, rationale, warnings,
+  // inputs}). Solo información en pantalla: nada se persiste sin que el
+  // usuario guarde el template con el flujo existente.
+  const [hwDraft, setHwDraft] = useState(null);
+  const [hwSuggesting, setHwSuggesting] = useState(false);
   const [processInfo, setProcessInfo] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [launching, setLaunching] = useState(false);
@@ -1543,6 +1787,49 @@ export default function Launcher() {
     }
   }
 
+  // M6 / A2: draft a partir del hardware detectado (con el modelo seleccionado
+  // si hay uno). Rellena el formulario pero NO persiste nada: el usuario
+  // revisa y guarda con saveTemplate.
+  async function suggestFromHardware() {
+    setHwSuggesting(true);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/hardware/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(selectedId ? { model_id: selectedId } : {}),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      setHwDraft(data);
+      if (data.params && Object.keys(data.params).length > 0) {
+        updateConfig(data.params);
+        // Un parámetro con su toggle OFF no se emite al lanzar: reactivar los
+        // grupos que el draft toca para que la sugerencia sea la real.
+        const touched = Object.keys(data.params);
+        setToggles((prev) => {
+          const next = { ...prev };
+          for (const [group, def] of Object.entries(TOGGLE_GROUPS)) {
+            if (def.fields.some((f) => touched.includes(f))) next[group] = true;
+          }
+          return next;
+        });
+        // El n_ctx del motor siempre es un valor de la escalera (base 4k–32k,
+        // más los pasos extendidos 65k–131k que habilita la ficha del modelo,
+        // A2F-1), y todos son presets del select: la vista custom queda
+        // innecesaria.
+        setCustomCtx(false);
+        const scope = data.params.gpu_mode === "cpu_only" ? "cpu" : "gpu";
+        const date = new Date().toISOString().slice(0, 10);
+        setNewTemplateName(t("hardware.suggestedName", { scope, date }));
+      }
+    } catch {
+      setActionError(t("hardware.suggestError"));
+    } finally {
+      setHwSuggesting(false);
+    }
+  }
+
   async function saveTemplate() {
     const name = newTemplateName.trim();
     if (!name) return;
@@ -1829,6 +2116,11 @@ export default function Launcher() {
               {t("launcher.vramMoE")}
             </p>
           )}
+          {vramEstimate.mtp_available && (
+            <p className="text-xs text-glyvex-muted-2">
+              {t("launcher.vramMtpDraft")}
+            </p>
+          )}
         </div>
       )}
     </Panel>
@@ -2020,6 +2312,46 @@ export default function Launcher() {
                 <input className={inputClasses} value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} placeholder={t("launcher.templateNamePlaceholder")} />
                 <button type="button" onClick={saveTemplate} className="flex items-center gap-1 px-3 py-2 rounded-md text-sm border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-card shrink-0"><Save size={14} />{t("launcher.save")}</button>
               </div>
+
+              {/* M6 / A2: el draft se aplica al formulario y pre-nombra el
+                  template; se guarda solo con el botón Save de arriba. */}
+              <button type="button" onClick={suggestFromHardware} disabled={hwSuggesting}
+                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-glyvex-accent text-glyvex-accent hover:bg-glyvex-accent/10 disabled:opacity-50">
+                <Wand2 size={14} className={hwSuggesting ? "animate-pulse" : ""} />
+                {hwSuggesting ? t("hardware.suggesting") : t("hardware.suggestButton")}
+              </button>
+              {hwDraft && (!hwDraft.params || Object.keys(hwDraft.params).length === 0) && (
+                <p className="text-sm text-glyvex-muted">{t("hardware.noDraft")}</p>
+              )}
+              {hwDraft && ((hwDraft.rationale?.length ?? 0) > 0 || (hwDraft.warnings?.length ?? 0) > 0) && (
+                <div className="rounded-md border border-glyvex-border-soft bg-glyvex-veil p-3 space-y-2">
+                  {(hwDraft.rationale?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-glyvex-muted">{t("hardware.rationaleTitle")}</p>
+                      <ul className="mt-1 space-y-0.5">
+                        {hwDraft.rationale.map((r, i) => (
+                          <li key={i} className="text-xs text-glyvex-text">
+                            <code className="text-glyvex-accent">{r.param}</code>{" — "}
+                            {t(`hardware.rationale.${r.key}`, r.args ?? {})}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {(hwDraft.warnings?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-amber-400">{t("hardware.warningsTitle")}</p>
+                      <ul className="mt-1 space-y-0.5">
+                        {hwDraft.warnings.map((w, i) => (
+                          <li key={i} className="text-xs text-amber-400">
+                            {t(`hardware.warnings.${w.key}`, w.args ?? {})}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
             </Panel>
 
             <Panel icon={Cpu} title={t("launcher.context")}>
@@ -2092,6 +2424,11 @@ export default function Launcher() {
               <Field label={t("launcher.nCpuMoeLabel")} hint={t("launcher.nCpuMoeHint")} flagHelp={probeHelp("--n-cpu-moe")}>
                 <input type="number" min={0} max={999} value={launchConfig.n_cpu_moe}
                   onChange={(e) => updateConfig({ n_cpu_moe: Math.max(0, Number(e.target.value)) })}
+                  className={inputClasses} />
+              </Field>
+              <Field label={t("launcher.moeCacheMibLabel")} hint={t("launcher.moeCacheMibHint")} flagHelp={probeHelp("--moe-cache-mib")}>
+                <input type="number" min={0} max={16384} step={512} value={launchConfig.moe_cache_mib}
+                  onChange={(e) => updateConfig({ moe_cache_mib: Math.max(0, Number(e.target.value)) })}
                   className={inputClasses} />
               </Field>
             </Panel>
@@ -2540,6 +2877,8 @@ export default function Launcher() {
               </div>
             </Panel>
           )}
+
+          {processInfo?.load_stats && <LoadCard loadStats={processInfo.load_stats} />}
 
           <Panel icon={GaugeIcon} title={t("launcher.processState")}>
             {!processInfo ? (
