@@ -263,13 +263,17 @@ async def test_log_file_endpoints_read_disk_not_ring(
 
         # El archivo completo, idéntico a lo que hay en disco (se lee con
         # newline="": el pump escribe en modo texto de Windows y el disco
-        # tiene \r\n; sin eso read_text normalizaría y la comparación miente).
+        # tiene \r\n; sin eso la lectura normalizaría y la comparación miente).
+        # Path.open(newline="") en lugar de read_text(newline=""): el kwarg de
+        # read_text existe solo desde 3.13 y la matriz CI testea 3.11/3.12.
         res = await client.get(f"/api/launcher/logs/{process_id}/file")
         assert res.status_code == 200
         assert res.headers["content-type"].startswith("text/plain")
         # Sin download: sin Content-Disposition -> el navegador lo muestra inline.
         assert "content-disposition" not in res.headers
-        assert res.text == log_path.read_text(encoding="utf-8", newline="")
+        with log_path.open("r", encoding="utf-8", newline="") as f:
+            disk_text = f.read()
+        assert res.text == disk_text
         assert "L8-TAIL-MARKER" in res.text
 
         # Prueba de que la fuente es el archivo y no el ring: una línea escrita
