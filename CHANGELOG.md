@@ -7,6 +7,49 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-05
+
+The release where the Suite talks with OpenCode directly: the backend now
+serves an MCP server, so an agent can discover models, estimate VRAM and
+launch or stop processes with safety rails from its own chat. Plus load-card
+and Monitor fixes validated against real data, and an updater security fix.
+Published on the update channel: 0.12.x installs receive it.
+
+### Added
+- **MCP server for OpenCode (AG-2)**: a Streamable-HTTP server served by the
+  backend itself at `/mcp` (no extra process). Tools `suite_status`,
+  `list_models`, `estimate_vram`, `launch_model` / `stop_model` with safety
+  rails (validated templates, VRAM preflight against the live snapshot, an
+  explicit `force` bypass). The Suite auto-registers itself in the OpenCode
+  config with the real discovered port, with hot-reload on live sessions and
+  clean removal on toggle-off/shutdown. A new "Servidor MCP" block in Config
+  shows status/registration/URL and an **independent** toggle from the
+  provider bridge.
+- **Effective context on the load card**: the card shows the real `n_ctx` the
+  model started with, taken from the authoritative line of the load log.
+
+### Changed
+- **Estimated VRAM as its own card**: moved out of Sampling and shown below
+  the configuration grid.
+- **"What this is not" section in the READMEs** (EN+ES): the Suite is
+  image-input → text-output, with a pointer to ComfyUI for image generation.
+
+### Fixed
+- **Monitor consumption totals**: merge by levels with watermarks instead of
+  the minimum timestamp, and gaps interpolated only if under 10 minutes;
+  matches the database exactly.
+- **LoadCard sometimes missing**: a race in the log deque swallowed an
+  `IndexError` and left `gpu`/`offload` in null.
+- **VRAM estimation with real auxiliary weights**: `/vram-estimate` accounts
+  for vision mmproj adapters and MTP drafts when they exist, with a
+  breakdown on the card.
+- **Tests compatible with Python 3.11/3.12 in CI**: log reads via
+  `Path.open(newline=…)` (the `read_text` kwarg is 3.13+).
+
+### Security
+- **tauri-plugin-updater 2.14.0 → 2.14.1** (Rust + JS): pulls in
+  `zip 4.6.1 → 9.2.2`, closing Dependabot alerts #7–#9.
+
 ## [0.12.0] — 2026-11-02
 
 The first full minor published as stable: hardware-aware recommendations, VRAM

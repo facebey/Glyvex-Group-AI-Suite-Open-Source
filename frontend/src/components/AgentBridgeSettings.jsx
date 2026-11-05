@@ -8,8 +8,13 @@ import { useTranslation } from "react-i18next";
  * config general (agent_bridge.enabled) y se guarda con el botón Guardar de
  * la página; acá abajo se muestra el estado real del bridge desde
  * GET /api/agent-bridge/status para poder verificar qué bloques publicó.
+ *
+ * AG-2 U4: mismo Section, sub-bloque "Servidor MCP": toggle espejo de
+ * mcp_server.enabled + indicador de registro desde status.mcp (el bloque que
+ * añade bridge_status). El toggle de MCP es INDEPENDIENTE del del bridge: la
+ * entrada mcp.glyvex vive con el backend, no con un modelo publicado.
  */
-export default function AgentBridgeSettings({ bridgeConfig, onChange }) {
+export default function AgentBridgeSettings({ bridgeConfig, onChange, mcpConfig, onMcpChange }) {
   const { t } = useTranslation();
   const [status, setStatus] = useState(null);
   const [statusError, setStatusError] = useState(false);
@@ -31,6 +36,10 @@ export default function AgentBridgeSettings({ bridgeConfig, onChange }) {
 
   const enabled = Boolean(bridgeConfig?.enabled);
   const dirty = status && status.enabled !== enabled;
+  // Default ON espeja el default del backend (McpServerConfig): si la config
+  // todavía no trae la clave, la UI muestra el estado real del servidor.
+  const mcpEnabled = mcpConfig ? Boolean(mcpConfig.enabled) : true;
+  const mcpDirty = status?.mcp && status.mcp.enabled !== mcpEnabled;
 
   return (
     <Section title={t("config.agentBridge.section")}>
@@ -137,6 +146,70 @@ export default function AgentBridgeSettings({ bridgeConfig, onChange }) {
             )}
           </div>
         )}
+
+        {/* AG-2 U4: el registro MCP se muestra aparte del bridge: su toggle es
+            independiente (mcp_server.enabled) porque la entrada mcp.glyvex
+            vive con el backend, no con un modelo publicado. */}
+        <div className="space-y-2 border-t border-glyvex-border-soft pt-3">
+          <p className="text-sm text-glyvex-text">{t("config.agentBridge.mcpTitle")}</p>
+          <p className="text-xs text-glyvex-muted">{t("config.agentBridge.mcpHint")}</p>
+
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-glyvex-accent"
+              checked={mcpEnabled}
+              onChange={(e) => onMcpChange({ ...mcpConfig, enabled: e.target.checked })}
+            />
+            <span>
+              <span className="text-glyvex-text">{t("config.agentBridge.mcpToggle")}</span>
+              <span className="block text-xs text-glyvex-muted">
+                {t("config.agentBridge.mcpToggleHint")}
+              </span>
+            </span>
+          </label>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs uppercase tracking-wide text-glyvex-muted">
+              {t("config.agentBridge.mcpLiveTitle")}
+            </span>
+            {status?.mcp && (
+              <span
+                className={`px-2 py-0.5 rounded border text-xs font-medium ${
+                  status.mcp.enabled
+                    ? "border-emerald-500/40 text-emerald-300 bg-emerald-500/10"
+                    : "border-glyvex-border-soft text-glyvex-muted"
+                }`}
+              >
+                {status.mcp.enabled ? t("config.agentBridge.enabled") : t("config.agentBridge.disabled")}
+              </span>
+            )}
+            {status?.mcp?.enabled && (
+              <span
+                className={`px-2 py-0.5 rounded border text-xs font-medium ${
+                  status.mcp.registered
+                    ? "border-emerald-500/40 text-emerald-300 bg-emerald-500/10"
+                    : "border-amber-500/40 text-amber-300 bg-amber-500/10"
+                }`}
+              >
+                {status.mcp.registered
+                  ? t("config.agentBridge.mcpRegistered")
+                  : t("config.agentBridge.mcpNotRegistered")}
+              </span>
+            )}
+          </div>
+
+          {status?.mcp?.url && (
+            <p className="text-xs text-glyvex-muted">
+              {t("config.agentBridge.mcpEndpoint")}:{" "}
+              <span className="font-mono text-glyvex-text">{status.mcp.url}</span>
+            </p>
+          )}
+
+          {mcpDirty && (
+            <p className="text-xs text-amber-400">{t("config.agentBridge.pendingApply")}</p>
+          )}
+        </div>
       </div>
     </Section>
   );

@@ -269,3 +269,57 @@ def test_denso_reporta_cero_swa():
     r = estimate_vram_usage(_dense_meta(), model_size_gb=10, n_ctx=8192)
     assert r["n_swa_layers"] == 0
     assert r["swa_window"] is None
+
+
+# --------------------------------------------------------------------------
+# VRAM-MMPROJ: componentes auxiliares (mmproj / draft MTP sidecar)
+# --------------------------------------------------------------------------
+
+
+def test_aux_default_no_cambia_nada():
+    # Sin auxiliares el resultado es idéntico al cálculo anterior: aux_gb=0 y
+    # desglose vacío. Los llamadores que no presupuestan aux (hardware_recommend)
+    # siguen con su propio camino, sin doble conteo.
+    r = estimate_vram_usage(_dense_meta(), model_size_gb=10, n_ctx=8192)
+    assert r["aux_gb"] == 0.0
+    assert r["aux_components"] == []
+    assert r["total_gb"] == round(r["weights_gb"] + r["kv_gb"] + r["compute_gb"], 2)
+
+
+def test_auxiliares_entran_al_total_y_al_estado():
+    # Caso real Agents-A1-4B-Q8_0: 4.17 GB + mmproj 0.63 GB. Con la meta de
+    # 128 KiB/token en f16 y 8192 tokens: KV=1, cómputo=1.5.
+    # Sin aux: 5+1+1.5 = 7.5 en 8 GB → 93.8% justo. Con mmproj: 8.13 → 101.6%
+    # no_cabe: el estado y el pct deben usar el total real con auxiliares.
+    meta = {"n_layer": 32, "n_head": 32, "n_embd": 4096, "n_head_kv": 8, "head_dim": 128}
+    aux = [{"kind": "mmproj", "label": "mmproj-F16.gguf", "size_gb": 0.63}]
+    base = estimate_vram_usage(meta, model_size_gb=5, n_ctx=8192,
+                               cache_type_k="f16", cache_type_v="f16", gpu_vram_gb=8)
+    with_aux = estimate_vram_usage(meta, model_size_gb=5, n_ctx=8192,
+                                   cache_type_k="f16", cache_type_v="f16", gpu_vram_gb=8,
+                                   aux_weights_gb=0.63, aux_components=aux)
+    assert base["total_gb"] == 7.5 and base["state"] == "justo"
+    assert with_aux["aux_gb"] == 0.63
+    assert with_aux["aux_components"] == aux
+    assert with_aux["total_gb"] == 8.13
+    assert with_aux["pct"] == 101.6
+    assert with_aux["state"] == "no_cabe"
+    # El desglose de pesos del modelo NO se toca: aux vive aparte.
+    assert with_aux["weights_gb"] == 5.0
+
+
+def test_leyenda_cubre_auxiliares_en_cada_fila():
+    # mmproj/draft son constantes respecto del contexto: entran en todas las
+    # filas de la leyenda para que clasifique igual que la estimación principal.
+    aux = [{"kind": "mtp_draft", "label": "draft-mtp.gguf", "size_gb": 1.25}]
+    legend = estimate_vram_legend(_dense_meta(), model_size_gb=10,
+                                  cache_type_k="f16", cache_type_v="f16", gpu_vram_gb=24,
+                                  ctx_values=(8192, 16384),
+                                  aux_weights_gb=1.25, aux_components=aux)
+    assert len(legend) == 2
+    for row in legend:
+        single = estimate_vram_usage(_dense_meta(), model_size_gb=10, n_ctx=row["n_ctx"],
+                                     cache_type_k="f16", cache_type_v="f16", gpu_vram_gb=24,
+                                     aux_weights_gb=1.25, aux_components=aux)
+        assert row["total_gb"] == single["total_gb"]
+        assert row["state"] == single["state"]

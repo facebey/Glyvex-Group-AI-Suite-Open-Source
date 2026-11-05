@@ -7,6 +7,14 @@ caer el proceso o al cerrar la app. OpenCode recarga el config en caliente
 (documentado en V2: "Configuration files normally reload automatically") → no
 hace falta reiniciar OpenCode.
 
+AG-2 U3 añade el registro MCP: cuando el backend arranca, main.py pasa el
+puerto real ya descubierto y `register_mcp()` escribe la entrada `mcp.glyvex`
+apuntando al /mcp/ de este backend (gate: `mcp_server.enabled`, el mismo toggle
+del servidor — la entrada vive con el backend, no con un modelo). Se retira en
+`cleanup_all()` o al desactivar el toggle. Comparte con AG-1 las garantías:
+backup previo, escritura atómica, y nunca tocar claves ajenas — incluido un
+`mcp.glyvex` manual del usuario (URL ajena a la nuestra = ajeno).
+
 Diseño y fuentes: Files/Docs/design/ag-1-opencode-bridge.md (2026-10-22,
 verificado contra opencode.ai/v2/docs y contra el config real del usuario, que
 está en formato V1 y OpenCode 2 lo lee igual). Puntos duros:
@@ -57,6 +65,14 @@ FALLBACK_CONTEXT = 8192
 OUTPUT_CAP = 8192
 OUTPUT_FLOOR = 1024
 
+# AG-2 U3: la entrada MCP. El contenedor "mcp" es una sola clave válida en
+# cualquier estilo del config (no depende de provider/providers). La URL sale
+# CON barra final: pelada, /mcp responde 307 y el cliente no garantiza seguir
+# ese redirect en un POST (resuelto en U0, doc de diseño §7.3). La regex define
+# qué entrada es "nuestra": cualquier otra mcp.glyvex es manual del usuario.
+MCP_CONTAINER = "mcp"
+MCP_URL_RE = re.compile(r"^http://127\.0\.0\.1:\d+/mcp/$")
+
 # Registry en memoria de lo que ESTA instancia publica (process_id -> registro).
 # Con él, cada cambio re-renderiza el bloque completo: publish/unpublish son
 # idempotentes por construcción y multi-servidor es solo un registro más.
@@ -66,7 +82,15 @@ OUTPUT_FLOOR = 1024
 _locks: list[tuple[object, asyncio.Lock]] = []
 _registry: dict[str, dict[str, Any]] = {}
 _backed_up = False
+# _touched empieza en False: cleanup_all() debe responder bien aunque esta
+# instancia nunca escribio el config de OpenCode (antes quedaba indefinida y
+# el shutdown con el bridge off levantaba NameError).
+_touched = False
 _last_error: str | None = None
+# Puerto escrito en la entrada mcp.glyvex por ESTA instancia (None: sin
+# registro MCP). Solo alimenta el diagnóstico (bridge_status/U4); la realidad
+# del archivo se lee siempre desde el config.
+_mcp_port: int | None = None
 
 
 def _current_lock() -> asyncio.Lock:
@@ -81,6 +105,13 @@ def _current_lock() -> asyncio.Lock:
 
 def enabled() -> bool:
     return bool(config.get("agent_bridge.enabled", False))
+
+
+def mcp_enabled() -> bool:
+    """Gate AG-2: el mismo toggle del servidor MCP (config mcp_server.enabled).
+    A propósito NO depende del toggle AG-1: la entrada MCP vive con el backend,
+    no con un modelo publicado (doc de diseño §3.5)."""
+    return bool(config.get("mcp_server.enabled", False))
 
 
 def opencode_config_path() -> Path:
@@ -307,6 +338,42 @@ def _prune_our_keys(data: dict[str, Any]) -> None:
         v2.pop(PROVIDER_ID, None)
 
 
+def _mcp_entry(port: int) -> dict[str, Any]:
+    """Formato verificado en la docs de OpenCode (doc de diseño §3.5; campos
+    type/url/enabled/oauth confirmados en opencode.ai/docs/mcp-servers):
+    `oauth: false` desactiva la autodetección OAuth, correcto para un endpoint
+    local sin auth que si no intentaría el flujo de login ante un 401."""
+    return {
+        "type": "remote",
+        "url": f"http://127.0.0.1:{port}/mcp/",
+        "enabled": True,
+        "oauth": False,
+    }
+
+
+def _is_our_mcp(entry: Any) -> bool:
+    return (
+        isinstance(entry, dict)
+        and entry.get("type") == "remote"
+        and isinstance(entry.get("url"), str)
+        and bool(MCP_URL_RE.fullmatch(entry["url"]))
+    )
+
+
+def _prune_mcp_ours(data: dict[str, Any]) -> None:
+    """Borra la entrada que escribe este bridge (mcp.glyvex) solo si es nuestra
+    (URL de nuestra forma): un mcp.glyvex manual o cualquier otro server del
+    contenedor nunca se tocan. Si el contenedor queda vacío desaparece: era una
+    clave que creamos nosotros."""
+    container = data.get(MCP_CONTAINER)
+    if not isinstance(container, dict):
+        return
+    if _is_our_mcp(container.get(PROVIDER_ID)):
+        del container[PROVIDER_ID]
+        if not container:
+            del data[MCP_CONTAINER]
+
+
 def _ensure_backup(path: Path) -> None:
     """Un .bak por sesion de app, antes de la primera escritura (diseno AG-1):
     con timestamp UTC, dentro de backup/ si esa carpeta ya existe (convencion del
@@ -330,12 +397,20 @@ def _apply_sync(
     style: str,
     created_new: bool,
     had_jsonc: bool,
+    mcp_port: int | None = None,
+    remove_mcp: bool = False,
 ) -> bool:
     """Merge y escritura del config. Es sincronica (corre en un thread, patron D7):
     solo toca nuestras claves; la escritura es atomica (tmp + os.replace). Devuelve
-    False si no se pudo escribir."""
+    False si no se pudo escribir.
+    mcp_port/remove_mcp (AG-2 U3): con mcp_port se escribe la entrada MCP con ese
+    puerto; con remove_mcp solo se retira la entrada propia. Sin ninguno de los
+    dos (path AG-1 puro) la clave mcp no se toca: un publish de un provider no
+    puede borrar el registro del servidor MCP, que sigue vivo con el backend."""
     global _touched
     _prune_our_keys(data)
+    if mcp_port is not None or remove_mcp:
+        _prune_mcp_ours(data)
     blocks = _render_blocks(style)
     container_key = "providers" if style == "v2" else "provider"
     if blocks or container_key in data:
@@ -345,6 +420,10 @@ def _apply_sync(
             logger.warning("agent bridge: %s no es un objeto en %s", container_key, path)
             return False
         container.update(blocks)
+    if mcp_port is not None:
+        # register_mcp ya valido antes de llamar: el contenedor mcp no existe
+        # o es un dict; uno ajeno no-objeto jamas llega hasta aqui.
+        data.setdefault(MCP_CONTAINER, {})[PROVIDER_ID] = _mcp_entry(mcp_port)
     if created_new:
         data.setdefault("$schema", "https://opencode.ai/config.json")
     _ensure_backup(path)
@@ -427,10 +506,98 @@ async def unpublish(process_id: str) -> bool:
         )
 
 
+async def register_mcp(port: int) -> bool:
+    """AG-2 U3: registra este backend como servidor MCP (entrada mcp.glyvex) en
+    el config de OpenCode. main.py la llama desde el lifespan con el puerto real
+    ya asignado: la entrada solo tiene sentido mientras el backend vive. Gate:
+    mcp_server.enabled (el toggle del propio servidor) — con él off no se toca
+    el archivo. Un mcp.glyvex manual (URL ajena a la nuestra) jamas se
+    reescribe: se reporta en _last_error. Idempotente por diseño: la entrada
+    propia anterior (puerto viejo) se reemplaza, y los providers/publicaciones
+    AG-1 del archivo quedan intactos."""
+    global _last_error, _mcp_port
+    if not mcp_enabled():
+        return False
+    path = opencode_config_path()
+    async with _current_lock():
+        data, err, had_jsonc = _read_config(path)
+        if err:
+            _last_error = err
+            logger.warning("agent bridge: %s", err)
+            return False
+        container = data.get(MCP_CONTAINER)
+        if container is not None and not isinstance(container, dict):
+            _last_error = "la clave 'mcp' del config de OpenCode no es un objeto: no se toca"
+            logger.warning("agent bridge: %s", _last_error)
+            return False
+        entry = container.get(PROVIDER_ID) if isinstance(container, dict) else None
+        if entry is not None and not _is_our_mcp(entry):
+            _last_error = (
+                "mcp.glyvex ya existe en el config de OpenCode (entrada manual): no se toca"
+            )
+            logger.warning("agent bridge: %s", _last_error)
+            return False
+        created_new = not path.exists() or not data
+        ok = await asyncio.to_thread(
+            _apply_sync,
+            path,
+            data,
+            _style_of(data),
+            created_new,
+            had_jsonc,
+            mcp_port=port,
+        )
+        if not ok:
+            _last_error = f"no se pudo escribir {path}"
+        elif _touched:
+            _last_error = None
+            _mcp_port = port
+        return ok
+
+
+async def unregister_mcp() -> bool:
+    """Retira la entrada mcp.glyvex propia (desactivar el toggle via config).
+    A proposito NO chequea mcp_server.enabled: es justamente el toggle que se
+    apaga para retirar la entrada. No-op si no hay entrada o si la existente es
+    manual (ajena)."""
+    global _last_error, _mcp_port
+    async with _current_lock():
+        path = opencode_config_path()
+        data, err, had_jsonc = _read_config(path)
+        if err:
+            _last_error = err
+            logger.warning("agent bridge: %s", err)
+            return False
+        if not data:
+            # Archivo vacio o desaparecido: no hay nada que limpiar.
+            _mcp_port = None
+            return True
+        container = data.get(MCP_CONTAINER)
+        if not isinstance(container, dict) or not _is_our_mcp(container.get(PROVIDER_ID)):
+            return False
+        ok = await asyncio.to_thread(
+            _apply_sync,
+            path,
+            data,
+            _style_of(data),
+            False,
+            had_jsonc,
+            remove_mcp=True,
+        )
+        _mcp_port = None
+        if not ok:
+            _last_error = f"no se pudo escribir {path}"
+        return ok
+
+
 async def cleanup_all() -> None:
-    """Shutdown de la app / toggle OFF: saca todo lo que ESTA instancia publico.
-    Si la instancia nunca toco el archivo, no lo toca tampoco ahora: un provider
-    'glyvex' armado a mano por el usuario no se ve afectado."""
+    """Shutdown de la app / toggle OFF: saca todo lo que ESTA instancia publico
+    (bloques AG-1) y retira la entrada MCP: el servidor /mcp muere junto con el
+    backend y dejarla apuntaría a un puerto muerto. Si la instancia nunca toco el
+    archivo, no lo toca tampoco ahora: un provider 'glyvex' armado a mano por el
+    usuario no se ve afectado (y una entrada propia huérfana de una sesión que
+    no cerró bien se limpia en la primera escritura posterior)."""
+    global _mcp_port
     async with _current_lock():
         if not _registry and not _touched:
             return
@@ -439,7 +606,10 @@ async def cleanup_all() -> None:
         data, err, had_jsonc = _read_config(path)
         if err or not data:
             return
-        await asyncio.to_thread(_apply_sync, path, data, _style_of(data), False, had_jsonc)
+        await asyncio.to_thread(
+            _apply_sync, path, data, _style_of(data), False, had_jsonc, remove_mcp=True
+        )
+        _mcp_port = None
 
 
 def bridge_status() -> dict[str, Any]:
@@ -458,6 +628,17 @@ def bridge_status() -> dict[str, Any]:
             our_keys.append(PROVIDER_ID)
         if data:
             style = _style_of(data)
+    mcp_info: dict[str, Any] = {
+        "enabled": mcp_enabled(),
+        "registered": False,
+        "url": None,
+        "our_port": _mcp_port,
+    }
+    if isinstance(data, dict):
+        mcp_container = data.get(MCP_CONTAINER)
+        if isinstance(mcp_container, dict) and _is_our_mcp(mcp_container.get(PROVIDER_ID)):
+            mcp_info["registered"] = True
+            mcp_info["url"] = mcp_container[PROVIDER_ID]["url"]
     published = [
         {
             "process_id": pid,
@@ -475,6 +656,9 @@ def bridge_status() -> dict[str, Any]:
         "style": style,
         "bridge_keys": sorted(our_keys),
         "published": published,
+        # AG-2 U4: estado del registro MCP (indicador «MCP activo en :<puerto>
+        # /mcp» en la UI). registered = la entrada nuestra está en el archivo.
+        "mcp": mcp_info,
         "last_error": _last_error if err is None else err,
     }
 
@@ -508,9 +692,10 @@ def _reset_for_tests() -> None:
     """Singleton con estado en memoria: los tests lo reinician para no arrastrar
     registry/backup/errores de un test al siguiente (mismo criterio que
     _isolated_state en conftest)."""
-    global _backed_up, _touched, _last_error
+    global _backed_up, _touched, _last_error, _mcp_port
     _registry.clear()
     _locks.clear()
     _backed_up = False
     _touched = False
     _last_error = None
+    _mcp_port = None

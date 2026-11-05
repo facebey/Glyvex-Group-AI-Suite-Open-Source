@@ -22,6 +22,23 @@ de forma segura (ver sección de Módulos).
 
 **Sitio de producto:** [ai-suite.glyvexgroup.com](https://ai-suite.glyvexgroup.com/) — [División Glyvex AI](https://ai.glyvexgroup.com/)
 
+## Qué no es
+
+Glyvex-AI-Suite gestiona **modelos de lenguaje** únicamente. No reemplaza a
+herramientas de generación de imagen/video/audio (ComfyUI o similares):
+
+- Soporta **entrada multimodal** — imágenes en Chat (modelos de visión vía
+  `mmproj`), documentos (PDF/DOCX/PPTX/XLSX), capturas `.pcap` y audio por
+  micrófono (speech-to-text) — pero todo modelo cargado **responde en
+  texto**.
+- **No genera** imagen, video ni audio. Los modelos de difusión (Flux,
+  Stable Diffusion, …) no corren en `llama-server`: usalos en ComfyUI o una
+  herramienta dedicada, y mantenelos fuera de las carpetas `model_dirs` para
+  que no ensucien el inventario de modelos.
+
+Para generación local de imagen, video o audio, ComfyUI es el complemento
+natural. La Suite se enfoca en ejecutar, medir y chatear con LLMs.
+
 ## Descarga (Windows)
 
 La forma más fácil de probarla: bajá el instalador desde

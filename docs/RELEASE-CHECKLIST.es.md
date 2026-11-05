@@ -141,6 +141,12 @@ registro de desinstalación y los accesos del Start Menu de esta máquina.
 - [ ] `.\distribution\sync-oss.ps1` — exporta el estado commiteado (sin
   `distribution/`), aplica la capa `distribution/final/`, commit y push a
   `facebey/Glyvex-Group-AI-Suite-Open-Source`.
+- [ ] **Tras el sync, esperar que el CI público del push quede VERDE sobre el
+  commit de sync** (`gh run list --repo facebey/Glyvex-Group-AI-Suite-Open-Source
+  --workflow CI`). No publicar una release sobre CI rojo: el sync `566c6c6` de
+  la 0.12.0 quedó rojo (un `read_text(newline=)` válido solo en 3.13+ en un
+  test) y pasó desapercibido porque el AppImage viene del workflow de release,
+  no del job CI — ver CI-1 en el MD de estado.
 
 ## 5. GitHub Release (repo público)
 

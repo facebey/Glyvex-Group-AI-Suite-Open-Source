@@ -1187,7 +1187,14 @@ class ModelProcessManager:
         - estimado: parse del log propio del server (offload de capas, KV),
         - medido: delta entre el baseline tomado antes del spawn y el instante
           en que /health respondió 200, más el RSS real del proceso hijo."""
-        stats = parse_load_logs(self._log_buffers.get(process_id, ()))
+        # Snapshot antes de parsear: esto corre en un worker (asyncio.to_thread desde
+        # _monitor_health) y el deque vivo se sigue llenando desde el event loop con
+        # cada línea que el server emite al arrancar. Iterarlo directo puede lanzar
+        # "deque mutated during iteration" — pasa justo con modelos grandes, que aún
+        # loguean cuando /health responde. .copy() es una sola llamada C: atómica
+        # bajo el GIL, nadie muta el original durante la copia.
+        buf = self._log_buffers.get(process_id)
+        stats = parse_load_logs(buf.copy() if buf is not None else ())
         baseline = self._load_baselines.pop(process_id, None)
         start = self._start_monotonic.get(process_id)
         if start is not None:

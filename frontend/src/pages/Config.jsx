@@ -76,6 +76,7 @@ const EMPTY_CONFIG = {
     influx: { enabled: false, version: "v2", url: "http://127.0.0.1:8086" },
   },
   agent_bridge: { enabled: false },
+  mcp_server: { enabled: true },
 };
 
 /** Avisa a las páginas abiertas (Monitor, Chat, Launcher) que la config cambió. */
@@ -698,6 +699,8 @@ export default function Config() {
       <AgentBridgeSettings
         bridgeConfig={config.agent_bridge}
         onChange={(agent_bridge) => setConfig((prev) => ({ ...prev, agent_bridge }))}
+        mcpConfig={config.mcp_server}
+        onMcpChange={(mcp_server) => setConfig((prev) => ({ ...prev, mcp_server }))}
       />
     </div>
   );

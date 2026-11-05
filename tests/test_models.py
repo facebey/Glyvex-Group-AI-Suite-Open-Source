@@ -383,6 +383,93 @@ async def test_vram_estimate_flags_mtp_sidecar(client, tmp_path):
     assert data["mtp_available"] is True
 
 
+# --------------------------------------------------------------------------
+# VRAM-MMPROJ: auxiliares reales (mmproj / draft sidecar) en /vram-estimate
+# --------------------------------------------------------------------------
+
+_MTPROJ_PAD = 50 * 1024 * 1024  # 50 MiB → aux_gb 0.05 con margen de redondeo
+
+
+async def _scan_dir(client, model_dir):
+    await client.post("/api/config", json={"model_dirs": [str(model_dir)]})
+    await scan_and_wait(client)
+    return (await client.get("/api/models")).json()
+
+
+async def test_vram_estimate_endpoint_cuenta_mmproj_asociado(client, tmp_path):
+    # Un mmproj en la carpeta del modelo entra al total como auxiliar con su
+    # tamaño REAL de archivo (caso real Agents-A1: el estimador decía 7.72 GB
+    # y el launch con visión usa +0.63 GB más).
+    model_dir = tmp_path / "models"
+    model_dir.mkdir(exist_ok=True)
+    kv = {"block_count": 32, "attention.head_count": 32, "attention.head_count_kv": 8,
+          "attention.head_size": 128, "embedding_length": 4096}
+    write_gguf(model_dir / "Vision-8B-Q4_K_M.gguf", "llama", None, dict(kv))
+    mmproj = write_gguf(model_dir / "mmproj-F16.gguf", "llama", None, None)
+    mmproj.write_bytes(mmproj.read_bytes() + b"\0" * _MTPROJ_PAD)
+    models = await _scan_dir(client, model_dir)
+    base = next(m for m in models if "mmproj" not in m["filename"])
+
+    res = await client.get(f"/api/models/{base['id']}/vram-estimate",
+                           params={"n_ctx": 8192, "cache_type_k": "q4_0", "cache_type_v": "q4_0"})
+    data = res.json()
+    assert data["available"] is True
+    assert data["aux_gb"] == 0.05
+    assert data["aux_components"] == [{"kind": "mmproj", "label": "mmproj-F16.gguf", "size_gb": 0.05}]
+    # El total incluye el aux: sin él la card repetiría el undercount de Agents-A1.
+    assert data["total_gb"] == round(
+        data["weights_gb"] + data["aux_gb"] + data["kv_gb"] + data["compute_gb"], 2)
+    # La leyenda es coherente: sus filas también llevan el aux (es constante
+    # respecto del contexto) — la fila 8192 coincide con la estimación principal.
+    row8192 = next(r for r in data["legend"] if r["n_ctx"] == 8192)
+    assert row8192["total_gb"] == data["total_gb"]
+
+
+async def test_vram_estimate_endpoint_no_cuenta_el_mmproj_propio(client, tmp_path):
+    # Entry huérfana que ES un mmproj registrado como modelo (caso real
+    # "Agents-A1-4B-mmproj"): su mmproj_path apunta a su propio archivo, ya
+    # contado como weights. El guard evita el doble conteo: aux queda en 0.
+    model_dir = tmp_path / "models"
+    model_dir.mkdir(exist_ok=True)
+    kv = {"block_count": 32, "attention.head_count": 32, "attention.head_count_kv": 8,
+          "attention.head_size": 128, "embedding_length": 4096}
+    write_gguf(model_dir / "Sueltos-4B-mmproj.gguf", "llama", None, dict(kv))
+    models = await _scan_dir(client, model_dir)
+    entry = models[0]
+    assert "mmproj" in entry["filename"]  # el guard aplica sobre la entry mmproj
+
+    res = await client.get(f"/api/models/{entry['id']}/vram-estimate",
+                           params={"n_ctx": 8192, "cache_type_k": "q4_0", "cache_type_v": "q4_0"})
+    data = res.json()
+    assert data["available"] is True
+    assert data["aux_gb"] == 0.0
+    assert data["aux_components"] == []
+    assert data["total_gb"] == round(data["weights_gb"] + data["kv_gb"] + data["compute_gb"], 2)
+
+
+async def test_vram_estimate_endpoint_cuenta_mtp_sidecar_como_aux(client, tmp_path):
+    # El draft sidecar ya no es solo un flag: su peso entra al total con
+    # desglose (mtp_available se mantiene igual que antes).
+    model_dir = tmp_path / "models"
+    model_dir.mkdir(exist_ok=True)
+    kv = {"block_count": 32, "attention.head_count": 32, "attention.head_count_kv": 8,
+          "attention.head_size": 128, "embedding_length": 4096}
+    write_gguf(model_dir / "Base-8B-Q4_K_M.gguf", "llama", None, dict(kv))
+    draft = write_gguf(model_dir / "Base-8B-Q4_K_M-mtp-tx.gguf", "llama", None, None)
+    draft.write_bytes(draft.read_bytes() + b"\0" * _MTPROJ_PAD)
+    models = await _scan_dir(client, model_dir)
+    base = next(m for m in models if "mtp" not in m["filename"])
+
+    res = await client.get(f"/api/models/{base['id']}/vram-estimate",
+                           params={"n_ctx": 8192, "cache_type_k": "q4_0", "cache_type_v": "q4_0"})
+    data = res.json()
+    assert data["available"] is True
+    assert data["mtp_available"] is True
+    assert data["aux_gb"] == 0.05
+    kinds = [c["kind"] for c in data["aux_components"]]
+    assert kinds == ["mtp_draft"]
+
+
 async def test_vram_estimate_endpoint_empty_gguf_unavailable(client, sample_model_dir):
     # GGUF de 0 bytes (fixture estándar): mmap falla  disponible false, sin 500.
     await client.post("/api/config", json={"model_dirs": [str(sample_model_dir)]})

@@ -185,33 +185,57 @@ class MetricsStore:
 
     def _merge_consumption(self, conn: sqlite3.Connection, series_id: int) -> dict[str, Any] | None:
         """
-        Total de vida de una serie de contadores, mergeando reinicios.
+        Total de vida de una serie de contadores, mergeando reinicios y
+        concatenando los niveles de retención (MON-MERGE).
 
         Los contadores de llama-server acumulan por corrida de SO: un restart
         con el mismo process_id los vuelve a 0. El total de vida es entonces la
         primera muestra observada más la suma de deltas positivos; una caída
         entre muestras es un reinicio (cuenta como corrida nueva y su primer
-        valor se suma como semilla de esa corrida). Dentro de una corrida la
-        suma es telescópica: sale igual del nivel crudo o del compactado, porque
-        los puntos intermedios se cancelan. Se usa el nivel con la cobertura
-        más antigua para no perder el tramo viejo de servidores largos por la
-        retención. Arista: un reinicio dentro de una ventana compactada mezcla
-        sus valores y ese merge es levemente aproximado.
+        valor se suma como semilla de esa corrida).
+
+        Dos reglas corregidas con datos reales (el código antiguo subestimaba
+        33-66% en servidores con tramos compactados, MON-4/MON-5):
+        - Cada ventana aporta su `max`, no su `avg`: un contador acumulativo
+          cierra la ventana en su valor máximo, mientras que `avg` es el
+          promedio de las muestras internas y siempre queda por debajo. Con
+          `max` la telescópica de una corrida sin reinicio es exacta.
+        - Los niveles se usan del más antiguo (1h) al más nuevo (raw) SIN
+          solaparse: un nivel solo aporta ventanas que terminan antes del
+          primer ts del nivel más fino. Así se conserva el tramo viejo de
+          servidores longevos (la retención purga raw a 48 h y 1m a 30 días)
+          sin fabricar reinicios falsos: el max de una ventana gruesa que
+          solapa datos finos más nuevos pica después del inicio de los finos,
+          y un stitching ingenuo lo leería como una caída.
+
+        Arista: un reinicio dentro de una ventana compactada o en el hueco
+        entre niveles mezcla sus valores y su semilla queda aproximada por el
+        max de la ventana. `last_ts` es la muestra más nueva REAL (cruda si la
+        hay), no el cierre de un bucket horario.
         """
-        best: tuple[int, int, str] | None = None  # (first_ts, last_ts, tabla)
-        for table in TABLE.values():
-            first, last, n = conn.execute(
-                f"SELECT MIN(ts), MAX(ts), COUNT(*) FROM {table} WHERE series_id = ?",
+        levels: list[tuple[int, list[tuple[int, float]]]] = []  # (paso, [(ts, max)]) fino→grueso
+        for tier, step in TIERS:
+            rows = conn.execute(
+                f"SELECT ts, max FROM {TABLE[tier]} WHERE series_id = ? ORDER BY ts",
                 (series_id,),
-            ).fetchone()
-            if n and (best is None or first < best[0]):
-                best = (first, last, table)
-        if best is None:
+            ).fetchall()
+            if rows:
+                levels.append((step, rows))
+        if not levels:
             return None
-        first_ts, last_ts, table = best
-        values = [r[0] for r in conn.execute(
-            f"SELECT avg FROM {table} WHERE series_id = ? ORDER BY ts", (series_id,)
-        )]
+
+        accepted: dict[int, float] = {}
+        finer_start: int | None = None  # ts de la muestra más antigua del nivel más fino ya tomado
+        for step, rows in levels:
+            if finer_start is None:
+                usable = rows
+            else:
+                usable = [r for r in rows if r[0] + step <= finer_start]
+            for ts, value in usable:
+                accepted[ts] = value
+            finer_start = rows[0][0] if finer_start is None else min(finer_start, rows[0][0])
+
+        values = [accepted[ts] for ts in sorted(accepted)]
         total = values[0]
         runs = 1
         for prev, cur in zip(values, values[1:]):
@@ -220,6 +244,8 @@ class MetricsStore:
                 total += cur
             elif cur > prev:
                 total += cur - prev
+        first_ts = min(rows[0][0] for _, rows in levels)
+        last_ts = max(rows[-1][0] for _, rows in levels)
         return {"total": int(round(total)), "first_ts": first_ts, "last_ts": last_ts, "runs": runs}
 
     def consumption_totals(self, process_id: str, keys: list[str]) -> dict[str, Any]:

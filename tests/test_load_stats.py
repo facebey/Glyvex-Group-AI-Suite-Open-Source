@@ -9,6 +9,8 @@ del usuario.
 """
 
 import os
+import threading
+from collections import deque
 
 import pytest
 
@@ -36,6 +38,8 @@ MODERN_LOG = [
     "load: offloaded 12/63 layers to GPU device 1",
     "load: offloaded 11/63 layers to CPU",
     "kv_unified: size = 900.00 MiB, n_ctx = 8192",
+    "llama_context: n_ctx                 = 8192",
+    "llama_context: n_ctx_seq             = 8192",
     "load: KV buffer size = 150.00 MiB",
     "( size: 240.00 MiB, n_layers: 25 )",
     "load: compute buffer size = 1410.55 MiB",
@@ -70,6 +74,9 @@ def test_parse_modern_format():
     assert stats.kv_cache_mib == 240.0
     assert stats.kv_layers == 25
 
+    # el contexto lo declara llama_context, no las variantes por-slot
+    assert stats.context_tokens == 8192
+
     assert stats.compute_mib == 1410.55
     # "CPU buffer size" sí; "CUDA0[0] buffer size" son buffers de pesos y no
     # deben contaminar ni el KV ni el CPU buffer.
@@ -95,6 +102,7 @@ LEGACY_LOG = [
     "llm_load_tensors: offloading 12 repeating layers to GPU",
     "llm_load_tensors: offloaded 23/35 layers to GPU",
     "llm_load_kv: KV buffer size = 150.00 MiB",
+    "llama_context: n_ctx                 = 4096",
     "llm_load_tensors: compute buffer size = 320.44 MiB",
     "llm_load_tensors: CPU buffer size = 403.32 MiB",
 ]
@@ -118,6 +126,7 @@ def test_parse_legacy_format():
     # sin inline: se usa el "KV buffer size"
     assert stats.kv_cache_mib == 150.0
     assert stats.kv_layers is None
+    assert stats.context_tokens == 4096
     assert stats.compute_mib == 320.44
     assert stats.cpu_buffer_mib == 403.32
     # las builds viejas no imprimían el tiempo de carga
@@ -166,6 +175,24 @@ def test_parse_noise_lines_excluded():
     assert stats.gpu_layers == 23
 
 
+def test_parse_context_tokens_ignores_slot_and_train_variants():
+    # líneas reales de un arranque gemma-4 (era b11009): solo el n_ctx del
+    # llama_context fija el contexto; n_ctx_seq es por-slot cuando hay varios
+    # slots, y n_ctx_train/n_ctx_orig_yarn/n_ctx_slot describen otra cosa.
+    stats = parse_load_logs(
+        [
+            "print_info: n_ctx_train           = 262144",
+            "print_info: n_ctx_orig_yarn       = 262144",
+            "266.37.348.230 I slot   operator(): id  0 | task 157421 | new prompt, n_ctx_slot = 65536",
+            "0.14.101.410 I slot   load_model: id  0 | task -1 | new slot, n_ctx = 65536",
+            "0.11.881.962 I llama_context: n_ctx                 = 131072",
+            "0.11.881.962 I llama_context: n_ctx_seq             = 65536",
+            "llama_context: n_ctx_seq (32768) < n_ctx_train (262144) -- the full capacity of the model will not be utilized",
+        ]
+    )
+    assert stats.context_tokens == 131072
+
+
 def test_parse_unrecognized_format_notes():
     # log de una build desconocida: ningún campo se inventa, la nota es un
     # código estable que la UI traduce (launcher.loadCardNoParse).
@@ -182,6 +209,7 @@ def test_parse_unrecognized_format_notes():
     assert stats.gpu_layers is None
     assert stats.devices == []
     assert stats.kv_cache_mib is None
+    assert stats.context_tokens is None
     assert stats.model_filename is None
 
 
@@ -216,6 +244,8 @@ REAL_B11009_LOG = [
     "0.04.549.593 I load_tensors: offloaded 66/66 layers to GPU",
     "0.04.549.597 I load_tensors:   CPU_Mapped model buffer size =   682.03 MiB",
     "0.04.549.600 I load_tensors:        CUDA0 model buffer size = 15718.48 MiB",
+    "0.13.577.850 I llama_context: n_ctx                 = 131072",
+    "0.13.577.875 I llama_context: n_ctx_seq             = 131072",
     "0.13.598.567 I llama_kv_cache:      CUDA0 KV buffer size =  4352.00 MiB",
     "0.13.862.677 I sched_reserve:      CUDA0 compute buffer size =   720.28 MiB",
     "0.13.862.686 I sched_reserve:  CUDA_Host compute buffer size =   148.28 MiB",
@@ -237,6 +267,7 @@ def test_parse_real_b11009_startup_lines():
     # CPU_Mapped = pesos en host, aparte de los buffers de cómputo
     assert stats.cpu_model_buffer_mib == 682.03
     assert stats.kv_cache_mib == 4352.0
+    assert stats.context_tokens == 131072
     assert stats.compute_mib == 720.28  # prevalece el mayor (CUDA0 sobre CUDA_Host)
     assert stats.log_load_seconds is None  # builds viejas: no imprimían el tiempo
     assert stats.notes == []
@@ -310,6 +341,7 @@ LOAD_RUN_LINES = [
     "load_tensors:   CPU_Mapped model buffer size = 682.03 MiB",
     "load_tensors:        CUDA0 model buffer size = 15718.48 MiB",
     "load: KV buffer size = 90.00 MiB",
+    "llama_context: n_ctx                 = 8192",
     "load: compute buffer size = 512.25 MiB",
     "load: CPU buffer size = 120.50 MiB",
     "load: model load time = 4321.00 ms",
@@ -420,6 +452,7 @@ async def test_launch_llama_populates_load_card(
     # pesos mapeados a host: campo propio, aparte del buffer de cómputo en CPU
     assert stats["cpu_model_buffer_mib"] == 682.03
     assert stats["kv_cache_mib"] == 90.0
+    assert stats["context_tokens"] == 8192
     assert stats["compute_mib"] == 512.25
     assert stats["cpu_buffer_mib"] == 120.5
     assert stats["log_load_seconds"] == pytest.approx(4.321)
@@ -465,3 +498,57 @@ async def test_launch_ollama_has_no_load_card(
     assert status["load_stats"] is None
 
     await client.post(f"/api/launcher/stop/{process_id}")
+
+
+def test_build_load_stats_snapshot_con_apollo_mutando_el_deque(monkeypatch):
+    # LOADCARD-NULL: _build_load_stats corre en un worker (asyncio.to_thread desde
+    # _monitor_health) mientras el event loop sigue agregando líneas al deque vivo
+    # (los modelos grandes aún loguean cuando /health responde). Iterar el deque
+    # en vivo lanza "deque mutated during iteration"; el except de _monitor_health
+    # la traga y la UI queda "running" sin card. El fix toma .copy() (una sola
+    # llamada C, atómica bajo el GIL) y parsea la copia privada.
+    mgr = launcher_module.manager
+    monkeypatch.setattr(
+        launcher_module.ModelProcessManager, "_usage_snapshot", lambda self: {}
+    )
+    monkeypatch.setattr(launcher_module, "process_rss_mib", lambda pid: 123.4)
+
+    pid = "race-loadcard"
+    info = launcher_module.ProcessInfo(
+        process_id=pid,
+        model_id="m1",
+        model_name="M1",
+        backend="llama_server",
+        state="starting",
+        host="127.0.0.1",
+        port=18080,
+        launch_config={},
+    )
+    mgr._log_buffers[pid] = deque(LOAD_RUN_LINES, maxlen=launcher_module.LOG_BUFFER_MAXLEN)
+
+    stop = threading.Event()
+
+    def spammer():
+        # Simula a _pump_output: append continuo al deque vivo desde otra hebra.
+        # Cicla el fixture para que la card siga siendo parseable sin importar
+        # qué ventana dejó el maxlen durante la carrera.
+        i = 0
+        while not stop.is_set():
+            mgr._log_buffers[pid].append(LOAD_RUN_LINES[i % len(LOAD_RUN_LINES)])
+            i += 1
+
+    t = threading.Thread(target=spammer, daemon=True)
+    t.start()
+    try:
+        # Sin el snapshot, alguna de estas llamadas itera el deque mientras el
+        # spammer muta -> IndexError intermitente (4/4 en modelos grandes reales).
+        for _ in range(50):
+            stats = mgr._build_load_stats(pid, info)
+            assert stats is not None
+            assert stats.build == "b11827"
+            assert stats.total_layers == 33
+            assert stats.process_rss_mib == 123.4
+    finally:
+        stop.set()
+        t.join(timeout=5)
+        mgr._log_buffers.pop(pid, None)

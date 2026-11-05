@@ -99,6 +99,8 @@ def estimate_vram_usage(
     n_parallel: int = 1,
     flash_attn: bool = False,
     gpu_vram_gb: float = 0,
+    aux_weights_gb: float = 0.0,
+    aux_components: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Estimar la VRAM total (GB) de un lanzamiento y clasificarla.
@@ -106,6 +108,16 @@ def estimate_vram_usage(
     `meta` es el dict de `read_gguf_metadata` (puede traer campos None: se
     cae a defaults razonables, como n_head_kv → n_head). Nunca levanta:
     sin los campos mínimos devuelve {"available": False, "error": ...}.
+
+    VRAM-MMPROJ: `aux_weights_gb` son los pesos de componentes auxiliares que
+    el launch carga además del .gguf principal (mmproj de visión, draft MTP
+    sidecar — tamaños REALES de archivo los mide el llamador desde el
+    inventario) y `aux_components` es su desglose [{"kind","label","size_gb"}].
+    Se suman al total y se publican aparte para que la UI pueda decir «si no
+    usas visión/MTP, el uso real será menor». Con aux=0 el resultado es
+    idéntico al cálculo anterior (los componentes no medidos no se inventan;
+    un MTP embebido NO entra acá: sus tensores ya están contados en
+    model_size_gb).
     """
     n_layer = meta.get("n_layer")
     n_head = meta.get("n_head")
@@ -163,10 +175,11 @@ def estimate_vram_usage(
     ssm_bytes = _ssm_state_bytes(meta, n_ssm)
 
     weights_gb = float(model_size_gb)
+    aux_gb = float(aux_weights_gb or 0.0)
     kv_gb = kv_bytes / _GIB
     ssm_gb = ssm_bytes / _GIB
     compute_gb = COMPUTE_BUFFER_GB_FA if flash_attn else COMPUTE_BUFFER_GB
-    total_gb = weights_gb + kv_gb + ssm_gb + compute_gb
+    total_gb = weights_gb + aux_gb + kv_gb + ssm_gb + compute_gb
 
     state = "unknown"
     pct: float | None = None
@@ -178,6 +191,15 @@ def estimate_vram_usage(
         "available": True,
         "error": None,
         "weights_gb": round(weights_gb, 2),
+        "aux_gb": round(aux_gb, 2),
+        "aux_components": [
+            {
+                "kind": str(c.get("kind", "aux")),
+                "label": str(c.get("label", "")),
+                "size_gb": round(float(c.get("size_gb") or 0.0), 2),
+            }
+            for c in (aux_components or [])
+        ],
         "kv_gb": round(kv_gb, 2),
         "ssm_gb": round(ssm_gb, 2),
         "compute_gb": round(compute_gb, 2),
@@ -206,12 +228,16 @@ def estimate_vram_legend(
     flash_attn: bool = False,
     gpu_vram_gb: float = 0,
     ctx_values: tuple[int, ...] = LEGEND_CTXS,
+    aux_weights_gb: float = 0.0,
+    aux_components: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Leyenda para la UI: para cada n_ctx común, el total de VRAM y su
     clasificación (comodo/justo/no_cabe). Mismo modelo y mismos parámetros que
     el estimador principal, variando solo el contexto. Devuelve [] si la
-    metadata no alcanza (mismo criterio que estimate_vram_usage).
+    metadata no alcanza (mismo criterio que estimate_vram_usage). Los auxiliares
+    (mmproj/draft) son constantes respecto del contexto: entran en cada fila de
+    la leyenda para que el estado clasificado coincida con la estimación principal.
     """
     legend: list[dict[str, Any]] = []
     for n_ctx in ctx_values:
@@ -219,6 +245,7 @@ def estimate_vram_legend(
             meta, model_size_gb, n_ctx,
             cache_type_k=cache_type_k, cache_type_v=cache_type_v,
             n_parallel=n_parallel, flash_attn=flash_attn, gpu_vram_gb=gpu_vram_gb,
+            aux_weights_gb=aux_weights_gb, aux_components=aux_components,
         )
         if not r.get("available"):
             break  # sin metadata mínima no hay leyenda que mostrar

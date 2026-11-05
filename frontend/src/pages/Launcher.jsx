@@ -1107,6 +1107,7 @@ function LoadCard({ loadStats }) {
     loadStats.cpu_layers != null ||
     devices.length > 0 ||
     loadStats.cpu_model_buffer_mib != null ||
+    loadStats.context_tokens != null ||
     loadStats.kv_cache_mib != null ||
     loadStats.compute_mib != null ||
     loadStats.cpu_buffer_mib != null ||
@@ -1200,6 +1201,11 @@ function LoadCard({ loadStats }) {
             )}
             {loadStats.cpu_model_buffer_mib != null &&
               estRow(t("launcher.loadCardCpuModelWeights"), `${gib(loadStats.cpu_model_buffer_mib)} GiB`)}
+            {loadStats.context_tokens != null &&
+              estRow(
+                t("launcher.loadCardContextSize"),
+                `${loadStats.context_tokens.toLocaleString()} tokens`
+              )}
             {loadStats.kv_cache_mib != null &&
               estRow(t("launcher.loadCardKv"), `${gib(loadStats.kv_cache_mib)} GiB`)}
             {loadStats.compute_mib != null &&
@@ -2062,67 +2068,84 @@ export default function Launcher() {
           )}
         </div>
       )}
-      {vramEstimate && vramEstimate.available && (
-        <div className="mt-2 rounded-md bg-glyvex-veil-box border border-glyvex-border-soft p-3 space-y-1">
-          <div className="flex items-center gap-2 text-sm">
-            <span className={`inline-block w-2.5 h-2.5 rounded-full ${VRAM_STATE_DOT[vramEstimate.state] || VRAM_STATE_DOT.unknown}`} />
-            <span className="font-medium">{t("launcher.vramEstimated", { total: vramEstimate.total_gb })}</span>
-            {vramEstimate.pct !== null && (
-              <span className="text-glyvex-muted">/ {vramEstimate.gpu_vram_gb} GB ({vramEstimate.pct}%)</span>
-            )}
-          </div>
-          <p className="text-xs text-glyvex-muted">
-            {t("launcher.vramWeightsKv", { w: vramEstimate.weights_gb, kv: vramEstimate.kv_gb })}
-            {vramEstimate.ssm_gb ? ` · SSM ${vramEstimate.ssm_gb} GB` : ""} · {t("launcher.vramCompute", { c: vramEstimate.compute_gb })}
-            {vramEstimate.n_parallel > 1 ? ` · ${vramEstimate.n_parallel} slots` : ""}
-          </p>
-          {Array.isArray(vramEstimate.legend) && vramEstimate.legend.length > 0 && (
-            <div className="pt-1.5 border-t border-glyvex-border-soft">
-              <p className="text-[11px] text-glyvex-muted-2 mb-1">
-                {t("launcher.vramByContext")}
-              </p>
-              <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-                {vramEstimate.legend.map((row) => (
-                  <span key={row.n_ctx} className="text-[11px] text-glyvex-muted">
-                    <span className="font-medium">{N_CTX_LABELS[row.n_ctx] ?? `${Math.round(row.n_ctx / 1024)}K`}</span>{" "}
-                    {row.total_gb} GB
-                    {row.pct !== null && (
-                      <span className={row.state === "no_cabe" ? "text-red-400" : row.state === "justo" ? "text-amber-400" : ""}>
-                        {" "}({row.pct}%)
-                      </span>
-                    )}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          {vramEstimate.state === "no_cabe" && (
-            <p className="text-xs text-red-400">
-              {t("launcher.vramNoFit")}
-            </p>
-          )}
-          {vramEstimate.state === "justo" && (
-            <p className="text-xs text-amber-400">
-              {t("launcher.vramJustFit")}
-            </p>
-          )}
-          {vramEstimate.state === "unknown" && (
-            <p className="text-xs text-glyvex-muted-2">
-              {t("launcher.vramUnknown")}
-            </p>
-          )}
-          {vramEstimate.is_moe && (
-            <p className="text-xs text-glyvex-muted-2">
-              {t("launcher.vramMoE")}
-            </p>
-          )}
-          {vramEstimate.mtp_available && (
-            <p className="text-xs text-glyvex-muted-2">
-              {t("launcher.vramMtpDraft")}
-            </p>
+    </Panel>
+  );
+
+  // La estimación de VRAM no es sampling: depende de n_ctx, cuantización y
+  // offload, y es información de decisión ANTES de lanzar. Vive en su propia
+  // card a ancho completo, debajo del grid de configuración y sobre Agents.
+  const vramPanel = vramEstimate && vramEstimate.available && (
+    <Panel icon={GaugeIcon} title={t("launcher.vramCardTitle")}>
+      <div className="space-y-1">
+        <div className="flex items-center gap-2 text-sm">
+          <span className={`inline-block w-2.5 h-2.5 rounded-full ${VRAM_STATE_DOT[vramEstimate.state] || VRAM_STATE_DOT.unknown}`} />
+          <span className="font-medium">{t("launcher.vramEstimated", { total: vramEstimate.total_gb })}</span>
+          {vramEstimate.pct !== null && (
+            <span className="text-glyvex-muted">/ {vramEstimate.gpu_vram_gb} GB ({vramEstimate.pct}%)</span>
           )}
         </div>
-      )}
+        <p className="text-xs text-glyvex-muted">
+          {t("launcher.vramWeightsKv", { w: vramEstimate.weights_gb, kv: vramEstimate.kv_gb })}
+          {(vramEstimate.aux_components ?? []).map((c) => (
+            // VRAM-MMPROJ: el desglose de los auxiliares reales que este launch
+            // cargaría (mmproj/draft medidos desde el inventario); se listan
+            // aparte para que quede claro qué parte del total no es el modelo.
+            <span key={`${c.kind}-${c.label}`}> · {c.kind === "mmproj" ? t("launcher.vramAuxMmproj") : t("launcher.vramAuxMtp")} {c.size_gb} GB</span>
+          ))}
+          {vramEstimate.ssm_gb ? ` · SSM ${vramEstimate.ssm_gb} GB` : ""} · {t("launcher.vramCompute", { c: vramEstimate.compute_gb })}
+          {vramEstimate.n_parallel > 1 ? ` · ${vramEstimate.n_parallel} slots` : ""}
+        </p>
+        {vramEstimate.aux_gb > 0 && (
+          <p className="text-[11px] text-glyvex-muted-2">
+            {t("launcher.vramAuxNote", { aux: vramEstimate.aux_gb })}
+          </p>
+        )}
+        {Array.isArray(vramEstimate.legend) && vramEstimate.legend.length > 0 && (
+          <div className="pt-1.5 border-t border-glyvex-border-soft">
+            <p className="text-[11px] text-glyvex-muted-2 mb-1">
+              {t("launcher.vramByContext")}
+            </p>
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+              {vramEstimate.legend.map((row) => (
+                <span key={row.n_ctx} className="text-[11px] text-glyvex-muted">
+                  <span className="font-medium">{N_CTX_LABELS[row.n_ctx] ?? `${Math.round(row.n_ctx / 1024)}K`}</span>{" "}
+                  {row.total_gb} GB
+                  {row.pct !== null && (
+                    <span className={row.state === "no_cabe" ? "text-red-400" : row.state === "justo" ? "text-amber-400" : ""}>
+                      {" "}({row.pct}%)
+                    </span>
+                  )}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {vramEstimate.state === "no_cabe" && (
+          <p className="text-xs text-red-400">
+            {t("launcher.vramNoFit")}
+          </p>
+        )}
+        {vramEstimate.state === "justo" && (
+          <p className="text-xs text-amber-400">
+            {t("launcher.vramJustFit")}
+          </p>
+        )}
+        {vramEstimate.state === "unknown" && (
+          <p className="text-xs text-glyvex-muted-2">
+            {t("launcher.vramUnknown")}
+          </p>
+        )}
+        {vramEstimate.is_moe && (
+          <p className="text-xs text-glyvex-muted-2">
+            {t("launcher.vramMoE")}
+          </p>
+        )}
+        {vramEstimate.mtp_available && (
+          <p className="text-xs text-glyvex-muted-2">
+            {t("launcher.vramMtpDraft")}
+          </p>
+        )}
+      </div>
     </Panel>
   );
 
@@ -2831,6 +2854,8 @@ export default function Launcher() {
               </>
             )}
           </div>
+
+          {vramPanel}
 
           {bridgeStatus?.enabled && (
             <Panel icon={Bot} title={t("launcher.agentsCard")}>

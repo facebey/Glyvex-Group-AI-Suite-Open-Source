@@ -22,6 +22,23 @@ Without an NVIDIA GPU, the Monitor and the Launcher degrade gracefully
 
 **Product site:** [ai-suite.glyvexgroup.com](https://ai-suite.glyvexgroup.com/) — [Glyvex AI Division](https://ai.glyvexgroup.com/)
 
+## What this is not
+
+Glyvex-AI-Suite manages **language models** only. It is not a replacement
+for image/video/audio generation tools (ComfyUI and the like):
+
+- It supports **multimodal input** — images in Chat (vision models via
+  `mmproj`), documents (PDF/DOCX/PPTX/XLSX), `.pcap` captures, and
+  microphone audio (speech-to-text) — but every loaded model **answers in
+  text**.
+- It does **not generate** images, video, or audio. Diffusion models (Flux,
+  Stable Diffusion, ...) don't run on `llama-server`: keep them in ComfyUI
+  or a dedicated tool, and outside the `model_dirs` folders so they don't
+  clutter the model inventory.
+
+For local generation of images, video, or audio, ComfyUI is the natural
+companion. The Suite focuses on running, measuring, and chatting with LLMs.
+
 ## Download (Windows)
 
 The easiest way to try it: download the installer from

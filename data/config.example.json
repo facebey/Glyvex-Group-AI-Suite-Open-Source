@@ -97,6 +97,9 @@
   "agent_bridge": {
     "enabled": false
   },
+  "mcp_server": {
+    "enabled": true
+  },
   "logs": {
     "rotate_keep": 3
   },

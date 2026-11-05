@@ -1559,6 +1559,48 @@ def mtp_companion_file(entry: ModelEntry) -> str | None:
     return None
 
 
+def _vram_aux_components(entry: ModelEntry) -> tuple[float, list[dict[str, Any]]]:
+    """(aux_gb, desglose) — los pesos auxiliares REALES que un launch de esta
+    entry cargaría además del .gguf principal (VRAM-MMPROJ).
+
+    Mismo criterio que hardware_api._model_card (fit de A2F-1): tamaño real de
+    archivo medido desde el inventario, sin inventar datos — archivo ilegible o
+    sin ruta no entra. Un MTP embebido suma 0: sus tensores ya están dentro de
+    entry.size_gb (el flag mtp_available sigue avisando aparte). Guard: si la
+    propia entry ES un mmproj suelto registrado como modelo, su mmproj_path
+    apunta a sí mismo y no se cuenta dos veces.
+    """
+    components: list[dict[str, Any]] = []
+    own = str(Path(entry.path).resolve())
+
+    if entry.mmproj_path and str(Path(entry.mmproj_path).resolve()) != own:
+        try:
+            size = Path(entry.mmproj_path).stat().st_size / (1024 ** 3)
+        except OSError:
+            size = 0.0
+        if size > 0:
+            components.append({
+                "kind": "mmproj",
+                "label": Path(entry.mmproj_path).name,
+                "size_gb": size,
+            })
+
+    mtp = mtp_companion_file(entry)
+    if mtp and not entry.mtp_embedded:
+        try:
+            size = Path(mtp).stat().st_size / (1024 ** 3)
+        except OSError:
+            size = 0.0
+        if size > 0:
+            components.append({
+                "kind": "mtp_draft",
+                "label": Path(mtp).name,
+                "size_gb": size,
+            })
+
+    return sum(float(c["size_gb"]) for c in components), components
+
+
 @router.get("/{model_id}/vram-estimate")
 async def get_model_vram_estimate(
     model_id: str,
@@ -1597,6 +1639,10 @@ async def get_model_vram_estimate(
         return {"available": False, "error": meta["error"]}
 
     gpu_vram_gb = float(config.get("hardware.vram_gb") or 0)
+    # VRAM-MMPROJ: los auxiliares que este launch usaría (mmproj de la entry,
+    # draft sidecar en la misma carpeta) entran al total y al estado, con su
+    # desglose publicado para que la UI sea honesta sobre el escenario visión/MTP.
+    aux_gb, aux_components = _vram_aux_components(entry)
     result = estimate_vram_usage(
         meta,
         model_size_gb=entry.size_gb,
@@ -1606,6 +1652,8 @@ async def get_model_vram_estimate(
         n_parallel=n_parallel,
         flash_attn=flash_attn,
         gpu_vram_gb=gpu_vram_gb,
+        aux_weights_gb=aux_gb,
+        aux_components=aux_components,
     )
     if result.get("available"):
         # Margen del draft MTP (documentado en EST-SWA): ni esta estimación ni
@@ -1624,6 +1672,8 @@ async def get_model_vram_estimate(
             n_parallel=n_parallel,
             flash_attn=flash_attn,
             gpu_vram_gb=gpu_vram_gb,
+            aux_weights_gb=aux_gb,
+            aux_components=aux_components,
         )
     return result
 

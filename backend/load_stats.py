@@ -75,6 +75,7 @@ class LoadStats(BaseModel):
     devices: list[DeviceOffload] = []
     kv_cache_mib: float | None = None
     kv_layers: int | None = None
+    context_tokens: int | None = None  # n_ctx efectivo del llama_context del arranque
     compute_mib: float | None = None
     cpu_buffer_mib: float | None = None
     # pesos que el log deja en RAM ("CPU_Mapped model buffer size"), no buffer
@@ -164,6 +165,12 @@ _RE_MODEL_BUFFER_MIB = re.compile(
     re.IGNORECASE,
 )
 
+# contexto efectivo reservado por el server: "llama_context: n_ctx = 131072"
+# (llama-context.cpp, el valor ya ajustado y asignado). No "n_ctx_seq" ni los
+# n_ctx de debug por slot ("slot load_model", "n_ctx_slot"): son por-slot y no
+# describen el contexto total levantado.
+_RE_N_CTX = re.compile(r"llama_context:\s*n_ctx\s*=\s*(\d+)")
+
 # nombres de dispositivos GPU anunciados:
 #   " Device 0: NVIDIA GeForce RTX 3060: ; compute = 8.6; ..." (CUDA)
 #   "Found Metal device: Apple M1" / "ggml metal initialized with device name ..."
@@ -223,6 +230,7 @@ def parse_load_logs(lines: Iterable[str]) -> LoadStats:
     cpu_layers_explicit: int | None = None
     kv_inline: tuple[float, int] | None = None
     kv_size_candidates: list[float] = []
+    n_ctx_candidates: list[int] = []
     device_names: dict[int | None, str] = {}
     gpu_weights: dict[int | None, float] = {}  # pesos declarados por device
     cpu_weights_mib: float | None = None  # pesos declarados en host
@@ -298,6 +306,15 @@ def parse_load_logs(lines: Iterable[str]) -> LoadStats:
             val = _to_float(m.group(1))
             if val is not None:
                 kv_size_candidates.append(val)
+                saw_anything = True
+
+        m = _RE_N_CTX.search(line)
+        if m:
+            # varias coincidencias si el proceso reinició el contexto en el
+            # mismo arranque: prevalece la mayor (la reservada al final)
+            val = int(m.group(1))
+            if val > 0:
+                n_ctx_candidates.append(val)
                 saw_anything = True
 
         m = _RE_COMPUTE_MIB.search(line)
@@ -390,6 +407,9 @@ def parse_load_logs(lines: Iterable[str]) -> LoadStats:
         stats.kv_cache_mib, stats.kv_layers = kv_inline
     elif kv_size_candidates:
         stats.kv_cache_mib = max(kv_size_candidates)
+
+    if n_ctx_candidates:
+        stats.context_tokens = max(n_ctx_candidates)
 
     if not saw_anything:
         # Código estable, no texto: la UI lo traduce (launcher.loadCardNoParse).

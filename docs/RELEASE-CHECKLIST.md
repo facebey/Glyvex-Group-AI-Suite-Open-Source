@@ -139,6 +139,12 @@ registry entry and Start Menu shortcuts.
 - [ ] `.\distribution\sync-oss.ps1` — exports the committed state (without
   `distribution/`), overlays the `distribution/final/` layer, commits and pushes
   to `facebey/Glyvex-Group-AI-Suite-Open-Source`.
+- [ ] **After the sync, wait for the public push CI to finish GREEN on the sync
+  commit** (`gh run list --repo facebey/Glyvex-Group-AI-Suite-Open-Source
+  --workflow CI`). Do not publish a release over a red CI: the 0.12.0 sync
+  `566c6c6` was red (a 3.13-only `read_text(newline=)` kwarg in a test) and
+  went unnoticed because the AppImage comes from the release workflow, not the
+  CI job — see CI-1 in the status MD.
 
 ## 5. GitHub Release (public repo)
 

@@ -30,6 +30,17 @@ def _fill_raw(store: MetricsStore, key: str, start: int, seconds: int, process_i
     )
 
 
+def _fill_counter(store: MetricsStore, key: str, start: int, seconds: int, process_id: str,
+                  value_at):
+    # Contador acumulativo: una muestra por ventana, avg==min==max (lo que
+    # hace el poller real con los contadores de tokens de llama-server).
+    windows = [
+        SampleWindow(key=key, ts=ts, avg=value_at(ts), min=value_at(ts), max=value_at(ts))
+        for ts in range(start, start + seconds, 5)
+    ]
+    store.write_raw(windows, scope="llm", process_id=process_id, units={key: "tokens"})
+
+
 def test_series_hw_no_se_duplican(tmp_path):
     store = _store(tmp_path)
     _fill_raw(store, "gpu.0.temp_c", T0, 10)
@@ -108,6 +119,57 @@ def test_consumption_series_all_suma_todas_las_instancias(tmp_path):
     assert empty.consumption_series_all([]) == []
     store.close()
     empty.close()
+
+
+def test_consumption_total_no_se_subestima_con_tramos_compactados(tmp_path):
+    # MON-MERGE (bug MON-4/MON-5): un server longevo cuyo nivel crudo ya fue
+    # purgado por la retención queda representado solo por ventanas compactadas.
+    # El código antiguo telescopiaba el `avg` del nivel de cobertura más antigua
+    # (1h): con un contador que sube dentro de cada ventana, eso colapsa el
+    # total al promedio del último tramo horario (caso real: 316,994 reportados
+    # vs 469,917 observados). Con `max` y el stitching sin solapamiento, una
+    # corrida sin reinicios da exactamente el último valor observado y last_ts
+    # es la muestra real más nueva, no el cierre de un bucket horario.
+    store = _store(tmp_path, Retention(raw_s=3600, m1_s=30 * 86400, h1_s=365 * 86400))
+    key = "llm.prompt_tokens_total"
+    # Contador monótono 1,000 → 8,200 tokens (1 token/s) corriendo 2 horas.
+    _fill_counter(store, key, T0, 7200, "p1", value_at=lambda ts: 1000 + (ts - T0))
+    store.rollup(now=T0 + 7200 + ROLLUP_LAG_S)
+    store.purge(now=T0 + 7200)          # purga el raw de la primera hora: escenario compactado
+
+    entry = store.consumption_totals("p1", [key])[key]
+    assert entry["runs"] == 1
+    assert entry["total"] == 8195       # value_at(T0+7195): el último valor REAL
+    assert entry["first_ts"] == T0      # cobertura del 1h, no del tramo crudo
+    assert entry["last_ts"] == T0 + 7195
+    store.close()
+
+
+def test_consumption_reinicio_detectado_entre_niveles_compactados(tmp_path):
+    # El reinicio dentro de un tramo compactado sigue contando como corrida
+    # nueva: la caída se ve entre el max de la ventana compactada previa al
+    # reinicio (3,995) y el max de la primera posterior (105; la semilla exacta
+    # de 50 ya no existe en el nivel compactado). El nivel crudo que cubre el
+    # tramo final continúa la corrida sin inventar un tercer reinicio en la
+    # frontera 1m→raw.
+    store = _store(tmp_path, Retention(raw_s=3600, m1_s=30 * 86400, h1_s=365 * 86400))
+    key = "llm.prompt_tokens_total"
+
+    def value_at(ts: int) -> float:
+        if ts < T0 + 3000:
+            return 1000.0 + (ts - T0)          # corrida 1: 1,000 → 3,995
+        return 50.0 + (ts - (T0 + 3000))       # reinicio en T0+3000: 50 → 4,245
+
+    _fill_counter(store, key, T0, 7200, "p1", value_at)
+    store.rollup(now=T0 + 7200 + ROLLUP_LAG_S)
+    store.purge(now=T0 + 7200)
+
+    entry = store.consumption_totals("p1", [key])[key]
+    assert entry["runs"] == 2
+    # total = semilla1 1,055 + (3,995-1,055) + seed2 105 + (4,245-105)
+    #       = 3,995 + 4,245  (el valor final REAL de cada corrida)
+    assert entry["total"] == 8240
+    store.close()
 
 
 def test_rollup_a_minuto_preserva_min_y_max(tmp_path):

@@ -11,6 +11,7 @@ import json
 import pytest
 
 import agent_bridge
+import config as config_module
 import launcher as launcher_module
 from helpers import scan_and_wait, wait_until
 
@@ -29,6 +30,14 @@ def bridge_on(monkeypatch):
     # Via unitaria: el toggle se enciende en el modulo. Los tests que van por
     # API usan el toggle real via POST /api/config (config aislada por test).
     monkeypatch.setattr(agent_bridge, "enabled", lambda: True)
+
+
+@pytest.fixture
+def mcp_off(monkeypatch):
+    # AG-2: el registro MCP sigue el toggle real de config mcp_server (default
+    # ON); este fixture lo apaga para verificar el gate, misma via unitaria
+    # que bridge_on pero sobre el config real (precedente test_main_lifespan).
+    monkeypatch.setitem(config_module.config._data["mcp_server"], "enabled", False)
 
 
 def _info(pid="proc-1", model="test-model", port=39080, host="127.0.0.1", **overrides):
@@ -245,6 +254,192 @@ async def test_cleanup_all_never_touched_leaves_file_untouched(bridge_on, bridge
     # debe reescribir el config del usuario solo por el shutdown.
     _write_json(bridge_config, V1_USER)
     await agent_bridge.cleanup_all()
+    assert _read(bridge_config) == V1_USER
+
+
+# ---------------------------------------------------------------------------
+# AG-2 U3 — registro del servidor MCP (entrada mcp.glyvex)
+# ---------------------------------------------------------------------------
+
+OUR_MCP = {
+    "type": "remote",
+    "url": "http://127.0.0.1:39080/mcp/",
+    "enabled": True,
+    "oauth": False,
+}
+
+
+async def test_register_mcp_creates_canonical_file_with_entry(bridge_config):
+    # mcp_server.enabled es ON por default: registrar sin archivo crea el config
+    # V2 con solo la entrada mcp (sin clave provider: no hay registros AG-1).
+    assert await agent_bridge.register_mcp(39080) is True
+    data = _read(bridge_config)
+    assert data["$schema"] == "https://opencode.ai/config.json"
+    assert data["mcp"]["glyvex"] == OUR_MCP
+    assert "provider" not in data and "providers" not in data
+
+
+async def test_register_mcp_in_v1_file_leaves_user_keys_intact(bridge_config):
+    # Caso del archivo real del usuario (estilo V1 con 'provider'): la clave mcp
+    # se agrega sin tocar nada mas. Que OpenCode acepte mcp en un archivo V1 es
+    # la open question #3 del diseño: se comprueba con el live-test de U3.
+    _write_json(bridge_config, V1_USER)
+    assert await agent_bridge.register_mcp(39080) is True
+    data = _read(bridge_config)
+    assert data["provider"] == V1_USER["provider"]  # el provider 'glyvex' manual intacto
+    assert data["theme"] == "dark"
+    assert data["disabled_providers"] == []
+    assert data["mcp"]["glyvex"] == OUR_MCP
+    assert "providers" not in data  # no crea un contenedor del otro estilo
+
+
+async def test_register_mcp_replaces_our_stale_entry_and_keeps_others(bridge_config):
+    # Entrada nuestra de una sesión anterior (puerto viejo de la escalera): es
+    # reemplazada. Otros servers del contenedor (mcp.a-jeno) no se tocan.
+    _write_json(
+        bridge_config,
+        {
+            "mcp": {
+                "glyvex": {
+                    "type": "remote",
+                    "url": "http://127.0.0.1:7981/mcp/",
+                    "enabled": True,
+                    "oauth": False,
+                },
+                "sentry": {"type": "remote", "url": "https://mcp.sentry.dev/mcp"},
+            }
+        },
+    )
+    assert await agent_bridge.register_mcp(39080) is True
+    data = _read(bridge_config)
+    assert data["mcp"]["glyvex"] == OUR_MCP
+    assert data["mcp"]["sentry"]["url"] == "https://mcp.sentry.dev/mcp"
+
+
+async def test_register_mcp_never_overwrites_manual_entry(bridge_config):
+    # mcp.glyvex con URL ajena es del usuario: no se reescribe y se reporta
+    # (misma regla AG-1 con el provider 'glyvex' exacto).
+    manual = {"type": "remote", "url": "https://mcp.example.com/mcp", "oauth": {}}
+    _write_json(bridge_config, {"mcp": {"glyvex": manual}, "theme": "light"})
+    assert await agent_bridge.register_mcp(39080) is False
+    data = _read(bridge_config)
+    assert data["mcp"]["glyvex"] == manual
+    assert data["theme"] == "light"
+    assert "manual" in (agent_bridge._last_error or "")
+
+
+async def test_register_mcp_non_object_container_is_not_touched(bridge_config):
+    _write_json(bridge_config, {"mcp": "no-es-un-objeto", "theme": "dark"})
+    assert await agent_bridge.register_mcp(39080) is False
+    assert _read(bridge_config) == {"mcp": "no-es-un-objeto", "theme": "dark"}
+    assert "objeto" in (agent_bridge._last_error or "")
+
+
+async def test_register_mcp_toggle_off_does_not_touch_file(bridge_config, mcp_off):
+    # El gate es el mismo toggle del servidor (mcp_server.enabled): con OFF el
+    # archivo no se toca, ni siquiera para limpiar.
+    _write_json(bridge_config, V1_USER)
+    assert await agent_bridge.register_mcp(39080) is False
+    assert _read(bridge_config) == V1_USER
+
+
+async def test_publish_with_mcp_registered_keeps_the_entry(bridge_on, bridge_config):
+    # Un publish AG-1 posterior al registro NO puede borrar la entrada MCP: el
+    # servidor vive con el backend, no con el modelo (path default de
+    # _apply_sync = keep).
+    await agent_bridge.register_mcp(39080)
+    await agent_bridge.publish(_info())
+    data = _read(bridge_config)
+    assert data["mcp"]["glyvex"] == OUR_MCP
+    assert "glyvex" in data["providers"]
+
+
+async def test_cleanup_all_removes_provider_and_mcp_entry(bridge_on, bridge_config):
+    # Al cerrar la app sale todo lo propio: bloques AG-1 y la entrada MCP (el
+    # servidor /mcp muere con el backend). Lo ajeno queda intacto.
+    _write_json(
+        bridge_config,
+        {**V1_USER, "mcp": {"sentry": {"type": "remote", "url": "https://mcp.sentry.dev/mcp"}}},
+    )
+    await agent_bridge.register_mcp(39080)
+    await agent_bridge.publish(_info())
+    await agent_bridge.cleanup_all()
+    data = _read(bridge_config)
+    assert "mcp" in data and "glyvex" not in data["mcp"]
+    assert data["mcp"]["sentry"]["url"] == "https://mcp.sentry.dev/mcp"
+    assert set(data["provider"]) == {"Glyvex-AI", "glyvex"}
+
+
+async def test_unregister_mcp_removes_only_ours(bridge_config):
+    # Toggle OFF por API (via main.update_config): retira mcp.glyvex y deja el
+    # resto del contenedor y todos los provider.
+    _write_json(
+        bridge_config,
+        {
+            **V1_USER,
+            "mcp": {
+                "glyvex": OUR_MCP,
+                "sentry": {"type": "local", "command": ["npx", "x"]},
+            },
+        },
+    )
+    assert await agent_bridge.unregister_mcp() is True
+    data = _read(bridge_config)
+    assert "glyvex" not in data["mcp"]
+    assert data["mcp"]["sentry"]["command"] == ["npx", "x"]
+    assert data["provider"] == V1_USER["provider"]
+
+
+async def test_unregister_mcp_removes_empty_container(bridge_config):
+    # Un contenedor que quedó solo con nuestra entrada era una clave nuestra:
+    # desaparece entera.
+    await agent_bridge.register_mcp(39080)
+    assert await agent_bridge.unregister_mcp() is True
+    assert "mcp" not in _read(bridge_config)
+
+
+async def test_unregister_mcp_noop_without_entry_or_when_manual(bridge_config):
+    # Sin nada que limpiar no escribe el archivo (no genera backup ni rewrites).
+    _write_json(bridge_config, V1_USER)
+    assert await agent_bridge.unregister_mcp() is False
+    assert _read(bridge_config) == V1_USER
+    manual = {"type": "local", "command": ["npx", "y"]}
+    _write_json(bridge_config, {"mcp": {"glyvex": manual}})
+    assert await agent_bridge.unregister_mcp() is False
+    assert _read(bridge_config)["mcp"]["glyvex"] == manual
+
+
+async def test_status_exposes_mcp_registration(bridge_config):
+    # Diagnóstico para la UI (indicador U4): toggle real + presencia de la
+    # entrada en el archivo + el puerto que escribo esta instancia.
+    status = agent_bridge.bridge_status()
+    assert status["mcp"] == {"enabled": True, "registered": False, "url": None, "our_port": None}
+    await agent_bridge.register_mcp(39080)
+    status = agent_bridge.bridge_status()
+    assert status["mcp"] == {
+        "enabled": True,
+        "registered": True,
+        "url": "http://127.0.0.1:39080/mcp/",
+        "our_port": 39080,
+    }
+
+
+async def test_api_mcp_toggle_off_unregisters_existing_entry(client, bridge_config):
+    # Igual que el toggle AG-1: apagar mcp_server por la API retira la entrada
+    # de inmediato (un registro apuntando a un server que no va a existir).
+    _write_json(bridge_config, {"mcp": {"glyvex": OUR_MCP}})
+    r = await client.post("/api/config", json={"mcp_server": {"enabled": False}})
+    assert r.status_code == 200
+    assert "mcp" not in _read(bridge_config)
+
+
+async def test_api_mcp_toggle_on_needs_the_real_port(client, bridge_config):
+    # El registro usa el puerto real de la app (app.state.glyvex_port, fijado
+    # tras la escalera en __main__): en tests ASGI no hay puerto y no se escribe
+    # una URL inventada.
+    _write_json(bridge_config, V1_USER)
+    r = await client.post("/api/config", json={"mcp_server": {"enabled": True}})
+    assert r.status_code == 200
     assert _read(bridge_config) == V1_USER
 
 

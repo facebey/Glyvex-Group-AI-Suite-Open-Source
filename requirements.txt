@@ -14,6 +14,14 @@ gguf>=0.19.0
 nvidia-ml-py>=13.615.71
 psutil>=7.2.2
 
+# AG-2: servidor MCP (Streamable HTTP stateless) montado en el propio backend
+# (backend/mcp_server.py, ruta /mcp). SDK oficial v2 (MCPServer), auditado
+# 2026-11-04 antes de instalar: MIT, sin telemetría de red (el middleware OTel
+# es no-op sin exporter); httpx2 (dependencia del SDK) es distribución separada
+# de httpx y convive sin conflicto. Evidencia: Files\Docs\design\
+# ag-2-mcp-server.md §7.
+mcp>=2.3.0
+
 # Extracción de adjuntos del chat (módulo M3). Todas puras Python y livianas:
 # si falta alguna, ese tipo de archivo se sigue adjuntando como "no
 # interpretable" en vez de romper la app.

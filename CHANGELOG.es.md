@@ -7,6 +7,51 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-05
+
+La release donde la Suite habla con OpenCode directamente: el backend ahora
+sirve un servidor MCP, así que un agente puede descubrir modelos, estimar VRAM
+y lanzar o detener procesos con barreras de seguridad desde su propio chat.
+Además fixes de la load-card y del Monitor validados contra datos reales, y
+un fix de seguridad del updater. Publicado en el canal de actualización: las
+instalaciones en 0.12.x lo reciben.
+
+### Añadido
+- **Servidor MCP para OpenCode (AG-2)**: un servidor Streamable-HTTP servido
+  por el propio backend en `/mcp` (sin proceso extra). Tools `suite_status`,
+  `list_models`, `estimate_vram`, `launch_model` / `stop_model` con safety
+  rails (plantillas validadas, preflio de VRAM contra el snapshot vivo, un
+  bypass explícito con `force`). La Suite se auto-registra en el config de
+  OpenCode con el puerto real descubierto, con hot-reload en sesiones en
+  curso y limpieza al desactivarlo o apagar el backend. Un bloque nuevo «Servidor
+  MCP» en Config muestra estado/registro/URL y un toggle **independiente** del
+  bridge de proveedores.
+- **Contexto efectivo en la LoadCard**: la card muestra el `n_ctx` real con
+  el que arrancó el modelo, tomado de la línea autoritativa del log de carga.
+
+### Cambiado
+- **Estimated VRAM como card propia**: sale de Sampling y se muestra debajo
+  de la grilla de configuración.
+- **Sección de alcance en los READMEs** («What this is not / Qué no es»,
+  EN+ES): la Suite es entrada-multimodal → salida-texto, con pointer a
+  ComfyUI para generación de imagen.
+
+### Corregido
+- **Totales de consumo del Monitor**: merge por niveles con marcas de agua en
+  vez del timestamp mínimo, y huecos interpolados solo si son <10 minutos;
+  cuadra exacto contra la base de datos.
+- **LoadCard ausente a veces**: una carrera en el deque de logs se tragaba un
+  `IndexError` y dejaba `gpu`/`offload` en null.
+- **Estimación VRAM con pesos auxiliares reales**: `/vram-estimate` cuenta
+  adapters de visión mmproj y drafts MTP cuando existen, con desglose en la
+  card.
+- **Tests compatibles con Python 3.11/3.12 en CI**: lectura de logs vía
+  `Path.open(newline=…)` (el kwarg de `read_text` es 3.13+).
+
+### Seguridad
+- **tauri-plugin-updater 2.14.0 → 2.14.1** (Rust + JS): arrastra
+  `zip 4.6.1 → 9.2.2`, cierra los avisos Dependabot #7–#9 del repo privado.
+
 ## [0.12.0] — 2026-11-02
 
 El primer minor completo publicado como estable: recomendaciones conscientes del

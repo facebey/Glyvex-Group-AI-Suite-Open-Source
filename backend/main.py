@@ -9,13 +9,13 @@ import os
 import platform
 import socket
 import time
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.gzip import GZipMiddleware
@@ -32,6 +32,7 @@ import llm_metrics
 import logsetup
 import metrics
 import metrics_export
+import mcp_server
 import models
 import runtime_api
 import session_tokens
@@ -61,7 +62,7 @@ if sys.platform == "win32":
 # (glyvex.spec, datas → _internal/frontend/dist).
 FRONTEND_DIST = BUNDLE_DIR / "frontend" / "dist"
 
-APP_VERSION = "0.12.0"
+APP_VERSION = "0.13.0"
 APP_NAME = "Glyvex-AI-Suite"
 APP_START_MONOTONIC = time.monotonic()
 
@@ -127,18 +128,35 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001 — nunca debe impedir arrancar
         logger.warning("no se pudo limpiar adjuntos huérfanos: %s", exc)
 
-    yield
-    logger.info("shutdown: guardando config y cerrando procesos")
-    await config.save()
-    await llm_metrics.manager.stop()
-    await metrics.manager.stop()
-    # Último: los managers encolan sus ventanas pendientes al detenerse.
-    await metrics_export.exporter.stop()
-    await launcher.manager.shutdown()
-    # AG-1: ultimo paso — retirar de la config de OpenCode los bloques que esta
-    # instancia publico (los servers que gestione ya no van a seguir sirviendo).
-    await agent_bridge.cleanup_all()
-    stt.unload_model()
+    async with AsyncExitStack() as stack:
+        # AG-2: al montar la sub-app MCP su lifespan propio NO corre (Starlette
+        # solo ejecuta el lifespan de la app anfitriona): sin entrar aquí el
+        # session_manager, la primera petición a /mcp falla con "Task group is
+        # not initialized". Con el toggle off no se arranca y el mount (gate de
+        # mcp_server.mcp_asgi_app) responde 404. Ojo: session_manager.run() es
+        # una sola vez por instancia — los tests lo cubren en test_mcp_server.py.
+        if config.get("mcp_server.enabled"):
+            await stack.enter_async_context(mcp_server.mcp.session_manager.run())
+        # AG-2 U3: registrar este backend en el config de OpenCode (mcp.glyvex).
+        # El puerto real solo existe tras la escalera de __main__ (llega por
+        # app.state); sin él (tests ASGI) no se escribe nada. register_mcp ya
+        # chequea mcp_server.enabled y nunca rompe el arranque: sus errores van
+        # a _last_error como en AG-1. La entrada se retira en cleanup_all().
+        mcp_listen_port = getattr(app.state, "glyvex_port", None)
+        if mcp_listen_port:
+            await agent_bridge.register_mcp(mcp_listen_port)
+        yield
+        logger.info("shutdown: guardando config y cerrando procesos")
+        await config.save()
+        await llm_metrics.manager.stop()
+        await metrics.manager.stop()
+        # Último: los managers encolan sus ventanas pendientes al detenerse.
+        await metrics_export.exporter.stop()
+        await launcher.manager.shutdown()
+        # AG-1: ultimo paso — retirar de la config de OpenCode los bloques que esta
+        # instancia publico (los servers que gestione ya no van a seguir sirviendo).
+        await agent_bridge.cleanup_all()
+        stt.unload_model()
 
 
 app = FastAPI(title="Glyvex-AI-Suite", version=APP_VERSION, lifespan=lifespan)
@@ -210,6 +228,18 @@ async def update_config(patch: ConfigUpdate) -> dict[str, Any]:
     bridge_patch = data.get("agent_bridge")
     if isinstance(bridge_patch, dict) and bridge_patch.get("enabled") is False:
         await agent_bridge.cleanup_all()
+    # AG-2 U3: la entrada mcp.glyvex sigue al toggle mcp_server: off la retira
+    # de inmediato (el servidor deja de montar en el próximo arranque); on la
+    # re-registra con el puerto real de esta app (sin puerto en tests ASGI es
+    # no-op por sí solo).
+    mcp_patch = data.get("mcp_server")
+    if isinstance(mcp_patch, dict):
+        if mcp_patch.get("enabled") is False:
+            await agent_bridge.unregister_mcp()
+        elif mcp_patch.get("enabled") is True:
+            mcp_listen_port = getattr(app.state, "glyvex_port", None)
+            if mcp_listen_port:
+                await agent_bridge.register_mcp(mcp_listen_port)
     logger.info("config actualizada: %s", _redact_secrets(data))
     return config.data
 
@@ -275,6 +305,24 @@ api_router.include_router(agent_bridge.router, prefix="/agent-bridge", tags=["ag
 api_router.include_router(themes.router, prefix="/themes", tags=["themes"])
 
 app.include_router(api_router)
+
+# AG-2: servidor MCP (Streamable HTTP stateless) en /mcp. Va DESPUÉS de los
+# routers /api (ganan el matching) y ANTES del montaje SPA de abajo (FastAPI
+# prueba rutas en orden; si el catch-all /{full_path} registrara primero, un
+# GET /mcp caería en index.html). El mount apunta al gate de mcp_server: con
+# config mcp_server.enabled off responde 404 sin tocar el servidor. Ver
+# Files\Docs\design\ag-2-mcp-server.md.
+app.mount("/mcp", mcp_server.mcp_asgi_app, name="mcp")
+
+
+@app.api_route("/mcp", methods=["GET", "POST"], include_in_schema=False)
+async def mcp_bare_redirect():
+    # El Mount solo matchea /mcp/... : la ruta pelada /mcp caería en el
+    # catch-all SPA de abajo (GET -> index.html, POST -> 405). 307 conserva
+    # método y body; los clientes MCP basados en fetch siguen el redirect por
+    # defecto. agent_bridge escribe la URL ya con barra — esto es cobertura
+    # por si un cliente normaliza la URL sin barra.
+    return RedirectResponse(url="/mcp/", status_code=307)
 
 # Caché del empaquetado: la webview carga la SPA desde el origen del backend
 # (http://127.0.0.1:<puerto>, puerto fijo por diseño — PERS-1). WebView2
@@ -416,6 +464,9 @@ if __name__ == '__main__':
     # uvicorn: el puerto reportado es el realmente en uso (sin ventana entre
     # bind y re-bind que otro proceso podría ocupar).
     sock, port = _bind_with_fallback(host, port)
+    # AG-2 U3: aquí queda fijado el puerto realmente en uso; el lifespan lo usa
+    # para escribir la entrada mcp.glyvex con la URL real (doc diseño §3.5).
+    app.state.glyvex_port = port
     # Marker para el orquestador: línea limpia con el puerto final. El
     # console hook (frozen sin consola) redirige stdout al log a menos que
     # GLYVEX_STDOUT_PIPE=1 (Tauri), en cuyo caso Rust lo lee por pipe.

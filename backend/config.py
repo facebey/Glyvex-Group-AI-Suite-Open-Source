@@ -380,6 +380,19 @@ class AgentBridgeConfig(BaseModel):
     enabled: bool = False
 
 
+class McpServerConfig(BaseModel):
+    """(AG-2) La Suite como servidor MCP: con enabled el backend sirve un servidor
+    MCP Streamable HTTP en /mcp (tools de estado, inventario y estimación de VRAM;
+    launch/stop en U2) y agent_bridge lo registra en el config de OpenCode. Off:
+    las peticiones a /mcp responden 404 y el bloque de OpenCode se retira.
+    Diseño completo: Files/Docs/design/ag-2-mcp-server.md."""
+
+    # Default ON: el servidor vive dentro del backend propio de la Suite (sin
+    # efectos externos); lo que toca archivos ajenos (el config de OpenCode) se
+    # registra aparte y sigue las garantías de AG-1.
+    enabled: bool = True
+
+
 class ConfigSchema(BaseModel):
     """Esquema completo de config.json, usado solo para validar/generar defaults."""
 
@@ -392,6 +405,7 @@ class ConfigSchema(BaseModel):
     tts: TTSConfig = Field(default_factory=TTSConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     agent_bridge: AgentBridgeConfig = Field(default_factory=AgentBridgeConfig)
+    mcp_server: McpServerConfig = Field(default_factory=McpServerConfig)
     logs: LogsConfig = Field(default_factory=LogsConfig)
     monitor: MonitorConfig = Field(default_factory=MonitorConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
