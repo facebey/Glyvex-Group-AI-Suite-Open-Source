@@ -686,6 +686,7 @@ _CREATION_FLAGS = (
 
 async def _run_capture(binary_path: str, arg: str, timeout: float = 15.0) -> str | None:
     """Corre `binary --<arg>` y devuelve su salida combinada, o None si falla."""
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             binary_path, arg,
@@ -696,6 +697,16 @@ async def _run_capture(binary_path: str, arg: str, timeout: float = 15.0) -> str
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except (OSError, asyncio.TimeoutError, NotImplementedError) as exc:
         logger.warning("no se pudo ejecutar %s %s: %s", binary_path, arg, exc)
+        # Un binario que nunca cierra stdout (busy-loop) deja el hijo VIVO al
+        # expirar el timeout: sin matarlo queda un proceso huérfano — con .bat
+        # en Windows sobrevive el cmd.exe con el bucle comiéndose un core.
+        # Se mata y se espera el cierre para liberar el transporte.
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
+            except (ProcessLookupError, OSError, asyncio.TimeoutError):
+                pass
         return None
     return out.decode("utf-8", errors="replace")
 

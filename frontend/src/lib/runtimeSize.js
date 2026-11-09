@@ -55,3 +55,19 @@ export function accelChoiceFromSource(sourceId) {
 export function accelOffered(gpuFamily) {
   return gpuFamily === "nvidia" || gpuFamily === "amd";
 }
+
+// RT-16: etiqueta legible del flavor instalado (status.accel_flavor desde la
+// meta, o derivado por el backend). "cpu", valores desconocidos o ausentes →
+// null: el badge se pinta SIN sufijo (runtime legado, modo experto o CPU).
+const FLAVOR_LABELS = {
+  "cuda-12.4": "CUDA 12.4",
+  "cuda-12.8": "CUDA 12.8",
+  "cuda-13.4": "CUDA 13.4",
+  vulkan: "Vulkan",
+  rocm: "ROCm",
+};
+
+export function accelFlavorLabel(flavor) {
+  if (typeof flavor !== "string") return null;
+  return FLAVOR_LABELS[flavor] ?? null;
+}

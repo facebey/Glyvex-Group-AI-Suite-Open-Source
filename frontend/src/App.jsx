@@ -11,7 +11,7 @@ import ExternalLink from "./components/ExternalLink.jsx";
 import { getStoredTheme, applyTheme, nextInList, isExternalThemeName, syncThemeLinks, THEMES, THEME_META, THEME_CHANGED_EVENT } from "./lib/theme.js";
 import MatrixRain from "./components/MatrixRain.jsx";
 import { consumeSSE } from "./lib/sse.js";
-import { runtimeSizeMb, accelOffered } from "./lib/runtimeSize.js";
+import { runtimeSizeMb, accelOffered, accelFlavorLabel } from "./lib/runtimeSize.js";
 import StatusWidget from "./components/StatusWidget.jsx";
 import LanguageSelector from "./components/LanguageSelector.jsx";
 import SidecarOverlay from "./components/SidecarOverlay.jsx";
@@ -160,6 +160,9 @@ function OnboardingScreen({ onDismiss }) {
   // la familia (espejo de ACCEL_SOURCES del backend en lib/runtimeSize.js).
   const offerAccel = accelOffered(runtime?.gpu_family);
   const sizeMb = runtimeSizeMb(runtime?.gpu_family, runtime?.accel_choice);
+  // RT-16: etiqueta del flavor instalado (p. ej. "CUDA 13.4") para el paso 3;
+  // null (CPU/legado/experto) → texto original sin sufijo.
+  const flavorLabel = accelFlavorLabel(runtime?.accel_flavor);
 
   let runtimeView;
   if (expertBinary) runtimeView = "expert";
@@ -191,7 +194,9 @@ function OnboardingScreen({ onDismiss }) {
             <>
               <div className="flex items-center gap-2 text-sm font-medium">
                 <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
-                {t("onboarding.runtimeReady", { pin: runtime?.pin })}
+                {flavorLabel
+                  ? t("onboarding.runtimeReadyFlavor", { pin: runtime?.pin, flavor: flavorLabel })
+                  : t("onboarding.runtimeReady", { pin: runtime?.pin })}
               </div>
               <p className="text-xs text-glyvex-muted">
                 {t("onboarding.runtimeReadySub", { gpu: gpuLabel })}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sizeDeltaMb, formatDeltaMb, runtimeSizeMb, accelOffered, accelChoiceFromSource } from "./runtimeSize.js";
+import { sizeDeltaMb, formatDeltaMb, runtimeSizeMb, accelOffered, accelChoiceFromSource, accelFlavorLabel } from "./runtimeSize.js";
 
 describe("sizeDeltaMb", () => {
   it("reemplazo (default): delta = nueva − anterior", () => {
@@ -92,5 +92,23 @@ describe("accelChoiceFromSource", () => {
     expect(accelChoiceFromSource("official")).toBe(null);
     expect(accelChoiceFromSource(null)).toBe(null);
     expect(accelChoiceFromSource(undefined)).toBe(null);
+  });
+});
+
+describe("accelFlavorLabel", () => {
+  it("mapea el flavor de la meta a la etiqueta del badge (RT-16)", () => {
+    expect(accelFlavorLabel("cuda-12.4")).toBe("CUDA 12.4");
+    expect(accelFlavorLabel("cuda-12.8")).toBe("CUDA 12.8");
+    expect(accelFlavorLabel("cuda-13.4")).toBe("CUDA 13.4");
+    expect(accelFlavorLabel("vulkan")).toBe("Vulkan");
+    expect(accelFlavorLabel("rocm")).toBe("ROCm");
+  });
+
+  it("cpu, desconocidos o ausentes → null (badge sin sufijo)", () => {
+    expect(accelFlavorLabel("cpu")).toBe(null);
+    expect(accelFlavorLabel("cuda-99.9")).toBe(null);
+    expect(accelFlavorLabel("")).toBe(null);
+    expect(accelFlavorLabel(null)).toBe(null);
+    expect(accelFlavorLabel(undefined)).toBe(null);
   });
 });

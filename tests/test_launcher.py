@@ -1198,6 +1198,32 @@ async def test_probe_binary_no_build_number(make_probeable_binary):
     assert info.version_line == "llama-server: version desconocida"
 
 
+async def test_run_capture_kills_hanging_binary(fake_llama_binary, tmp_path):
+    """Un binario que nunca cierra stdout (busy-loop) no puede dejar un proceso
+    huérfano al expirar el timeout del capture. Sin el kill, cada probe contra
+    un binario colgado deja un cmd.exe consumiendo un core entero (fue la causa
+    de los zombies entre corridas de tests y de las mediciones de CPU
+    contaminadas)."""
+    import psutil  # noqa: PLC0415 — solo este test necesita escanear procesos
+
+    out = await launcher_module._run_capture(fake_llama_binary, "--help", timeout=2.0)
+    assert out is None
+
+    # El kill + wait del capture ya confirmó el cierre; el margen es solo para
+    # que la tabla de procesos del SO refleje la salida antes del escaneo.
+    await asyncio.sleep(0.5)
+    # Se busca por el nombre del directorio tmp del test (único por test): los
+    # hijos de este test lo llevan en su cmdline y ningún proceso ajeno puede
+    # coincidir. (No la ruta completa: cmd.exe la reporta con rutas cortas 8.3.)
+    needle = tmp_path.name.lower()
+    leftovers = [
+        p.info["pid"]
+        for p in psutil.process_iter(["pid", "cmdline"])
+        if any(needle in arg.lower() for arg in p.info["cmdline"] or [])
+    ]
+    assert leftovers == []
+
+
 # --------------------------------------------------------------------------
 # Build 11003: validaciones de LaunchConfig (FA_QUANTS + rangos nuevos)
 # --------------------------------------------------------------------------

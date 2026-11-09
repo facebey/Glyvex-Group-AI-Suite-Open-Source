@@ -42,6 +42,7 @@ import { useTranslation } from "react-i18next";
 import CollapsiblePanel from "../components/ui/CollapsiblePanel.jsx";
 import BrowseButton from "../components/ui/BrowseButton.jsx";
 import { pickFile } from "../lib/pickPath.js";
+import { accelFlavorLabel } from "../lib/runtimeSize.js";
 
 // Espejo de SAMPLING_PRESETS de backend/launcher.py. Vive acá para poder
 // previsualizar los valores sin round-trip; si cambian en el backend, hay
@@ -2176,7 +2177,17 @@ export default function Launcher() {
                 className="text-xs px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
                 title={runtimeStatus.binary_path}
               >
-                {t("launcher.runtimeReady", { pin: runtimeStatus.pin })}
+                {(
+                  // RT-16: con flavor instalado el badge muestra qué CUDA/
+                  // aceleración quedó activa; sin dato (meta legacy o CPU) se
+                  // pinta el texto original sin sufijo.
+                  (() => {
+                    const flavor = accelFlavorLabel(runtimeStatus.accel_flavor);
+                    return flavor
+                      ? t("launcher.runtimeReadyFlavor", { pin: runtimeStatus.pin, flavor })
+                      : t("launcher.runtimeReady", { pin: runtimeStatus.pin });
+                  })()
+                )}
               </span>
             ) : runtimeStatus.state === "downloading" ? (
               <span className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded border border-glyvex-accent/40 bg-glyvex-accent/10 text-glyvex-accent">

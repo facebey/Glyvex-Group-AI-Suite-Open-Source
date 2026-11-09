@@ -45,6 +45,12 @@ def _force_cc(monkeypatch, cc):
     monkeypatch.setattr(runtime_module, "_max_gpu_compute_capability", lambda: cc)
 
 
+def _force_driver(monkeypatch, major):
+    """Fija el major del driver NVIDIA detectado (RT-15B). None simula sin
+    NVML o sin dato legible."""
+    monkeypatch.setattr(runtime_module, "_system_driver_major", lambda: major)
+
+
 def _patch_transport(monkeypatch, handler):
     """Reemplaza httpx.AsyncClient por uno con MockTransport(handler):
     _download_file usa el client INTERNO, así que la única forma de simular
@@ -359,9 +365,12 @@ def test_select_base_source_official_b11827_verifiable(monkeypatch):
 
 
 def test_select_accel_source_windows_default_cuda12(monkeypatch):
-    # RT-15: sin NVML (no se detecta la arch) Windows elige por defecto el
-    # bundle 12.x (win-cuda-12.4), que sí soporta Pascal; 13.x solo Blackwell.
+    # RT-15/RT-15B: sin NVML (ni arch ni driver) Windows elige por defecto el
+    # bundle 12.x (win-cuda-12.4), que sí soporta Pascal; 13.x requiere arch
+    # Blackwell o driver >= gate.
     _force_windows(monkeypatch)
+    _force_cc(monkeypatch, None)
+    _force_driver(monkeypatch, None)
     source = runtime_module._select_accel_source("nvidia")
     files = runtime_module._platform_files(source["files"])
     assert source is not None
@@ -389,10 +398,52 @@ def test_select_accel_source_maxwell_uses_cuda12_windows(monkeypatch):
 
 
 def test_select_accel_source_turing_uses_cuda12_windows(monkeypatch):
-    # Turing sm_75: sin Blackwell el default es 12.x (13.x también correría).
+    # Turing sm_75 con driver por debajo del gate (<590): 13.x no inicializaría
+    # la GPU → 12.x. RT-15B: el driver decide aquí, no la arquitectura sola.
     _force_windows(monkeypatch)
     _force_cc(monkeypatch, (7, 5))
+    _force_driver(monkeypatch, 570)
     assert runtime_module._select_accel_source("nvidia")["id"] == "official-cuda-12.4"
+
+
+def test_select_accel_source_ampere_cuda13_with_modern_driver_windows(monkeypatch):
+    # RT-15B: Ampere sm_86 (RTX 3090) con driver moderno (p. ej. 621) → CUDA
+    # 13.4 preferido: la 30 serie está oficialmente soportada por 13.x y el
+    # build 13.4 compila sm_86.
+    _force_windows(monkeypatch)
+    _force_cc(monkeypatch, (8, 6))
+    _force_driver(monkeypatch, 621)
+    source = runtime_module._select_accel_source("nvidia")
+    assert source["id"] == "official"
+    assert source["cuda_major"] == 13
+    assert all("cuda-13.4" in f["url"] for f in runtime_module._platform_files(source["files"]))
+
+
+def test_select_accel_source_ampere_cuda12_with_old_driver_windows(monkeypatch):
+    # RT-15B: la misma Ampere con driver < gate → 12.4 (13.4 no arrancaría).
+    _force_windows(monkeypatch)
+    _force_cc(monkeypatch, (8, 6))
+    _force_driver(monkeypatch, 570)
+    assert runtime_module._select_accel_source("nvidia")["id"] == "official-cuda-12.4"
+
+
+def test_select_accel_source_ampere_cuda13_with_modern_driver_linux(monkeypatch):
+    # RT-15B en Linux: Ampere + driver r59x → 13.4 linux (.tar.gz de "official").
+    _force_linux(monkeypatch)
+    _force_cc(monkeypatch, (8, 6))
+    _force_driver(monkeypatch, 591)
+    source = runtime_module._select_accel_source("nvidia")
+    assert source["id"] == "official"
+    assert all("cuda-13.4" in f["url"] for f in runtime_module._platform_files(source["files"]))
+
+
+def test_select_accel_source_ampere_cuda12_8_with_580_driver_linux(monkeypatch):
+    # RT-15B en Linux: driver 580 queda POR DEBAJO del gate (el build 13.4 se
+    # validó solo con r590+) → se baja CUDA 12.8, la ruta de mayor compatibilidad.
+    _force_linux(monkeypatch)
+    _force_cc(monkeypatch, (8, 6))
+    _force_driver(monkeypatch, 580)
+    assert runtime_module._select_accel_source("nvidia")["id"] == "official-cuda-12.8"
 
 
 def test_select_accel_source_blackwell_uses_cuda13_windows(monkeypatch):
@@ -415,7 +466,10 @@ def test_select_accel_source_blackwell_uses_cuda13_linux(monkeypatch):
 
 
 def test_required_cuda_major_by_architecture(monkeypatch):
-    # RT-15: 13 solo con Blackwell (cc major >= 10); 12 en el resto y sin NVML.
+    # RT-15: 13 solo con Blackwell (cc major >= 10) o arch < 7.5 → 12, en el
+    # resto y sin NVML. Con driver ilegible (None) la preferencia RT-15B no
+    # aplica: conducta legada intacta.
+    _force_driver(monkeypatch, None)
     cases = {
         None: 12,
         (5, 2): 12,   # Maxwell
@@ -429,6 +483,26 @@ def test_required_cuda_major_by_architecture(monkeypatch):
     for cc, expected in cases.items():
         _force_cc(monkeypatch, cc)
         assert runtime_module._required_cuda_major() == expected, cc
+
+
+def test_required_cuda_major_driver_gate(monkeypatch):
+    # RT-15B: con driver legible, 13 se prefiere solo en el rango de
+    # arquitectura que CUDA 13 soporta (7.5 ≤ cc < 10) Y con driver >= gate.
+    cases = {
+        ((6, 1), 621): 12,    # Pascal: driver alto NO la habilita (13 la tiró)
+        ((7, 4), 621): 12,    # Volta: innegociable por arquitectura
+        ((7, 5), 590): 13,    # Turing justo en el gate → 13
+        ((7, 5), 589): 12,    # Turing bajo el gate → 12
+        ((8, 6), 621): 13,    # Ampere (3090) con driver moderno → 13 preferido
+        ((8, 6), 580): 12,    # Ampere con driver docs-mínimo pero bajo el gate
+        ((8, 6), None): 12,   # driver ilegible → safe default 12
+        ((9, 0), 591): 13,    # Hopper con driver r59x
+        ((12, 0), None): 13,  # Blackwell no necesita driver legible: 12.x no la compila
+    }
+    for (cc, drv), expected in cases.items():
+        _force_cc(monkeypatch, cc)
+        _force_driver(monkeypatch, drv)
+        assert runtime_module._required_cuda_major() == expected, (cc, drv)
 
 
 def test_cuda_note_only_for_pre_turing_arch(monkeypatch):
@@ -460,7 +534,10 @@ def test_select_accel_source_stub_without_cuda_major(monkeypatch):
 
 def test_platform_files_selects_current_platform(monkeypatch):
     # RT-14: el catálogo es compartido win+linux; cada plataforma ve solo
-    # sus archives (.zip vs .tar.gz).
+    # sus archives (.zip vs .tar.gz). Sin NVML (RT-15/RT-15B safe default 12)
+    # para que la fuente elegida sea determinista en cualquier máquina.
+    _force_cc(monkeypatch, None)
+    _force_driver(monkeypatch, None)
     _force_linux(monkeypatch)
     base_files = runtime_module._platform_files(
         runtime_module._select_base_source()["files"]
@@ -469,7 +546,8 @@ def test_platform_files_selects_current_platform(monkeypatch):
         "llama-b11827-bin-ubuntu-x64.tar.gz",
     ]
     accel = runtime_module._select_accel_source("nvidia")
-    # Linux elige 12.8 (primera fuente): CUDA 13.4 exige driver >=590.
+    # Sin NVML → safe default 12 → en Linux la primera fuente verificable
+    # (CUDA 13.4 exigiría arch ≥7.5 con driver >= gate).
     assert accel["id"] == "official-cuda-12.8"
     accel_files = runtime_module._platform_files(accel["files"])
     assert [f["url"].rsplit("/", 1)[-1] for f in accel_files] == [
@@ -684,7 +762,64 @@ def test_status_ready_with_meta(monkeypatch):
     assert st["binary_path"] == str(d / runtime_module.BINARY_NAME)
     assert st["build"] == "b11827"
     assert st["source"] == "official"
+    # RT-16: meta legacy sin accel_source ni accel_flavor → None (la UI pinta
+    # el badge sin sufijo; no hay dato de qué aceleración quedó instalada).
+    assert st["accel_flavor"] is None
     assert st["size_mb"] is not None
+
+
+def test_status_accel_flavor_from_meta_and_fallbacks(monkeypatch):
+    # RT-16: manda el flavor escrito al instalar; sin él se deriva del catálogo
+    # por accel_source; fuente desconocida o ausente → None (badge sin sufijo).
+    _force_windows(monkeypatch)
+    d = runtime_module.runtime_dir()
+    d.mkdir(parents=True)
+    (d / runtime_module.BINARY_NAME).write_bytes(b"FAKE-EXE")
+    meta_path = d / runtime_module.META_FILENAME
+
+    def write_meta(meta: dict):
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        return runtime_module.runtime_status()["accel_flavor"]
+
+    # Meta nueva: el campo guarda lo que se instaló, aunque el catálogo luego
+    # cambie de idea (el pin no se resuelve al revén).
+    assert write_meta({
+        "state": "ready", "build": "b11827", "source": "official",
+        "accel": "nvidia", "accel_source": "official-cuda-12.4",
+        "accel_flavor": "cuda-12.4",
+    }) == "cuda-12.4"
+    # Meta legacy: se deriva del catálogo.
+    assert write_meta({
+        "state": "ready", "build": "b11827", "source": "official",
+        "accel": "nvidia", "accel_source": "official-cuda-12.4",
+    }) == "cuda-12.4"
+    # Sin aceleración (degradado) pero con flavor "cpu" en la meta: pasa tal cual.
+    assert write_meta({
+        "state": "ready", "build": "b11827", "source": "official",
+        "accel": None, "accel_source": None, "accel_flavor": "cpu",
+    }) == "cpu"
+    # Meta sin flavor ni accel_source, o con un id de un pin viejo: None.
+    assert write_meta({"state": "ready", "build": "b11827", "source": "official"}) is None
+    assert write_meta({
+        "state": "ready", "build": "b11146", "source": "official",
+        "accel": "nvidia", "accel_source": "official-cuda-11.8",
+    }) is None
+
+
+def test_accel_flavors_declared_in_catalog(monkeypatch):
+    # RT-16: toda fuente del catálogo real declara su flavor estable — el
+    # frontend nunca lo parsea del id (inestable entre pins).
+    expected = {
+        "official-cuda-12.4": "cuda-12.4",
+        "official-cuda-12.8": "cuda-12.8",
+        "official": "cuda-13.4",
+        "official-vulkan": "vulkan",
+        "official-rocm-10.0": "rocm",
+    }
+    for source_id, flavor in expected.items():
+        assert runtime_module._accel_flavor_from_catalog(source_id) == flavor
+    assert runtime_module._accel_flavor_from_catalog("inexistente") is None
+    assert runtime_module._accel_flavor_from_catalog(None) is None
 
 
 def test_status_error_from_meta(monkeypatch):
@@ -842,6 +977,7 @@ def _stub_sources(monkeypatch, base_body: bytes, accel_body: bytes | None, famil
         accel_sources[family] = [{
             "id": "fake-accel",
             "accel": accel_tag,
+            "flavor": "fake-flavor",
             "files": [{"url": accel_url,
                        "sha256": hashlib.sha256(accel_body).hexdigest()}],
         }]
@@ -883,6 +1019,9 @@ async def test_download_two_stage_with_accel(monkeypatch, tmp_path):
     meta = json.loads((d / runtime_module.META_FILENAME).read_text(encoding="utf-8"))
     assert meta["accel"] == "nvidia"
     assert meta["accel_source"] == "fake-accel"
+    # RT-16: la meta registra el flavor declarado por la fuente.
+    assert meta["accel_flavor"] == "fake-flavor"
+    assert st["accel_flavor"] == "fake-flavor"
     assert set(meta["files"]) == {"base.zip", "accel.zip"}
 
 
@@ -956,11 +1095,14 @@ async def test_download_choice_unavailable_degrades_with_error(monkeypatch, tmp_
     assert st["state"] == "ready"
     assert st["accel"] is None
     assert st["accel_source"] is None
+    # RT-16: un runtime degradado registra flavor "cpu".
+    assert st["accel_flavor"] == "cpu"
     assert "rocm" in (st["accel_error"] or "")
     d = runtime_module.runtime_dir()
     assert (d / "llama-server.exe").read_bytes() == b"EXE"
     meta = json.loads((d / runtime_module.META_FILENAME).read_text(encoding="utf-8"))
     assert "rocm" in (meta["accel_error"] or "")
+    assert meta["accel_flavor"] == "cpu"
 
 
 async def test_download_accel_failure_degrades_to_cpu(monkeypatch, tmp_path):
@@ -993,6 +1135,7 @@ async def test_download_accel_failure_degrades_to_cpu(monkeypatch, tmp_path):
     assert st["state"] == "ready"
     assert st["accel"] is None
     assert st["accel_error"] is not None
+    assert st["accel_flavor"] == "cpu"  # RT-16: degradado → flavor "cpu"
     d = runtime_module.runtime_dir()
     assert (d / "llama-server.exe").exists()
     # Sin restos de la etapa fallida.

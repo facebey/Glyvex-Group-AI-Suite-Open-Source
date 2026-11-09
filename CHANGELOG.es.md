@@ -7,6 +7,36 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-11-06
+
+El runtime ahora elige su bundle CUDA **teniendo en cuenta el driver
+instalado**, no solo la arquitectura de la GPU, y la UI dice qué flavor quedó
+realmente instalado: una máquina Ampere→Hopper con driver actual recibe CUDA
+13.x en lugar de 12.x — y puede verlo en el badge. Publicado en el canal de
+actualización: las instalaciones en 0.13.x lo reciben.
+
+### Añadido
+- **El badge del runtime muestra el flavor instalado (RT-16)**: cada
+  instalación registra qué paquete de aceleración puso realmente (`cuda-12.4`,
+  `cuda-12.8`, `cuda-13.4`, `vulkan`, `rocm`, o `cpu` cuando queda degradado)
+  en la meta del runtime; `/api/runtime/status` lo expone como `accel_flavor`
+  (derivado del catálogo para instalaciones previas), y los badges del Launcher
+  y del onboarding lo muestran — p. ej. "Runtime: b11827 · CUDA 13.4 listo".
+  Las instalaciones sin datos suficientes muestran el badge simple de antes.
+
+### Cambiado
+- **Selección de bundle CUDA consciente del driver (RT-15B)**: la descarga del
+  runtime ahora lee el driver NVIDIA instalado (`nvmlSystemGetDriverVersion`) y
+  elige el CUDA más nuevo compatible con AMBAS cosas: la arquitectura y ese
+  driver. Turing→Hopper (compute capability 7.5–9.x) recibe CUDA 13.x solo con
+  driver en o sobre el gate, y mantiene el bundle 12.x por debajo;
+  Maxwell/Pascal/Volta (cc < 7.5) toman siempre 12.x — CUDA 13 los tiró;
+  Blackwell toma siempre 13.x; y sin NVML queda intacto el safe default 12.x
+  anterior. El gate es 590 (conservador: las docs de NVIDIA indican ≥580, el
+  build 13.4 pinnado está validado con r590+) y vive en una sola constante de
+  `backend/runtime.py`. Verificado en vivo en una RTX 3090 con driver 621.14:
+  el runtime gestionado ahora instala `win-cuda-13.4`.
+
 ## [0.13.0] — 2026-11-05
 
 La release donde la Suite habla con OpenCode directamente: el backend ahora

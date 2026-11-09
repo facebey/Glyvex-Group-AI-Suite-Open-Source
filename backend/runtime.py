@@ -135,11 +135,16 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
         {
             # Windows, CUDA 12.4: soporta Maxwell (sm_50)→Hopper (sm_90) e
             # incluye Pascal (sm_61, p. ej. 1080 Ti), que CUDA 13.x TIRÓ.
-            # Selección por arquitectura (RT-15): cc major < 10 → 12.x por
-            # defecto (bundle autocontenido, el usuario no instala toolkit).
+            # Selección (RT-15 + RT-15B): 12.x para cc < 7.5 (innegociable)
+            # y para 7.5 ≤ cc < 10 cuando el driver instalado no llega al gate
+            # de CUDA 13 (bundle autocontenido, el usuario no instala toolkit).
             "id": "official-cuda-12.4",
             "description": "Build oficial ggml-org/llama.cpp b11827 (CUDA 12.4 + cuDART, Windows)",
             "cuda_major": 12,
+            # (RT-16) Flavor legible que se guarda en la meta y se muestra en
+            # el badge: NUNCA se deriva del id (los ids no son estables entre
+            # pins — "official" fue CUDA 12.4 en b11349 y es 13.4 aquí).
+            "flavor": "cuda-12.4",
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
@@ -157,11 +162,13 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
         },
         {
             # Linux, CUDA 12.8: máxima compatibilidad — corre con driver
-            # NVIDIA >=570 (p. ej. 580.x). CUDA 13.4 exige driver >=590, así
-            # que en equipos con driver 580 la GPU jamás se inicializaría.
+            # NVIDIA >=570 (p. ej. 580.x). CUDA 13.4 exige driver >=590
+            # (gate RT-15B: _CUDA13_DRIVER_GATE), así que en equipos con
+            # driver 580 la GPU jamás se inicializaría con 13.4.
             "id": "official-cuda-12.8",
             "description": "Build oficial ggml-org/llama.cpp b11827 (CUDA 12.8 + cuDART, Linux)",
             "cuda_major": 12,
+            "flavor": "cuda-12.8",
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
@@ -178,13 +185,15 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
             ],
         },
         {
-            # CUDA 13.4: solo Blackwell (sm_100/120/121, cc major >= 10) o
-            # elección explícita. TIRÓ Maxwell/Pascal/Volta (13.4 compila
-            # 75/80/86/89/90/120a/121a; cero Pascal), por eso no es el
-            # default para arquitecturas <= 9.x (RT-15).
+            # CUDA 13.4: Blackwell (sm_100/120/121, cc major >= 10) siempre;
+            # Turing→Hopper (7.5 ≤ cc < 10) solo si el driver instalado llega
+            # al gate _CUDA13_DRIVER_GATE (RT-15B); o elección explícita.
+            # TIRÓ Maxwell/Pascal/Volta (13.4 compila 75/80/86/89/90/120a/
+            # 121a; cero Pascal), por eso NUNCA es default para cc < 7.5 (RT-15).
             "id": "official",
             "description": "Build oficial ggml-org/llama.cpp b11827 (CUDA 13.4 + cuDART)",
             "cuda_major": 13,
+            "flavor": "cuda-13.4",
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
@@ -224,6 +233,7 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
             # (config.runtime.accel). Las familias sin tag no tienen selector.
             "id": "official-vulkan",
             "accel": "vulkan",
+            "flavor": "vulkan",
             "description": "Build oficial ggml-org/llama.cpp b11827 (Vulkan, Windows)",
             "files": [
                 {
@@ -243,6 +253,7 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
             # y la comparativa de la Parte 2 decide si ROCm pasa a default.
             "id": "official-rocm-10.0",
             "accel": "rocm",
+            "flavor": "rocm",
             "description": "Build oficial ggml-org/llama.cpp b11827 (ROCm 10.0, Windows)",
             "files": [
                 {
@@ -313,15 +324,47 @@ def _max_gpu_compute_capability() -> tuple[int, int] | None:
         return None
 
 
+def _system_driver_major() -> int | None:
+    """(RT-15B) Major del driver NVIDIA instalado vía NVML ('621.14' → 621,
+    '590.44.01' → 590). None si NVML no está disponible o la versión no se
+    puede leer. Solo se consulta cuando la arquitectura es elegible para
+    CUDA 13 pero no obligada (7.5 ≤ cc < 10)."""
+    if pynvml is None:
+        return None
+    try:
+        pynvml.nvmlInit()
+        major = int(str(pynvml.nvmlSystemGetDriverVersion()).split(".", 1)[0])
+        return major if major > 0 else None
+    except Exception:
+        return None
+
+
+# Gate de driver para bajar CUDA 13.x (RT-15B). Docs NVIDIA: CUDA 13.x
+# requiere driver r580+ (minor version compatibility); el build upstream
+# 13.4 pinnado aquí se validó en Linux solo con r590+ (ver ACCEL_SOURCES),
+# así que el gate usa el valor conservativo que satisface ambos. Ajustable
+# tras confirmación en vivo (QA del ítem).
+_CUDA13_DRIVER_GATE = 590
+
+
 def _required_cuda_major() -> int:
-    """Mayor de CUDA del bundle según la arquitectura detectada (RT-15):
-    13 solo si alguna GPU es Blackwell (sm_100/120/121, cc major >= 10 —
-    CUDA 12.x no la compila); 12 en caso contrario, que cubre Maxwell (5.0)→
-    Hopper (9.0) e incluye Pascal (6.1), que CUDA 13.x tiró. Sin NVML (no se
-    detecta la arch) → 12 por defecto: safe default, cubre el caso Pascal muy
-    común y solo falla en Blackwell (raro)."""
+    """Mayor de CUDA del bundle según arquitectura + driver instalado
+    (RT-15 extendido por RT-15B):
+    - Blackwell (cc major >= 10): 13 siempre — CUDA 12.x no la compila.
+    - Maxwell/Pascal/Volta (cc < 7.5): 12 siempre — CUDA 13.x los tiró.
+    - Turing→Hopper (7.5 ≤ cc < 10): ambas rutas corren; se prefiere 13 si
+      el driver instalado llega al gate, si no 12.
+    - Sin NVML (no se detecta arch ni driver) → 12: safe default intacto,
+      cubre el caso Pascal muy común y solo falla en Blackwell (raro)."""
     cc = _max_gpu_compute_capability()
-    if cc is not None and cc[0] >= 10:
+    if cc is None:
+        return 12
+    if cc[0] >= 10:
+        return 13
+    if cc < (7, 5):
+        return 12
+    drv = _system_driver_major()
+    if drv is not None and drv >= _CUDA13_DRIVER_GATE:
         return 13
     return 12
 
@@ -346,8 +389,8 @@ def _source_verifiable(source: dict) -> bool:
 
 def _select_accel_source(family: str, accel_choice: str | None = None) -> dict | None:
     """Fuente de aceleración verificable para la familia + plataforma, elegida
-    por el mayor de CUDA que requiere la arquitectura de la GPU (RT-15).
-    None si no hay paquete → runtime degradado a CPU (no error).
+    por el mayor de CUDA que requiere la arquitectura de la GPU + su driver
+    (RT-15/RT-15B). None si no hay paquete → runtime degradado a CPU (no error).
 
     accel_choice (RT-10 B2): elección explícita del usuario para familias con
     más de una ruta ("vulkan"/"rocm"). Con elección solo cuentan las fuentes
@@ -393,6 +436,21 @@ def accel_choices(family: str) -> list[str]:
     ]
 
 
+def _accel_flavor_from_catalog(source_id: str | None) -> str | None:
+    """(RT-16) Flavor declarado por el catálogo para un id de fuente
+    ('official-cuda-12.4' → 'cuda-12.4', 'official' → 'cuda-13.4'). None si el
+    id no está en el catálogo (meta de un pin viejo: no hay qué mostrar).
+    Se busca por id en el catálogo, NO se parsea del id: los ids no son
+    estables entre pins."""
+    if not source_id:
+        return None
+    for sources in ACCEL_SOURCES.values():
+        for s in sources:
+            if s.get("id") == source_id:
+                return s.get("flavor")
+    return None
+
+
 def _read_meta() -> dict | None:
     path = runtime_dir() / META_FILENAME
     if not path.exists():
@@ -431,6 +489,7 @@ def runtime_status() -> dict:
         "source": None,
         "accel": None,
         "accel_source": None,
+        "accel_flavor": None,
         "accel_error": None,
         "cuda_note": None,
         "error": None,
@@ -454,6 +513,12 @@ def runtime_status() -> dict:
         # Qué fuente de aceleración quedó instalada (B2): la UI la usa para el
         # selector de rutas AMD y para mostrar la backend activa.
         status["accel_source"] = (meta or {}).get("accel_source")
+        # (RT-16) Flavor instalado para el badge ("cuda-13.4"/"vulkan"/"cpu"):
+        # manda el valor escrito al instalar; metas legacy (sin el campo) se
+        # derivan del catálogo por accel_source. None → la UI pinta el badge
+        # sin sufijo (runtime legado o modo experto).
+        status["accel_flavor"] = (meta or {}).get(
+            "accel_flavor") or _accel_flavor_from_catalog((meta or {}).get("accel_source"))
         status["accel_error"] = (meta or {}).get("accel_error")
         status["cuda_note"] = (meta or {}).get("cuda_note")
         status["size_mb"] = _dir_size_mb(d)
@@ -837,6 +902,9 @@ async def download_runtime(
             "source": base["id"],
             "accel": family if accel_id else None,
             "accel_source": accel_id,
+            # (RT-16) Flavor estable para el badge: "cpu" si el runtime quedó
+            # degradado; None si la fuente fake no lo declara (fixtures).
+            "accel_flavor": "cpu" if not accel_id else accel.get("flavor"),
             "accel_error": accel_error,
             "cuda_note": _cuda_note() if accel_id else None,
             "date": datetime.now(timezone.utc).isoformat(),

@@ -616,20 +616,24 @@ class MetricsCollector:
         results: list[ProcessMetrics] = []
         now = time.time()
         try:
-            for proc in psutil.process_iter(["pid", "name", "num_threads", "create_time"]):
+            # num_threads y create_time se piden SOLO a los procesos que pasan
+            # el filtro: incluirlos en process_iter los cobra de todos los
+            # procesos del sistema (~4 s por pasada aquí), lo que superaba el
+            # intervalo del broadcast loop, dejaba el sleep en 0 y mantenía un
+            # núcleo al 100% con la app sin usar.
+            for proc in psutil.process_iter(["pid", "name"]):
                 try:
-                    info = proc.info
-                    name = (info.get("name") or "").lower()
+                    name = (proc.info.get("name") or "").lower()
                     if not any(target in name for target in TARGET_PROCESS_NAMES):
                         continue
                     rss_bytes = proc.memory_info().rss
                     results.append(ProcessMetrics(
-                        pid=info["pid"],
-                        name=info.get("name") or "",
+                        pid=proc.pid,
+                        name=proc.info.get("name") or "",
                         cpu_percent=proc.cpu_percent(),
                         ram_rss_mb=round(rss_bytes / (1024**2), 1),
-                        threads=info.get("num_threads") or 0,
-                        uptime_s=round(now - info["create_time"], 1) if info.get("create_time") else 0.0,
+                        threads=proc.num_threads(),
+                        uptime_s=round(now - proc.create_time(), 1),
                     ))
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
