@@ -32,10 +32,12 @@ jobs:
           languages: ${{ matrix.language }}
           source-root: ${{ matrix.language == 'javascript' && 'frontend' || '.' }}
           config-file: ./.github/codeql/codeql-config.yml
-          # cache:false desactiva la trap-cache interna: cada entrada suma
-          # ~16 MB al storage Actions (cuota Free 0.5 GB) por commit analizado.
-          # Sin cache el analisis es algo mas lento; la cuota lo prioriza.
-          cache: false
+          # trap-caching:false desactiva la trap-cache interna: cada entrada
+          # suma ~16 MB al storage Actions (cuota Free 0.5 GB) por commit
+          # analizado. Ojo: en codeql-action v3 el input se llama trap-caching;
+          # 'cache' fue renombrado y hoy solo emite un warning sin tener efecto.
+          # Sin trap-cache el analisis es algo mas lento; la cuota lo prioriza.
+          trap-caching: false
       # Sin build step: python no compila y el JS se extrae estaticamente.
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
