@@ -7,5 +7,5 @@
 # pytest-asyncio >=0.24 es requerido: tests/pytest.ini usa
 # `asyncio_default_fixture_loop_scope` (opcion disponible desde 0.24).
 pytest>=9.1.1
-pytest-asyncio>=1.4.0
+pytest-asyncio>=1.4.1.post1
 pytest-cov>=7.1.0
