@@ -7,6 +7,53 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-11-13
+
+The embedded runtime moves to **llama.cpp b12359** (the v1.0.0-dev line), and
+**speculative decoding becomes multi-mode**: each launch can pick its assistant
+draft — MTP or an external draft GGUF — with real per-mode VRAM budgeting and
+a preflight before loading.
+
+### Added
+- **Multi-mode speculative decoding (LL-4)**: the Launcher's spec selector now
+  exposes the modes the build supports (`auto`, `none`, MTP assistant, external
+  draft GGUF — the `dflash` family included) with per-mode fields; draft
+  sidecars are discovered and grouped with their base model (MTP companion,
+  mmproj); the draft's VRAM is budgeted per mode in `/vram-estimate` and the
+  Estimated VRAM card; a draft whose vocabulary doesn't match the base model is
+  detected before loading; and when llama-server rejects a draft, the UI shows
+  the real reason read from the server log instead of a generic failure.
+- **AMD GPUs on Linux (preview)**: the managed-runtime catalog adds the
+  `ubuntu-vulkan` and `ubuntu-rocm-10.0` packages, and a sysfs-PCI fallback
+  recognizes AMD/Intel GPUs when NVML isn't available. Before this release a
+  linux AMD machine could only run on CPU; now it can receive the Vulkan or
+  ROCm package. Preview: not yet validated on real linux hardware.
+- **Runtime badge with CUDA 13.5**: the flavor badge shows 13.5 for the new
+  Blackwell bundle; the 13.4 label is kept so installs made before the bump
+  still display the flavor they actually have.
+
+### Changed
+- **Runtime: llama.cpp pin b11827 → b12359**. Same two-level install (base
+  ~24 MB + CUDA/Vulkan/ROCm acceleration) and the same driver/architecture
+  split (CUDA 12.4 for Pascal→Hopper, CUDA 13.5 for Blackwell with driver
+  ≥590). Measured on an RTX 3090 with an A/B of matched methodology: model
+  loading ~20% faster; pp/decode equal or better on dense and on MoE
+  full-GPU (Qwen3-Coder-30B-A3B: pp 3435 t/s, decode 154.3 t/s at ctx
+  65536); MTP and DFlash2 drafts work; mtmd vision sidecars load unchanged.
+  Every catalog asset is re-pinned with its sha256, and the download-size
+  estimates now match the new archives.
+- **The advanced parameter `--defrag-thold` is removed**: it is the only flag
+  upstream removed between b11827 and b12359. Configs saved with that field
+  still load fine; its value simply becomes inert.
+
+### Fixed
+- **Idle CPU burn**: the metrics loop now asks psutil only for the attributes
+  of the processes it actually matched — the Suite no longer burns CPU while
+  idle.
+- **Probe zombie processes**: a binary probe that times out now kills its
+  child; a failed probe no longer leaves `cmd.exe` or `llama-server` processes
+  behind.
+
 ## [0.14.0] — 2026-11-06
 
 The runtime now picks its CUDA bundle with **the installed driver in mind**, not

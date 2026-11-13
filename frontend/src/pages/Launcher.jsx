@@ -43,6 +43,19 @@ import CollapsiblePanel from "../components/ui/CollapsiblePanel.jsx";
 import BrowseButton from "../components/ui/BrowseButton.jsx";
 import { pickFile } from "../lib/pickPath.js";
 import { accelFlavorLabel } from "../lib/runtimeSize.js";
+import {
+  NGRAM_DEFAULTS,
+  NGRAM_FIELD_FLAGS,
+  SPEC_MODES,
+  defaultSpecMode,
+  isDraftMode,
+  isNgramMode,
+  migrateLegacySpecFields,
+  ngramFieldsForMode,
+  specModeWarningKey,
+  specRequiresDraftFile,
+  specTypeForDraftFilename,
+} from "../lib/specModes.js";
 
 // Espejo de SAMPLING_PRESETS de backend/launcher.py. Vive acá para poder
 // previsualizar los valores sin round-trip; si cambian en el backend, hay
@@ -98,7 +111,15 @@ const DEFAULT_LAUNCH_CONFIG = {
   cache_type_v: "q8_0",
   flash_attn: true,
   load_mode: "auto",
-  mtp_draft_model: "",
+  // -- Especulación multi-modo (LL-4 U4) --------------------------------
+  // Selector 1:1 con --spec-type del binario (ver lib/specModes.js).
+  // "none" = sin especulación: el mismo comportamiento que las configs
+  // viejas sin campos MTP. Templates/configs guardados con los campos
+  // viejos se normalizan con migrateLegacySpecFields al aplicarlos.
+  spec_type: "none",
+  // Archivo .gguf del draft para los modos draft. Reemplaza al viejo
+  // mtp_draft_model. draft-mtp con cabeza embebida NO lo necesita.
+  draft_model: "",
   mtp_embedded: false,
   n_draft: 5,
   // Pisos de la especulación. null = no emitir (default de la build:
@@ -109,6 +130,14 @@ const DEFAULT_LAUNCH_CONFIG = {
   // con aceptación prácticamente idéntica. "" = no pasar el flag.
   cache_type_k_draft: "q8_0",
   cache_type_v_draft: "q8_0",
+  // Modos ngram: null = no emitir el flag -> defaults del binario (se
+  // muestran como placeholder desde NGRAM_DEFAULTS en lib/specModes.js).
+  ngram_size_n: null,
+  ngram_size_m: null,
+  ngram_min_hits: null,
+  ngram_n_min: null,
+  ngram_n_max: null,
+  ngram_n_match: null,
   mmproj_path: "",
   lora_path: "",
   lora_scale: 1.0,
@@ -127,7 +156,6 @@ const DEFAULT_LAUNCH_CONFIG = {
   numa: false,
   no_kv_offload: false,
   cache_reuse: 0,
-  defrag_thold: -1,
   grp_attn_n: 1,
   grp_attn_w: 512,
   jinja: true,
@@ -178,7 +206,6 @@ const TOGGLE_GROUPS = {
   mmproj: { flag: "--mmproj", fields: ["mmproj_path"] },
   rope: { flag: "--rope-scaling", fields: ["rope_scaling_type", "rope_freq_base", "yarn_ext_factor"] },
   cache_reuse: { flag: "--cache-reuse", fields: ["cache_reuse"] },
-  defrag_thold: { flag: "--defrag-thold", fields: ["defrag_thold"] },
   grp_attn: { flag: "--grp-attn-n", fields: ["grp_attn_n", "grp_attn_w"] },
   cache_ram: { flag: "--cache-ram", fields: ["cache_ram_mib"] },
   fit: { flag: "--fit", fields: ["fit"] },
@@ -209,6 +236,23 @@ function togglesFromConfig(cfg) {
   return out;
 }
 
+// Textos del panel de módulos para cada modo/campo de especulación: son
+// claves i18n bajo launcher.* (definidas en es.json y en.json en espejo).
+const DRAFT_HINT_KEYS = {
+  "draft-mtp": "specDraftHintDraftMtp",
+  "draft-dflash": "specDraftHintDraftDflash",
+  "draft-simple": "specDraftHintDraftSimple",
+  "draft-eagle3": "specDraftHintDraftEagle3",
+};
+const NGRAM_HINT_KEYS = {
+  ngram_size_n: "ngramSizeNHint",
+  ngram_size_m: "ngramSizeMHint",
+  ngram_min_hits: "ngramMinHitsHint",
+  ngram_n_min: "ngramNMinHint",
+  ngram_n_max: "ngramNMaxHint",
+  ngram_n_match: "ngramNMatchHint",
+};
+
 const TEMPLATE_FIELDS = [
   // host/port: sin esto el template no conservaba el endpoint configurado
   // (al reaplicarlo volvía el default 127.0.0.1:8080).
@@ -217,10 +261,12 @@ const TEMPLATE_FIELDS = [
   "n_ctx", "n_batch", "n_ubatch", "n_gpu_layers", "n_cpu_moe", "moe_cache_mib", "gpu_mode",
   "cache_type_k", "cache_type_v", "flash_attn", "load_mode",
   "n_draft", "n_parallel", "cache_type_k_draft", "cache_type_v_draft",
-  // Especulación/MTP: sin mtp_embedded/mtp_draft_model el template guardaba
-  // los parámetros de draft pero no la activación (receta rota); los pisos
-  // de confianza n/p_draft_min se perdían al reaplicar.
-  "n_draft_min", "p_draft_min", "mtp_embedded", "mtp_draft_model",
+  // Especulación multi-modo (LL-4 U4): el modo y la activación del draft
+  // tienen que viajar con los parámetros, si no la receta reaplicada queda
+  // con el draft inactivo. Los campos ngram viajan null = default del binario.
+  "n_draft_min", "p_draft_min", "spec_type", "draft_model", "mtp_embedded",
+  "ngram_size_n", "ngram_size_m", "ngram_min_hits",
+  "ngram_n_min", "ngram_n_max", "ngram_n_match",
   // LoRA: sin lora_path la escala es inútil; juntos reproducen el launch.
   "lora_path", "lora_scale",
   // Razonamiento
@@ -235,7 +281,7 @@ const TEMPLATE_FIELDS = [
   "kv_unified_per_slot", "sleep_idle_seconds", "warmup", "lazy_mode",
   // Parámetros avanzados
   "rope_freq_base", "rope_scaling_type", "yarn_ext_factor",
-  "numa", "no_kv_offload", "cache_reuse", "defrag_thold",
+  "numa", "no_kv_offload", "cache_reuse",
   "grp_attn_n", "grp_attn_w", "jinja", "reasoning_effort",
   // Fuera a propósito: mmproj_path (lo aporta el modelo seleccionado),
   // api_key/log_file/backend (fijos, no son parte de la receta).
@@ -647,10 +693,10 @@ function GroupCard({ group, onSelect }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [selectedBaseId, setSelectedBaseId] = useState(group.base_models[0]?.id ?? null);
-  const [useMtp, setUseMtp] = useState(false);
-  const [mtpSource, setMtpSource] = useState("none");       // "embedded" | "sidecar" | "manual" | "none"
-  const [selectedMtpId, setSelectedMtpId] = useState(group.mtp_models[0]?.id ?? null);
-  const [manualMtpPath, setManualMtpPath] = useState("");
+  const [useSpec, setUseSpec] = useState(false);
+  const [specSource, setSpecSource] = useState("none");     // "embedded" | "sidecar" | "manual" | "none"
+  const [selectedDraftId, setSelectedDraftId] = useState(null);
+  const [manualDraftPath, setManualDraftPath] = useState("");
   const [useMmproj, setUseMmproj] = useState(false);
   const [mmprojSource, setMmprojSource] = useState("none"); // "embedded" | "sidecar" | "manual" | "none"
   const [selectedMmprojId, setSelectedMmprojId] = useState(group.mmproj_models[0]?.id ?? null);
@@ -658,22 +704,29 @@ function GroupCard({ group, onSelect }) {
 
   // Apenas el usuario toca un control a mano, el autodetect deja de pisarlo
   // (incluso si después cambia de cuantización base).
-  const mtpTouchedRef = useRef(false);
+  const specTouchedRef = useRef(false);
   const mmprojTouchedRef = useRef(false);
 
   const selectedBase = group.base_models.find((m) => m.id === selectedBaseId) ?? null;
 
+  // Sidecars draft auto-detectables del grupo: la familia MTP (mtp-*) y la
+  // DFlash (draft_models, LL-4 U2). El modo resultante se decide por la
+  // familia real del archivo elegido (specTypeForDraftFilename), no por
+  // suponer "MTP" a todo draft.
+  const draftSidecars = [...(group.mtp_models ?? []), ...(group.draft_models ?? [])];
+  const draftId = selectedDraftId ?? draftSidecars[0]?.id ?? null;
+
   const hasEmbeddedMtp = Boolean(selectedBase?.mtp_embedded);
-  const hasSidecarMtp = group.mtp_models.length > 0;
+  const hasSidecarDraft = draftSidecars.length > 0;
   const hasEmbeddedVision = Boolean(selectedBase?.has_vision_embedded);
   const hasSidecarVision = group.mmproj_models.length > 0;
 
   // Opciones del picker: "manual" está SIEMPRE disponible como salida de
   // emergencia, aunque el scanner haya detectado algo — el detector puede
   // equivocarse, o el usuario simplemente puede preferir otro archivo.
-  const mtpOptions = [
+  const specOptions = [
     ...(hasEmbeddedMtp ? [["embedded", t("groupCard.embeddedInModel")]] : []),
-    ...(hasSidecarMtp ? [["sidecar", t("groupCard.detectedInFolder")]] : []),
+    ...(hasSidecarDraft ? [["sidecar", t("groupCard.detectedInFolder")]] : []),
     ["manual", t("groupCard.manualPath")],
   ];
   const visionOptions = [
@@ -686,11 +739,11 @@ function GroupCard({ group, onSelect }) {
   // el archivo aparte; si no hay ninguno, apagado. Se recalcula al cambiar de
   // cuantización base porque cada .gguf de la carpeta puede diferir.
   useEffect(() => {
-    if (mtpTouchedRef.current) return;
-    if (hasEmbeddedMtp) { setUseMtp(true); setMtpSource("embedded"); }
-    else if (hasSidecarMtp) { setUseMtp(true); setMtpSource("sidecar"); }
-    else { setUseMtp(false); setMtpSource("none"); }
-  }, [selectedBaseId, hasEmbeddedMtp, hasSidecarMtp]);
+    if (specTouchedRef.current) return;
+    if (hasEmbeddedMtp) { setUseSpec(true); setSpecSource("embedded"); }
+    else if (hasSidecarDraft) { setUseSpec(true); setSpecSource("sidecar"); }
+    else { setUseSpec(false); setSpecSource("none"); }
+  }, [selectedBaseId, hasEmbeddedMtp, hasSidecarDraft]);
 
   useEffect(() => {
     if (mmprojTouchedRef.current) return;
@@ -707,21 +760,40 @@ function GroupCard({ group, onSelect }) {
   // son asíncronas).
   function emitSelection(next = {}, announce = false) {
     if (!selectedBaseId) return;
-    const m = next.mtp ?? useMtp;
-    const ms = next.mtpSource ?? mtpSource;
-    const mtpId = next.mtpId ?? selectedMtpId;
-    const mtpManual = next.mtpManual ?? manualMtpPath;
+    const m = next.spec ?? useSpec;
+    const ms = next.specSrc ?? specSource;
+    const specDraftId = next.specId ?? draftId;
+    const specManual = next.specManual ?? manualDraftPath;
     const v = next.vision ?? useMmproj;
     const vs = next.visionSource ?? mmprojSource;
     const mmprojId = next.mmprojId ?? selectedMmprojId;
     const mmprojManual = next.mmprojManual ?? manualMmprojPath;
 
-    const mtpPath = m
-      ? (ms === "sidecar"
-          ? (group.mtp_models.find((x) => x.id === mtpId)?.path ?? "")
-          : ms === "manual" ? mtpManual.trim()
-          : "")
-      : "";
+    // El modo sigue el origen real del draft (misma regla de familia que el
+    // backend): embebido → draft-mtp sin archivo; sidecar o path manual →
+    // draft-mtp/draft-dflash según el nombre del archivo.
+    let specType = "none";
+    let draftPath = "";
+    let draftEmbedded = false;
+    if (m) {
+      if (ms === "embedded") {
+        specType = "draft-mtp";
+        draftEmbedded = true;
+      } else if (ms === "sidecar") {
+        const sidecar = draftSidecars.find((x) => x.id === specDraftId);
+        if (sidecar) {
+          specType = specTypeForDraftFilename(sidecar.filename ?? sidecar.name);
+          draftPath = sidecar.path ?? "";
+        } else {
+          specType = "draft-mtp";
+        }
+      } else if (ms === "manual") {
+        draftPath = specManual.trim();
+        specType = draftPath ? specTypeForDraftFilename(draftPath) : "draft-mtp";
+      }
+    }
+    if (!draftPath && !draftEmbedded) specType = "none";
+
     const mmprojPath = v
       ? (vs === "sidecar"
           ? (group.mmproj_models.find((x) => x.id === mmprojId)?.path ?? "")
@@ -730,8 +802,9 @@ function GroupCard({ group, onSelect }) {
       : "";
 
     onSelect(selectedBaseId, {
-      mtp_draft_model: mtpPath,
-      mtp_embedded: m && ms === "embedded",
+      spec_type: specType,
+      draft_model: draftPath,
+      mtp_embedded: draftEmbedded,
       mmproj_path: mmprojPath,
     }, announce);
   }
@@ -747,7 +820,7 @@ function GroupCard({ group, onSelect }) {
           <p className="text-sm font-medium truncate">{group.name}</p>
           <p className="text-xs text-glyvex-muted truncate">
             {t("groupCard.quantizations", { count: group.base_models.length })}
-            {group.mtp_models.length > 0 ? ` · ${group.mtp_models.length} MTP` : ""}
+            {draftSidecars.length > 0 ? ` · ${t("groupCard.specDrafts", { count: draftSidecars.length })}` : ""}
             {group.mmproj_models.length > 0 ? ` · ${group.mmproj_models.length} ${t("groupCard.vision")}` : ""}
           </p>
         </div>
@@ -768,39 +841,39 @@ function GroupCard({ group, onSelect }) {
               ))}
             </div>
           </div>
-          {(hasEmbeddedMtp || hasSidecarMtp) && (
+          {(hasEmbeddedMtp || hasSidecarDraft) && (
             <div>
               <label className="flex items-center gap-2 text-sm cursor-pointer mb-1.5">
-                <input type="checkbox" checked={useMtp}
+                <input type="checkbox" checked={useSpec}
                   onChange={(e) => {
-                    mtpTouchedRef.current = true;
+                    specTouchedRef.current = true;
                     const checked = e.target.checked;
-                    const src = checked && mtpSource === "none"
+                    const src = checked && specSource === "none"
                       ? (hasEmbeddedMtp ? "embedded" : "sidecar")
-                      : mtpSource;
-                    setUseMtp(checked);
-                    if (src !== mtpSource) setMtpSource(src);
-                    emitSelection({ mtp: checked, mtpSource: src });
+                      : specSource;
+                    setUseSpec(checked);
+                    if (src !== specSource) setSpecSource(src);
+                    emitSelection({ spec: checked, specSrc: src });
                   }}
                   className="accent-glyvex-accent" />
-                MTP draft model
-                {useMtp && mtpSource === "embedded" && <DetectedBadge>{t("groupCard.detectedEmbedded")}</DetectedBadge>}
+                {t("groupCard.speculation")}
+                {useSpec && specSource === "embedded" && <DetectedBadge>{t("groupCard.detectedEmbedded")}</DetectedBadge>}
               </label>
-              {useMtp && (
-                <SourcePicker value={mtpSource} options={mtpOptions}
-                  onChange={(v) => { mtpTouchedRef.current = true; setMtpSource(v); emitSelection({ mtpSource: v }); }} />
+              {useSpec && (
+                <SourcePicker value={specSource} options={specOptions}
+                  onChange={(v) => { specTouchedRef.current = true; setSpecSource(v); emitSelection({ specSrc: v }); }} />
               )}
-              {useMtp && mtpSource === "sidecar" && group.mtp_models.length > 1 && (
+              {useSpec && specSource === "sidecar" && draftSidecars.length > 1 && (
                 <select className="w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-2 py-1.5 text-xs text-glyvex-text"
-                  value={selectedMtpId ?? ""}
-                  onChange={(e) => { mtpTouchedRef.current = true; setSelectedMtpId(e.target.value); emitSelection({ mtpId: e.target.value }); }}>
-                  {group.mtp_models.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.size_gb} GB)</option>)}
+                  value={draftId ?? ""}
+                  onChange={(e) => { specTouchedRef.current = true; setSelectedDraftId(e.target.value); emitSelection({ specId: e.target.value }); }}>
+                  {draftSidecars.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.size_gb} GB)</option>)}
                 </select>
               )}
-              {useMtp && mtpSource === "manual" && (
+              {useSpec && specSource === "manual" && (
                 <input className="w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-2 py-1.5 text-xs text-glyvex-text placeholder:text-glyvex-muted/60"
-                  value={manualMtpPath}
-                  onChange={(e) => { mtpTouchedRef.current = true; setManualMtpPath(e.target.value); emitSelection({ mtpManual: e.target.value }); }}
+                  value={manualDraftPath}
+                  onChange={(e) => { specTouchedRef.current = true; setManualDraftPath(e.target.value); emitSelection({ specManual: e.target.value }); }}
                   placeholder={t("groupCard.draftPathPlaceholder")} />
               )}
             </div>
@@ -1066,7 +1139,7 @@ function ServerVitalsStrip({ processId, state }) {
               (specInterval != null ? t("vitals.mtpLast", { n: specInterval.toFixed(1) }) : "")
             }
           >
-            <span className="text-glyvex-muted">MTP</span>
+            <span className="text-glyvex-muted">{t("vitals.specLabel")}</span>
             <span className="font-medium tabular-nums text-glyvex-text">{t("vitals.mtpAccepted", { n: specTotal.toFixed(1) })}</span>
           </div>
         )}
@@ -1390,6 +1463,8 @@ export default function Launcher() {
   const [selectedId, setSelectedId] = useState(null);
   const [modelMeta, setModelMeta] = useState(null);
   const [vramEstimate, setVramEstimate] = useState(null);
+  // Preflight base↔draft del path elegido (aviso no bloqueante, LL-4 U4).
+  const [draftPreflight, setDraftPreflight] = useState(null);
   const [launchConfig, setLaunchConfig] = useState(DEFAULT_LAUNCH_CONFIG);
   const [templateList, setTemplateList] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState("");
@@ -1552,7 +1627,7 @@ export default function Launcher() {
             // La config del proceso vivo manda sobre el preset sugerido por
             // la metadata: es lo que realmente está corriendo.
             samplingTouchedRef.current = true;
-            setLaunchConfig((prev) => ({ ...prev, ...activeProcess.launch_config }));
+            setLaunchConfig((prev) => ({ ...prev, ...migrateLegacySpecFields(activeProcess.launch_config) }));
             // P1.5: los toggles OFF quedaron como null en la config serializada.
             setToggles((prev) => ({ ...prev, ...togglesFromConfig(activeProcess.launch_config) }));
           }
@@ -1635,8 +1710,11 @@ export default function Launcher() {
   }, [selectedId]);
 
   // VRAM estimada del modelo seleccionado; depende de los parámetros que la
-  // mueven (n_ctx, tipos de KV, slots). Con debounce corto para no disparar
-  // una fetch por cada dígito al editar n_parallel.
+  // mueven (n_ctx, tipos de KV, slots, modo de especulación). Con debounce
+  // corto para no disparar una fetch por cada dígito al editar n_parallel.
+  // LL-4 U4: se manda el spec_type del selector para que la estimación
+  // incluya el coste real del draft (el backend re-estima el draft por fila
+  // de contexto y responde spec_budget con lo que realmente aplicó).
   useEffect(() => {
     if (!selectedId) { setVramEstimate(null); return undefined; }
     let cancelled = false;
@@ -1647,7 +1725,17 @@ export default function Launcher() {
       cache_type_v: launchConfig.cache_type_v,
       n_parallel: String(launchConfig.n_parallel),
       flash_attn: String(launchConfig.flash_attn),
+      spec_type: launchConfig.spec_type,
     });
+    if ((launchConfig.draft_model || "").trim()) params.set("draft_model", launchConfig.draft_model.trim());
+    if (launchConfig.spec_type === "draft-mtp") params.set("mtp_embedded", String(launchConfig.mtp_embedded));
+    // LL-4 U6: la visión se presupuesta según la selección REAL, la misma
+    // regla que aplica handleLaunch vía applyToggles: toggle OFF = no se carga
+    // --mmproj; ON con path = tamaño real de ESE archivo; ON sin path = visión
+    // embebida (sus pesos ya están dentro del .gguf principal).
+    params.set("use_vision", String(Boolean(toggles.mmproj)));
+    const visionPath = (launchConfig.mmproj_path || "").trim();
+    if (toggles.mmproj && visionPath) params.set("vision_path", visionPath);
     const timer = setTimeout(() => {
       fetch(`/api/models/${selectedId}/vram-estimate?${params}`)
         .then((r) => (r.ok ? r.json() : null))
@@ -1655,7 +1743,27 @@ export default function Launcher() {
         .catch(() => { /* sin estimación: la tarjeta simplemente no se muestra */ });
     }, 250);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [selectedId, launchConfig.n_ctx, launchConfig.cache_type_k, launchConfig.cache_type_v, launchConfig.n_parallel, launchConfig.flash_attn]);
+  }, [selectedId, launchConfig.n_ctx, launchConfig.cache_type_k, launchConfig.cache_type_v, launchConfig.n_parallel, launchConfig.flash_attn, launchConfig.spec_type, launchConfig.draft_model, launchConfig.mtp_embedded, launchConfig.mmproj_path, toggles.mmproj]);
+
+  // Preflight base↔draft (LL-4 U4, endpoint de U2): AVISO heurístico
+  // pre-lanzamiento sobre el path que la UI va a usar realmente. Nunca
+  // bloquea: el ground-truth del rechazo está en el log de llama-server (U5).
+  useEffect(() => {
+    const draftPath = (launchConfig.draft_model || "").trim();
+    if (!selectedId || !isDraftMode(launchConfig.spec_type) || !draftPath) {
+      setDraftPreflight(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setDraftPreflight(null);
+    const timer = setTimeout(() => {
+      fetch(`/api/models/${selectedId}/draft-preflight?draft_path=${encodeURIComponent(draftPath)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => { if (!cancelled && data) setDraftPreflight(data); })
+        .catch(() => { /* sin preflight: simplemente no se muestra el aviso */ });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [selectedId, launchConfig.spec_type, launchConfig.draft_model]);
 
   useEffect(() => {
     if (!selectedId) { setProcessInfo(null); return undefined; }
@@ -1784,12 +1892,15 @@ export default function Launcher() {
         : { ...DEFAULT_TOGGLES });
       // `toggles` no es un campo de launchConfig: se saca antes de merguear.
       const { toggles: _toggles, ...configParams } = tpl.params;
+      // Templates guardados antes de LL-4 traen los campos MTP viejos: se
+      // normalizan acá, no en el backend (el backend no migra cuando el
+      // payload ya trae un spec_type explícito).
+      updateConfig(migrateLegacySpecFields(configParams));
       // Un template guardado trae su propio sampling: no dejamos que la
       // metadata del modelo lo sobrescriba después.
       if (Object.prototype.hasOwnProperty.call(tpl.params, "sampling_preset")) {
         samplingTouchedRef.current = true;
       }
-      updateConfig(configParams);
       setCustomCtx(false);
     }
   }
@@ -1809,11 +1920,12 @@ export default function Launcher() {
       if (!res.ok) throw new Error(String(res.status));
       const data = await res.json();
       setHwDraft(data);
-      if (data.params && Object.keys(data.params).length > 0) {
-        updateConfig(data.params);
+      const params = migrateLegacySpecFields(data.params);
+      if (params && Object.keys(params).length > 0) {
+        updateConfig(params);
         // Un parámetro con su toggle OFF no se emite al lanzar: reactivar los
         // grupos que el draft toca para que la sugerencia sea la real.
-        const touched = Object.keys(data.params);
+        const touched = Object.keys(params);
         setToggles((prev) => {
           const next = { ...prev };
           for (const [group, def] of Object.entries(TOGGLE_GROUPS)) {
@@ -1884,7 +1996,7 @@ export default function Launcher() {
     setSelectedId(modelId);
     if (configOverrides && Object.keys(configOverrides).length > 0) {
       // Viene de una GroupCard: trae la decisión explícita del usuario sobre
-      // MTP y visión.
+      // especulación (spec_type/draft_model) y visión.
       setLaunchConfig((prev) => ({ ...prev, ...configOverrides }));
       // Link: el toggle de visión sigue al checkbox de la GroupCard
       // (sin path, OFF).
@@ -1893,10 +2005,28 @@ export default function Launcher() {
       // Viene de la vista List (sin overrides): se derivan los defaults del
       // propio modelo, para que no quede pegada la config del modelo anterior.
       const model = modelList.find((m) => m.id === modelId);
+      const group = groupList.find((g) => g.base_models.some((m) => m.id === modelId)) ?? null;
+      // Preselección honesta: solo modos con soporte REAL detectado (cabeza
+      // embebida o sidecar en la carpeta). El path del sidecar detectado se
+      // preselecciona también — List no tiene picker, pero lanzar un modo
+      // draft sin archivo sería 422.
+      const embeddedMtp = Boolean(model?.mtp_embedded);
+      const mtpSidecars = (group?.mtp_models ?? []).length;
+      const dflashSidecars = (group?.draft_models ?? []).filter(
+        (m) => specTypeForDraftFilename(m.filename ?? m.name) === "draft-dflash",
+      ).length;
+      const specType = defaultSpecMode({ embeddedMtp, mtpSidecars, dflashSidecars });
+      const draftPath =
+        specType === "draft-dflash"
+          ? (group?.draft_models?.[0]?.path ?? "")
+          : specType === "draft-mtp" && mtpSidecars > 0
+            ? (group?.mtp_models?.[0]?.path ?? "")
+            : "";
       setLaunchConfig((prev) => ({
         ...prev,
-        mtp_draft_model: "",
-        mtp_embedded: Boolean(model?.mtp_embedded),
+        spec_type: specType,
+        draft_model: draftPath,
+        mtp_embedded: specType === "draft-mtp" ? embeddedMtp : false,
         // El mmproj del modelo anterior no viaja: se re-liga al nuevo modelo.
         mmproj_path: "",
       }));
@@ -1905,7 +2035,7 @@ export default function Launcher() {
     setActionError(null);
     // Las emiciones en vivo de la card no arrastran la página al panel.
     if (announce) setScrollTick((tick) => tick + 1);
-  }, [modelList]);
+  }, [modelList, groupList]);
 
   const handleLaunch = useCallback(async () => {
     if (!selectedModel) return;
@@ -1931,7 +2061,7 @@ export default function Launcher() {
       const payload = {
         ...toggled,
         model_id: selectedModel.id,
-        mtp_draft_model: toggled.mtp_draft_model || null,
+        draft_model: toggled.draft_model || null,
         cache_type_k_draft: toggled.cache_type_k_draft || null,
         cache_type_v_draft: toggled.cache_type_v_draft || null,
         mmproj_path: toggled.mmproj_path || null,
@@ -2091,7 +2221,7 @@ export default function Launcher() {
             // VRAM-MMPROJ: el desglose de los auxiliares reales que este launch
             // cargaría (mmproj/draft medidos desde el inventario); se listan
             // aparte para que quede claro qué parte del total no es el modelo.
-            <span key={`${c.kind}-${c.label}`}> · {c.kind === "mmproj" ? t("launcher.vramAuxMmproj") : t("launcher.vramAuxMtp")} {c.size_gb} GB</span>
+            <span key={`${c.kind}-${c.label}`}> · {c.kind === "mmproj" ? t("launcher.vramAuxMmproj") : t("launcher.vramAuxSpec")} {c.size_gb} GB</span>
           ))}
           {vramEstimate.ssm_gb ? ` · SSM ${vramEstimate.ssm_gb} GB` : ""} · {t("launcher.vramCompute", { c: vramEstimate.compute_gb })}
           {vramEstimate.n_parallel > 1 ? ` · ${vramEstimate.n_parallel} slots` : ""}
@@ -2141,14 +2271,28 @@ export default function Launcher() {
             {t("launcher.vramMoE")}
           </p>
         )}
-        {vramEstimate.mtp_available && (
-          <p className="text-xs text-glyvex-muted-2">
-            {t("launcher.vramMtpDraft")}
+        {/* LL-4 U4: con spec_type explícito el backend ya presupuesta el draft
+            real (spec_budget + componente draft_model en aux_components); el
+            viejo aviso mtp_available solo existía en modo legacy. */}
+        {vramEstimate.spec_budget && vramEstimate.spec_budget.spec_type !== "none" && (
+          <p className="text-[11px] text-glyvex-muted-2">
+            {vramEstimate.spec_budget.note ?? t("launcher.vramSpecApplied", { mode: vramEstimate.spec_budget.spec_type })}
           </p>
         )}
       </div>
     </Panel>
   );
+
+  // -- Estado del bloque de especulación del panel "Módulos opcionales"
+  // (LL-4 U4). Espejo de lo que el builder/validator del backend hacen con
+  // estos campos; los avisos son orientativos, nunca bloqueantes.
+  const draftModeActive = isDraftMode(launchConfig.spec_type);
+  const ngramModeActive = isNgramMode(launchConfig.spec_type);
+  const draftPathFilled = Boolean((launchConfig.draft_model || "").trim());
+  // draft-mtp con cabeza embebida y sin path no necesita archivo: el campo
+  // se grisea (igual que antes con mtp_embedded).
+  const draftInputDisabled = launchConfig.spec_type === "draft-mtp" && launchConfig.mtp_embedded && !draftPathFilled;
+  const specWarnKey = specModeWarningKey(launchConfig.spec_type, launchConfig.draft_model, launchConfig.mtp_embedded);
 
   if (loading) return <p className="text-glyvex-bg-muted text-sm">{t("launcher.loadingModels")}</p>;
 
@@ -2500,74 +2644,118 @@ export default function Launcher() {
                 </Panel>
 
                 <Panel icon={Puzzle} title={t("launcher.optionalModules")}>
-                  {selectedModel.mtp_embedded && (
+                  <Field label={t("launcher.specTypeLabel")} hint={t("launcher.specTypeHint")} flagHelp={probeHelp("--spec-type")}>
+                    <select className={selectClasses} value={launchConfig.spec_type}
+                      onChange={(e) => updateConfig({ spec_type: e.target.value })}>
+                      {SPEC_MODES.map((m) => <option key={m.value} value={m.value}>{t(`launcher.specModes.${m.value}`)}</option>)}
+                    </select>
+                  </Field>
+                  {selectedModel.mtp_embedded && launchConfig.spec_type === "draft-mtp" && (
                     <Toggle
                       label={t("launcher.mtpEmbeddedLabel") + (selectedModel.mtp_embedded_layers ? t("launcher.mtpLayers", { count: selectedModel.mtp_embedded_layers }) : "")}
-                       checked={launchConfig.mtp_embedded}
-                       onChange={(v) => updateConfig({ mtp_embedded: v })}
-                       help={probeHelp("--spec-type")}
-                     />
+                      checked={launchConfig.mtp_embedded}
+                      onChange={(v) => updateConfig({ mtp_embedded: v })}
+                      help={probeHelp("--spec-type")}
+                    />
                   )}
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field
-                      label="MTP draft model (path)"
-                      hint={launchConfig.mtp_embedded ? t("launcher.mtpEmbeddedHint") : undefined}
-                      flagHelp={probeHelp("--spec-draft-model")}>
-                      <div className="flex gap-2">
-                        <input className={inputClasses}
-                          value={launchConfig.mtp_draft_model || ""}
-                          onChange={(e) => updateConfig({ mtp_draft_model: e.target.value })}
-                          placeholder={launchConfig.mtp_embedded ? t("launcher.noPathRequired") : "/models/draft.gguf"}
-                          disabled={launchConfig.mtp_embedded} />
-                        {!launchConfig.mtp_embedded && (
-                          <BrowseButton label={t("launcher.browseGguf")} onBrowse={async () => {
-                            const p = await pickFile(GGUF_FILTERS);
-                            if (p) updateConfig({ mtp_draft_model: p });
-                          }} />
-                        )}
+                  {draftModeActive && (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field
+                          label="draft_model (path)"
+                          hint={draftInputDisabled ? t("launcher.mtpEmbeddedHint") : t(`launcher.${DRAFT_HINT_KEYS[launchConfig.spec_type]}`)}
+                          flagHelp={probeHelp("--spec-draft-model")}>
+                          <div className="flex gap-2">
+                            <input className={inputClasses}
+                              value={launchConfig.draft_model || ""}
+                              onChange={(e) => updateConfig({ draft_model: e.target.value })}
+                              placeholder={draftInputDisabled ? t("launcher.noPathRequired") : "/models/draft.gguf"}
+                              disabled={draftInputDisabled} />
+                            {!draftInputDisabled && (
+                              <BrowseButton label={t("launcher.browseGguf")} onBrowse={async () => {
+                                const p = await pickFile(GGUF_FILTERS);
+                                if (p) updateConfig({ draft_model: p });
+                              }} />
+                            )}
+                          </div>
+                        </Field>
+                        <Field label="n_draft" hint={t("launcher.nDraftHint")} flagHelp={probeHelp("--spec-draft-n-max")}>
+                          <input type="number" className={inputClasses} value={launchConfig.n_draft} onChange={(e) => updateConfig({ n_draft: Number(e.target.value) })} />
+                        </Field>
                       </div>
-                    </Field>
-                      <Field label="n_draft" hint={t("launcher.nDraftHint")} flagHelp={probeHelp("--spec-draft-n-max")}>
-                      <input type="number" className={inputClasses} value={launchConfig.n_draft} onChange={(e) => updateConfig({ n_draft: Number(e.target.value) })} />
-                    </Field>
-                  </div>
-                  {(launchConfig.mtp_embedded || launchConfig.mtp_draft_model) && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="cache_type_k (draft)" hint={t("launcher.draftKvHint")} flagHelp={probeHelp("--spec-draft-type-k")}>
-                        <select className={selectClasses} value={launchConfig.cache_type_k_draft}
-                          onChange={(e) => updateConfig({ cache_type_k_draft: e.target.value })}>
-                          <option value="">{t("launcher.autoF16")}</option>
-                          {CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </Field>
-                      <Field label="cache_type_v (draft)" flagHelp={probeHelp("--spec-draft-type-v")}>
-                        <select className={selectClasses} value={launchConfig.cache_type_v_draft}
-                          onChange={(e) => updateConfig({ cache_type_v_draft: e.target.value })}>
-                          <option value="">{t("launcher.autoF16")}</option>
-                          {CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </Field>
-                    </div>
+                      {specWarnKey && (
+                        <p className="text-xs text-red-400 -mt-2">
+                          {t(`launcher.${specWarnKey}`)}
+                        </p>
+                      )}
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label="cache_type_k (draft)" hint={t("launcher.draftKvHint")} flagHelp={probeHelp("--spec-draft-type-k")}>
+                          <select className={selectClasses} value={launchConfig.cache_type_k_draft}
+                            onChange={(e) => updateConfig({ cache_type_k_draft: e.target.value })}>
+                            <option value="">{t("launcher.autoF16")}</option>
+                            {CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="cache_type_v (draft)" flagHelp={probeHelp("--spec-draft-type-v")}>
+                          <select className={selectClasses} value={launchConfig.cache_type_v_draft}
+                            onChange={(e) => updateConfig({ cache_type_v_draft: e.target.value })}>
+                            <option value="">{t("launcher.autoF16")}</option>
+                            {CACHE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </Field>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label="n_draft_min" hint={t("launcher.nDraftMinHint")} flagHelp={probeHelp("--spec-draft-n-min")}>
+                          <input type="number" min="1" step="1" className={inputClasses} value={launchConfig.n_draft_min ?? ""}
+                            onChange={(e) => updateConfig({ n_draft_min: e.target.value === "" ? null : Number(e.target.value) })} />
+                        </Field>
+                        <Field label="p_draft_min" hint={t("launcher.pDraftMinHint")} flagHelp={probeHelp("--spec-draft-p-min")}>
+                          <input type="number" min="0" max="1" step="0.05" className={inputClasses} value={launchConfig.p_draft_min ?? ""}
+                            onChange={(e) => updateConfig({ p_draft_min: e.target.value === "" ? null : Number(e.target.value) })} />
+                        </Field>
+                      </div>
+                      {launchConfig.flash_attn &&
+                        (launchConfig.cache_type_k_draft || "f16") !== (launchConfig.cache_type_v_draft || "f16") && (
+                          <p className="text-xs text-red-400 -mt-2">
+                            {t("launcher.draftFaQuantsWarning")}
+                          </p>
+                        )}
+                      {/* Preflight base↔draft (U2): aviso heurístico sobre el
+                          path que la UI va a lanzar. Nunca bloquea. */}
+                      {draftPathFilled && draftPreflight && (
+                        <div className="space-y-0.5">
+                          {draftPreflight.available === false ? (
+                            <p className="text-[11px] text-glyvex-muted-2">{t("launcher.specPreflightUnavailable", { error: draftPreflight.error })}</p>
+                          ) : draftPreflight.ok ? (
+                            <p className="text-[11px] text-emerald-400">{t("launcher.specPreflightOk")}</p>
+                          ) : (
+                            <p className="text-xs text-amber-400">
+                              {t("launcher.specPreflightMismatch", { fields: (draftPreflight.mismatches ?? []).map((m) => `${m.field}: ${m.base} → ${m.draft}`).join(" · ") })}
+                            </p>
+                          )}
+                          {draftPreflight.available !== false && (draftPreflight.unverified ?? []).length > 0 && (
+                            <p className="text-[11px] text-glyvex-muted-2">{t("launcher.specPreflightUnverified", { fields: draftPreflight.unverified.join(", ") })}</p>
+                          )}
+                          {draftPreflight.note && <p className="text-[11px] text-glyvex-muted-2">{draftPreflight.note}</p>}
+                        </div>
+                      )}
+                    </>
                   )}
-                  {(launchConfig.mtp_embedded || launchConfig.mtp_draft_model) && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="n_draft_min" hint={t("launcher.nDraftMinHint")} flagHelp={probeHelp("--spec-draft-n-min")}>
-                        <input type="number" min="1" step="1" className={inputClasses} value={launchConfig.n_draft_min ?? ""}
-                          onChange={(e) => updateConfig({ n_draft_min: e.target.value === "" ? null : Number(e.target.value) })} />
-                      </Field>
-                      <Field label="p_draft_min" hint={t("launcher.pDraftMinHint")} flagHelp={probeHelp("--spec-draft-p-min")}>
-                        <input type="number" min="0" max="1" step="0.05" className={inputClasses} value={launchConfig.p_draft_min ?? ""}
-                          onChange={(e) => updateConfig({ p_draft_min: e.target.value === "" ? null : Number(e.target.value) })} />
-                      </Field>
-                    </div>
+                  {ngramModeActive && (
+                    <>
+                      <p className="text-xs text-glyvex-muted-2">{t("launcher.ngramModeNote")}</p>
+                      <div className="grid grid-cols-3 gap-3">
+                        {ngramFieldsForMode(launchConfig.spec_type).map((f) => (
+                          <Field key={f} label={f} hint={t(`launcher.${NGRAM_HINT_KEYS[f]}`)} flagHelp={probeHelp(NGRAM_FIELD_FLAGS[f])}>
+                            <input type="number" min="1" step="1" className={inputClasses}
+                              value={launchConfig[f] ?? ""}
+                              placeholder={String(NGRAM_DEFAULTS[launchConfig.spec_type][f])}
+                              onChange={(e) => updateConfig({ [f]: e.target.value === "" ? null : Number(e.target.value) })} />
+                          </Field>
+                        ))}
+                      </div>
+                    </>
                   )}
-                  {(launchConfig.mtp_embedded || launchConfig.mtp_draft_model) &&
-                    launchConfig.flash_attn &&
-                    (launchConfig.cache_type_k_draft || "f16") !== (launchConfig.cache_type_v_draft || "f16") && (
-                      <p className="text-xs text-red-400 -mt-2">
-                        {t("launcher.draftFaQuantsWarning")}
-                      </p>
-                    )}
                   <Toggle label="mmproj (--mmproj)" checked={toggles.mmproj}
                     onChange={(v) => {
                       setToggle("mmproj", v);
@@ -2769,17 +2957,6 @@ export default function Launcher() {
                       onChange={(e) => updateConfig({ cache_reuse: Number(e.target.value) })}
                       className="w-full accent-glyvex-accent" />
                   </Field>
-                  <Toggle label="defrag_thold (--defrag-thold)" checked={toggles.defrag_thold}
-                    onChange={(v) => setToggle("defrag_thold", v)}
-                    disabled={isToggleUnavailable("defrag_thold")} title={toggleTitle("defrag_thold")} />
-                  <Field label={`defrag_thold: ${launchConfig.defrag_thold < 0 ? t("launcher.defragDisabled") : Number(launchConfig.defrag_thold).toFixed(2)}`}
-                    hint={t("launcher.defragDeprecatedHint")}
-                    flagHelp={probeHelp("--defrag-thold")}>
-                    <input type="range" min={-1} max={1} step={0.01} value={launchConfig.defrag_thold}
-                      disabled={!toggles.defrag_thold || isToggleUnavailable("defrag_thold")}
-                      onChange={(e) => updateConfig({ defrag_thold: Number(e.target.value) })}
-                      className="w-full accent-glyvex-accent" />
-                  </Field>
                   <Toggle label="grp_attn (--grp-attn-n/w, grupo)" checked={toggles.grp_attn}
                     onChange={(v) => setToggle("grp_attn", v)}
                     disabled={isToggleUnavailable("grp_attn")} title={toggleTitle("grp_attn")} />
@@ -2934,6 +3111,22 @@ export default function Launcher() {
                 </div>
                 {processInfo.warning && <p className="text-sm text-amber-400">{processInfo.warning}</p>}
                 {processInfo.error_message && <p className="text-sm text-red-400">{processInfo.error_message}</p>}
+                {/* LL-4 U5: rechazo REAL de la especulación capturado del log
+                    del propio llama-server (no un aviso heurístico nuestro):
+                    el texto crudo va tal cual y la sugerencia se traduce por
+                    kind. El proceso puede seguir vivo (spec degradada) o haber
+                    caído — en ambos casos esto explica POR QUÉ. */}
+                {processInfo.spec_rejections?.length > 0 && (
+                  <div className="space-y-2 rounded border border-red-500/40 bg-red-500/10 p-2.5">
+                    <p className="text-xs font-semibold text-red-300">{t("processSpec.title")}</p>
+                    {processInfo.spec_rejections.map((r, i) => (
+                      <div key={`${r.kind}-${i}`} className="space-y-1">
+                        <p className="text-[11px] font-mono text-glyvex-text break-all">{r.line}</p>
+                        <p className="text-xs text-amber-400">{t(`processSpec.hints.${r.kind}`)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {processInfo.backend === "llama_server" && (
                   <ServerVitalsStrip processId={processInfo.process_id} state={processInfo.state} />
                 )}

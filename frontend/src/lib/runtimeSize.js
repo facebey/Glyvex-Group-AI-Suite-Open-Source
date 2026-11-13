@@ -16,18 +16,18 @@ export function formatDeltaMb(deltaMb) {
   return deltaMb > 0 ? `+${deltaMb}` : `${deltaMb}`;
 }
 
-// Estimación de descarga por familia de GPU (RT-10): base ~23 MB + paquete de
-// aceleración. Valores reales de los archives pinnados b11827: CUDA 12.4 +
-// cuDART ~633 MB; Vulkan ~35 MB (B1); ROCm 10.0 ~251 MB (B2). Es SOLO la
+// Estimación de descarga por familia de GPU (RT-10): base ~24 MB + paquete de
+// aceleración. Valores reales de los archives pinnados b12359: CUDA 12.4 +
+// cuDART ~701 MB; Vulkan ~60 MB (B1); ROCm 10.0 ~291 MB (B2). Es SOLO la
 // estimación pre-descarga de la UI: con el runtime instalado manda el size_mb
 // real de la meta. Debe espejar ACCEL_SOURCES del backend — familias sin
 // entrada caen a la base (degradado a CPU). AMD es un mapa por elección (B2):
 // sin elección manda `default`, que espeja el primer tag de la lista del
 // backend (Vulkan por cubrir toda la familia).
-const SIZE_BASE_MB = 23;
+const SIZE_BASE_MB = 24;
 const SIZE_BY_FAMILY_MB = {
-  nvidia: 656,
-  amd: { default: "vulkan", vulkan: 58, rocm: 274 },
+  nvidia: 701,
+  amd: { default: "vulkan", vulkan: 60, rocm: 291 },
 };
 
 export function runtimeSizeMb(gpuFamily, accelChoice) {
@@ -62,7 +62,10 @@ export function accelOffered(gpuFamily) {
 const FLAVOR_LABELS = {
   "cuda-12.4": "CUDA 12.4",
   "cuda-12.8": "CUDA 12.8",
+  // (b12359) El pinnado pasó a 13.5; la etiqueta 13.4 se conserva para metas
+  // de installs anteriores al bump.
   "cuda-13.4": "CUDA 13.4",
+  "cuda-13.5": "CUDA 13.5",
   vulkan: "Vulkan",
   rocm: "ROCm",
 };

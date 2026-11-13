@@ -89,6 +89,9 @@ from load_stats import LoadStats, MeasuredGpu, parse_load_logs, process_rss_mib
 from models import get_entry_metadata, inventory as model_inventory
 from runtime import resolve_binary
 import metrics as metrics_module
+# Taxonomía canónica de modos draft (LL-4 U3): vive en vram_estimate porque el
+# presupuesto de VRAM la necesita y models.py no puede importar launcher.
+from vram_estimate import SPEC_DRAFT_MODES
 
 logger = logging.getLogger("glyvex.launcher")
 
@@ -119,6 +122,53 @@ def should_forward_log_line(line: str, previous_was_idle: bool) -> tuple[bool, b
     """(reenviar, esta_línea_es_idle). Colapsa idles consecutivos en uno."""
     is_idle = IDLE_LOG_MARK in line
     return (not (is_idle and previous_was_idle), is_idle)
+
+
+# LL-4 U5: ground-truth del rechazo de la especulación. El preflight de
+# metadata (U2) y los avisos del panel son heurísticos; lo que SÍ es hecho es
+# lo que el propio binario escribe en su log cuando no acepta el draft o el
+# modo. Familias de líneas de llama.cpp (b11827): fallo al cargar el draft,
+# vocab, spec-type desconocido para esa build, draft declarado
+# incompatible. Conservador a propósito: cada patrón exige evidencia de fallo
+# en la misma línea y el contexto draft/spec — un log normal ("spec: accepted
+# ...", "llm_load_vocab: ...") jamás activa el banner de la card.
+SPEC_REJECTION_KINDS = ("draft_load", "vocab_mismatch", "spec_type_unsupported", "draft_incompatible")
+# Máximo de rechazos distintos publicados por proceso: suficiente para
+# explicarlo sin llenar la card de variantes del mismo fallo.
+SPEC_REJECTION_MAX = 5
+
+_SPEC_REJECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("draft_load", re.compile(r"(?:failed to|could not|unable to) load (?:the )?(?:spec(?:ulative)? )?draft model", re.I)),
+    ("draft_load", re.compile(r"failed to (?:create|init|initialize|build)[^\n]{0,80}draft (?:model|context)", re.I)),
+    ("spec_type_unsupported", re.compile(r"(?:unknown|invalid|unsupported|unrecognized|not supported|unimplemented)[^\n]{0,40}spec[-_ ]?type", re.I)),
+    ("spec_type_unsupported", re.compile(r"spec[-_ ]?type[^\n]{0,40}(?:is not|not|are not)[^\n]{0,20}supported", re.I)),
+    # Vocab: solo cuenta si la misma línea involucra un draft o spec —
+    # un mismatch de vocab declarada por otro subsistema no es un rechazo LL-4.
+    ("vocab_mismatch", re.compile(
+        r"(?:vocab\w*|vocabulary)[^\n]{0,60}(?:mismatch|incompatib\w*|do(?:es)? not match|doesn'?t match)"
+        r"|mismatch[^\n]{0,60}(?:vocab\w*|vocabulary)",
+        re.I)),
+    ("draft_incompatible", re.compile(r"draft(?: model)?[^\n]{0,60}(?:incompatible|not compatible|cannot be used|incompatibility)", re.I)),
+    ("draft_incompatible", re.compile(r"(?:main|target) model[^\n]{0,60}incompatible[^\n]{0,60}draft", re.I)),
+)
+
+# vocab_mismatch exige que la línea hable de un draft o de spec (los otros
+# patrones ya llevan "draft" o "spec-type" en la propia expresión).
+_VOCAB_REJECTION_CONTEXT = re.compile(r"draft|spec", re.I)
+
+
+def detect_spec_rejection(line: str) -> dict[str, str] | None:
+    """None, o {"kind": <SPEC_REJECTION_KINDS>, "line": <raw>}. Puro: se
+    prueba unitariamente sin subprocess."""
+    if not line:
+        return None
+    for kind, pattern in _SPEC_REJECTION_PATTERNS:
+        if not pattern.search(line):
+            continue
+        if kind == "vocab_mismatch" and not _VOCAB_REJECTION_CONTEXT.search(line):
+            continue
+        return {"kind": kind, "line": line}
+    return None
 
 
 # Rotación por tamaño de data/logs/*.log: desde que llama-server no recibe
@@ -229,6 +279,19 @@ LoadMode = Literal["auto", "none", "mmap", "mlock", "mmap+mlock", "dio"]
 # Lectura bajo demanda de ciertos tensores (p. ej. embeddings por capa) para
 # ahorrar VRAM residente. auto = solo tensores >4GiB (default del binario).
 LazyMode = Literal["auto", "on", "off"]
+# Especulación multi-modo (LL-4). Valores idénticos a los que acepta el
+# --spec-type de llama.cpp (verificado contra el --help real de b11827):
+# none | draft-simple | draft-eagle3 | draft-mtp | draft-dflash |
+# ngram-simple | ngram-mod. (El binario además acepta draft-dspark,
+# ngram-map-k, ngram-map-k4v, ngram-cache y combos por comas; fuera del
+# alcance v1 — ver Files\Docs\design\ll4-spec-multi-mode.md §3.)
+SpecType = Literal[
+    "none", "draft-mtp", "draft-dflash", "draft-simple",
+    "draft-eagle3", "ngram-simple", "ngram-mod",
+]
+# Modos que usan archivo de draft: comparten el plano de flags --spec-draft-*.
+# La lista es la canónica de vram_estimate (import arriba): la comparte con el
+# presupuesto de VRAM para que flag y presupuesto no puedan divergir (LL-4 U3).
 
 # Migración de configs/templates guardados con tipos de KV que ya no existen
 # en el schema. Sin esto, un hw_template viejo en SQLite con cache_type_k
@@ -273,25 +336,44 @@ class LaunchConfig(BaseModel):
     flash_attn: bool = True
     load_mode: LoadMode = "auto"
 
-    # -- Speculative decoding (MTP / NextN) ------------------------------
-    # Dos formas de tener MTP:
-    #   - sidecar: un .gguf de draft aparte (mtp-*.gguf) -> mtp_draft_model
-    #   - embebido: el propio modelo trae los tensores blk.N.nextn.*
-    #     (lo detecta el scanner en models.py) -> mtp_embedded=True, sin path
-    mtp_draft_model: str | None = None
+    # -- Speculative decoding multi-modo (LL-4) ------------------------
+    # selector de modo 1:1 con --spec-type del binario (SpecType). Default
+    # "none": sin especulación — el mismo comportamiento que tenían las
+    # configs viejas sin los campos MTP. Las configs/templates guardados con
+    # los campos viejos siguen funcionando: _migrate_legacy_spec_fields
+    # deriva el modo desde ellos.
+    spec_type: SpecType = "none"
+    # Archivo .gguf del draft para los modos draft (mtp/dflash/simple/eagle3).
+    # Reemplaza al viejo mtp_draft_model (alias legacy, ver el validator).
+    # draft-mtp con cabeza embebida NO lo necesita: el propio --model trae
+    # los tensores nextn.
+    draft_model: str | None = None
+    # Cabeza MTP/NextN dentro del propio .gguf (lo detecta el scanner en
+    # models.py). Solo tiene sentido con spec_type="draft-mtp".
     mtp_embedded: bool = False
     n_draft: int = 5
-    # Pisos de la especulación. None = no emitir (default de la build: p-min
-    # 0.00, que acepta tokens del draft sin piso de confianza y desperdicia
-    # ciclos de GPU en verificaciones rechazadas). p_draft_min > 0 (p. ej.
-    # 0.75) frena temprano la especulación dudosa.
+    # Pisos de la especulación (comunes a todos los modos draft). None = no
+    # emitir (default de la build: p-min 0.00, que acepta tokens del draft
+    # sin piso de confianza y desperdicia ciclos de GPU en verificaciones
+    # rechazadas). p_draft_min > 0 (p. ej. 0.75) frena temprano la
+    # especulación dudosa.
     n_draft_min: int | None = None
     p_draft_min: float | None = None
     # KV cache del DRAFT. None = no se pasa el flag (llama-server usa f16,
     # que quema VRAM sin necesidad). Default q8_0: mitad de VRAM que f16 con
-    # aceptación prácticamente idéntica. Solo aplica con MTP activo.
+    # aceptación prácticamente idéntica. Solo aplica a los modos draft.
     cache_type_k_draft: CacheType | None = "q8_0"
     cache_type_v_draft: CacheType | None = "q8_0"
+    # NGram plane (sin modelo extra: no suma VRAM de pesos; el lookup vive
+    # en RAM). None = no emitir el flag -> defaults del binario (b11827:
+    # ngram-simple: size-n 12, size-m 48, min-hits 1;
+    # ngram-mod: n-min 48, n-max 64, n-match 24).
+    ngram_size_n: int | None = None    # --spec-ngram-simple-size-n
+    ngram_size_m: int | None = None    # --spec-ngram-simple-size-m
+    ngram_min_hits: int | None = None  # --spec-ngram-simple-min-hits
+    ngram_n_min: int | None = None     # --spec-ngram-mod-n-min
+    ngram_n_max: int | None = None     # --spec-ngram-mod-n-max
+    ngram_n_match: int | None = None   # --spec-ngram-mod-n-match
     mmproj_path: str | None = None
     lora_path: str | None = None
     lora_scale: float = 1.0
@@ -366,7 +448,10 @@ class LaunchConfig(BaseModel):
     numa: bool = False
     no_kv_offload: bool = False
     cache_reuse: int | None = 0          # 0-256
-    defrag_thold: float | None = -1.0    # -1 = deshabilitado
+    # (b12359) defrag_thold/--defrag-thold fue REMOVIDO por upstream en
+    # b12359: el campo y su emisor salieron del LaunchConfig en el mismo
+    # commit del bump. Configs guardadas con defrag_thold siguen siendo
+    # aceptadas (Pydantic ignora extra) pero quedan inertes a propósito.
     # Unifica el KV cache entre slots. Con n_parallel > 1 y kv_unified en
     # false, CADA slot reserva su propio ctx completo (x N de VRAM de KV).
     kv_unified: bool = False             # --kv-unified
@@ -446,6 +531,28 @@ class LaunchConfig(BaseModel):
             data.setdefault("load_mode", load_mode)
         return data
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_spec_fields(cls, data: Any) -> Any:
+        """Mapea mtp_draft_model (campo removido, ver SpecType) a draft_model +
+        spec_type="draft-mtp": un config/template guardado antes de LL-4 no
+        debe romper el lanzamiento ni perder silenciosamente la especulación
+        MTP que el usuario tenía activada. Un spec_type explícito (distinto
+        de None) gana sobre la migración."""
+        if not isinstance(data, dict):
+            return data
+        legacy_draft = data.pop("mtp_draft_model", None)
+        legacy_on = bool(legacy_draft) or bool(data.get("mtp_embedded"))
+        if legacy_on and data.get("spec_type") is None:
+            logger.warning(
+                "config guardada con campos MTP (mtp_draft_model/mtp_embedded, "
+                "campo removido): se migra a spec_type=draft-mtp"
+            )
+            data["spec_type"] = "draft-mtp"
+            if legacy_draft:
+                data.setdefault("draft_model", legacy_draft)
+        return data
+
     @model_validator(mode="after")
     def _validate_cross_fields(self) -> "LaunchConfig":
         if self.gpu_mode == "cpu_only" and self.n_gpu_layers != 0:
@@ -509,6 +616,40 @@ class LaunchConfig(BaseModel):
             raise ValueError("top_k debe ser >= 0 (0 = deshabilitado)")
         if not (0.0 <= self.min_p <= 1.0):
             raise ValueError("min_p debe estar entre 0.0 y 1.0")
+        # -- speculative decoding multi-modo (LL-4) ----------------------
+        if self.spec_type in SPEC_DRAFT_MODES:
+            if self.spec_type == "draft-mtp":
+                # MTP funciona de dos formas: draft externo o cabeza embebida
+                # en el propio .gguf; sin ninguna de las dos el server falla
+                # al arrancar, así que lo cortamos acá.
+                if not self.draft_model and not self.mtp_embedded:
+                    raise ValueError(
+                        "spec_type='draft-mtp' requiere draft_model (archivo de "
+                        "draft) o mtp_embedded=true (cabeza MTP embebida en el .gguf)"
+                    )
+            elif not self.draft_model:
+                raise ValueError(
+                    f"spec_type={self.spec_type!r} requiere draft_model "
+                    "(archivo .gguf del modelo de draft)"
+                )
+        if self.spec_type == "ngram-simple":
+            for field in ("ngram_size_n", "ngram_size_m", "ngram_min_hits"):
+                value = getattr(self, field)
+                if value is not None and value < 1:
+                    raise ValueError(f"{field} debe ser >= 1")
+            if (self.ngram_size_n is not None and self.ngram_size_m is not None
+                    and self.ngram_size_m <= self.ngram_size_n):
+                raise ValueError(
+                    "ngram_size_m (máximo) debe ser mayor que ngram_size_n (mínimo)"
+                )
+        if self.spec_type == "ngram-mod":
+            for field in ("ngram_n_min", "ngram_n_max", "ngram_n_match"):
+                value = getattr(self, field)
+                if value is not None and value < 1:
+                    raise ValueError(f"{field} debe ser >= 1")
+            if (self.ngram_n_min is not None and self.ngram_n_max is not None
+                    and self.ngram_n_max < self.ngram_n_min):
+                raise ValueError("ngram_n_max debe ser >= ngram_n_min")
         return self
 
 
@@ -516,6 +657,17 @@ class HWTemplate(BaseModel):
     name: str
     builtin: bool = False
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class SpecRejection(BaseModel):
+    """Una línea del log de llama-server que rechaza la especulación pedida
+    (LL-4 U5). kind es la familia del detector (estable: la UI la traduce);
+    `line` es el texto crudo del log (fuente de verdad, se muestra tal cual).
+    `at` solo ordena la card — no se usa para lógica."""
+
+    kind: Literal["draft_load", "vocab_mismatch", "spec_type_unsupported", "draft_incompatible"]
+    line: str
+    at: str
 
 
 class ProcessInfo(BaseModel):
@@ -538,6 +690,13 @@ class ProcessInfo(BaseModel):
     # que esta instancia no lanzó (otra instancia, huérfano de un --reload).
     # El proceso igual se crea; la UI muestra esto junto al estado.
     warning: str | None = None
+    # LL-4 U5: rechazos reales de la especulación detectados en el log del
+    # propio llama-server (ver detect_spec_rejection). A diferencia de
+    # `warning` (aviso de prevuelo nuestro), esto viene del binario: la UI lo
+    # muestra como banner en la card con el texto original y una sugerencia.
+    # Solo llama_server; en memoria, como load_stats. Un lanzamiento nuevo
+    # (restart) empieza limpio porque se construye un ProcessInfo nuevo.
+    spec_rejections: list[SpecRejection] = Field(default_factory=list)
     # A2F-2: "cómo levantó el modelo" — deltas reales de RAM/VRAM medidos por
     # el launcher (baseline -> ready) + lo que el propio log de llama-server
     # declara (offload de capas, KV): estimado, marcado como tal en la UI.
@@ -939,9 +1098,11 @@ def build_llama_server_command(
     # usuario haya elegido otra cosa).
     if cfg.load_mode != "auto":
         cmd += ["--load-mode", cfg.load_mode]
-    # -- speculative decoding (MTP / NextN) ------------------------------
-    # Nombres de flags según `llama-server --help` (build 11003):
-    #   --spec-type draft-mtp     activa el modo de especulación MTP
+    # -- speculative decoding multi-modo (LL-4) --------------------------
+    # Nombres de flags según `llama-server --help` (verificado en b11827):
+    #   --spec-type MODO          none | draft-mtp | draft-dflash |
+    #                             draft-simple | draft-eagle3 |
+    #                             ngram-simple | ngram-mod
     #   --spec-draft-model FNAME  modelo de draft (alias -md / --model-draft);
     #                             SOLO cuando la cabeza viene en un archivo aparte
     #   --spec-draft-n-max N      tokens a especular por paso
@@ -950,12 +1111,12 @@ def build_llama_server_command(
     #                             default de la build 0.00 = sin piso)
     # Ojo: --draft-model nunca existió y --draft/--draft-n/--draft-max fueron
     # removidos del binario ("use --spec-draft-n-max"), por eso no se usan.
-    if cfg.mtp_draft_model or cfg.mtp_embedded:
-        cmd += ["--spec-type", "draft-mtp"]
-        if cfg.mtp_draft_model:
-            cmd += ["--spec-draft-model", cfg.mtp_draft_model]
-        # Con mtp_embedded y sin path, el propio --model ya trae los tensores
-        # nextn: no se pasa ningún archivo extra.
+    if cfg.spec_type in SPEC_DRAFT_MODES:
+        cmd += ["--spec-type", cfg.spec_type]
+        if cfg.draft_model:
+            cmd += ["--spec-draft-model", cfg.draft_model]
+        # Con draft-mtp embebido y sin path, el propio --model ya trae los
+        # tensores nextn: no se pasa ningún archivo extra.
         cmd += ["--spec-draft-n-max", str(cfg.n_draft)]
         if cfg.n_draft_min is not None:
             cmd += ["--spec-draft-n-min", str(cfg.n_draft_min)]
@@ -968,6 +1129,27 @@ def build_llama_server_command(
             cmd += ["--spec-draft-type-k", cfg.cache_type_k_draft]
         if cfg.cache_type_v_draft:
             cmd += ["--spec-draft-type-v", cfg.cache_type_v_draft]
+    elif cfg.spec_type == "ngram-simple":
+        # NGram simple: lookup n-gram en el contexto, sin modelo draft ni VRAM
+        # extra. Sin valores = defaults del binario (b11827: n 12, m 48,
+        # min-hits 1). En builds viejas filter_command descarta los flags.
+        cmd += ["--spec-type", "ngram-simple"]
+        if cfg.ngram_size_n is not None:
+            cmd += ["--spec-ngram-simple-size-n", str(cfg.ngram_size_n)]
+        if cfg.ngram_size_m is not None:
+            cmd += ["--spec-ngram-simple-size-m", str(cfg.ngram_size_m)]
+        if cfg.ngram_min_hits is not None:
+            cmd += ["--spec-ngram-simple-min-hits", str(cfg.ngram_min_hits)]
+    elif cfg.spec_type == "ngram-mod":
+        # NGram mod: n-grams con ventana variable (b11827: n-min 48,
+        # n-max 64, n-match 24 por default).
+        cmd += ["--spec-type", "ngram-mod"]
+        if cfg.ngram_n_min is not None:
+            cmd += ["--spec-ngram-mod-n-min", str(cfg.ngram_n_min)]
+        if cfg.ngram_n_max is not None:
+            cmd += ["--spec-ngram-mod-n-max", str(cfg.ngram_n_max)]
+        if cfg.ngram_n_match is not None:
+            cmd += ["--spec-ngram-mod-n-match", str(cfg.ngram_n_match)]
     if cfg.mmproj_path:
         cmd += ["--mmproj", cfg.mmproj_path]
     if cfg.lora_path:
@@ -1017,12 +1199,8 @@ def build_llama_server_command(
         cmd += ["--kv-unified-per-slot", str(cfg.kv_unified_per_slot)]
     if cfg.lazy_mode != "auto":
         cmd += ["--lazy-mode", cfg.lazy_mode]
-    # --defrag-thold figura como DEPRECATED en el --help de builds recientes.
-    # Por ahora el binario lo sigue aceptando (no está en la lista de flags
-    # críticos), así que lo dejamos: si algún día lo remueven del todo, el
-    # probe de capacidades lo descarta solo y esto no rompe el arranque.
-    if cfg.defrag_thold is not None and cfg.defrag_thold >= 0:
-        cmd += ["--defrag-thold", str(cfg.defrag_thold)]
+    # (--defrag-thold salio del builder en el bump b12359: upstream lo
+    # REMOVIO; el control ya no existe en LaunchConfig ni en la UI.)
     if cfg.grp_attn_n is not None and cfg.grp_attn_n > 1:
         cmd += ["--grp-attn-n", str(cfg.grp_attn_n)]
         if cfg.grp_attn_w is not None:
@@ -1158,6 +1336,33 @@ class ModelProcessManager:
         buf.append(line)
         for queue in self._log_subscribers.get(process_id, []):
             queue.put_nowait(line)
+
+    def _record_spec_rejection(self, process_id: str, line: str) -> None:
+        """LL-4 U5: si el log de un llama_server rechaza la especulación,
+        queda en ProcessInfo.spec_rejections para el banner de la card. Se
+        registran como mucho SPEC_REJECTION_MAX peros distintos (el binario
+        suele repetir la misma línea o encadenar variantes del mismo fallo);
+        la primera es la que explica el rechazo, las siguientes solo aportan
+        contexto distinto."""
+        info = self._info.get(process_id)
+        if info is None or info.backend != "llama_server":
+            return
+        hit = detect_spec_rejection(line)
+        if hit is None:
+            return
+        if len(info.spec_rejections) >= SPEC_REJECTION_MAX:
+            return
+        if any(r.kind == hit["kind"] and r.line == hit["line"] for r in info.spec_rejections):
+            return
+        info.spec_rejections.append(SpecRejection(
+            kind=hit["kind"],
+            line=hit["line"][:400],
+            at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        ))
+        logger.warning(
+            "rechazo de especulación en el log: id=%s kind=%s linea=%s",
+            process_id, hit["kind"], hit["line"][:200],
+        )
 
     # -- health check ----------------------------------------------------
 
@@ -1312,6 +1517,7 @@ class ModelProcessManager:
                 if not forward:
                     continue
                 self._publish_log_line(process_id, line)
+                self._record_spec_rejection(process_id, line)
                 await log_fh.write(line + "\n")
                 written_since_check += len(line) + 1
                 if written_since_check >= LOG_ROTATE_CHECK_BYTES:

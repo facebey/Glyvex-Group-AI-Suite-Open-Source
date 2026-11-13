@@ -68,6 +68,28 @@ COMFY_RATIO = 80.0
 # si cambian los presets de la UI, actualizar esto a la par.
 LEGEND_CTXS = (4096, 8192, 16384, 32768, 65536, 131072, 262144)
 
+# --- Presupuesto del draft especulativo (LL-4 U3) ----------------------------
+# Modos que cargan un .gguf de draft junto al modelo base. Lista canónica
+# compartida por el presupuesto de VRAM (models.py, hardware_recommend.py) y
+# el launcher: vive aquí porque models.py NO puede importar launcher (launcher
+# importa models). Debe coincidir con launcher.SpecType.
+SPEC_DRAFT_MODES = frozenset({"draft-mtp", "draft-dflash", "draft-simple", "draft-eagle3"})
+# Modos que NO suman pesos a la VRAM: su lookup vive en RAM-CPU (ngram) o no
+# hay especulación (none). El semáforo no debe desaconsejarlos por VRAM.
+SPEC_NO_AUX_MODES = frozenset({"none", "ngram-simple", "ngram-mod"})
+
+# Guard físico contra "headers copiados" en sidecars de draft (LL-4 U6). Ciertos
+# adaptadores MTP declaran en su header la arquitectura COMPLETA del modelo base
+# en vez de la suya — caso real medido 2026-11-10: mtp-Qwen3.8-27B-Q4_0.gguf
+# (1.28 GB) declara los 65 layers y las dims completas de Qwen3.8-27B (16.35 GB)
+# y el estimador presupuestaba 6.42 GB frente a ~2.2 medidos. Si el peso que el
+# header del draft implicaría al quant del base supera DRAFT_HEADER_GUARD_RATIO
+# veces el tamaño real del archivo, esas capas no existen: se corta a lo que el
+# archivo cabe físicamente (ver _clamp_draft_layers). La tolerancia de 8× deja
+# pasar un draft legítimamente de quant más alto que el base (un Q8 junto a un
+# Q4 pesa ~2× el equivalente; 8× es holgura, no licencia para inflar).
+DRAFT_HEADER_GUARD_RATIO = 8.0
+
 _GIB = 1024 ** 3
 
 
@@ -101,6 +123,7 @@ def estimate_vram_usage(
     gpu_vram_gb: float = 0,
     aux_weights_gb: float = 0.0,
     aux_components: list[dict[str, Any]] | None = None,
+    draft_aux: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Estimar la VRAM total (GB) de un lanzamiento y clasificarla.
@@ -118,6 +141,17 @@ def estimate_vram_usage(
     idéntico al cálculo anterior (los componentes no medidos no se inventan;
     un MTP embebido NO entra acá: sus tensores ya están contados en
     model_size_gb).
+
+    Draft especulativo (LL-4 U3): `draft_aux` = {"label","weights_gb",
+    "metadata", opcionalmente "max_layers"} describe el draft que el launch va
+    a cargar en un modo spec_type de SPEC_DRAFT_MODES (pesos 0 si la cabeza va
+    embebida; max_layers = capas declaradas por una fuente confiable, ver
+    estimate_draft_aux_gb). Su
+    coste NO es un peso fijo: se re-estima a este n_ctx con
+    estimate_draft_aux_gb (pesos + KV propio q8_0 + cómputo) y se publica
+    como componente {"kind": "draft_model"}. Por eso el llamador pasa solo
+    los pesos/metadata del archivo y cada fila de la leyenda re-estima el
+    suyo. Los modos ngram/none simplemente no pasan draft_aux: suman 0 VRAM.
     """
     n_layer = meta.get("n_layer")
     n_head = meta.get("n_head")
@@ -179,6 +213,33 @@ def estimate_vram_usage(
     kv_gb = kv_bytes / _GIB
     ssm_gb = ssm_bytes / _GIB
     compute_gb = COMPUTE_BUFFER_GB_FA if flash_attn else COMPUTE_BUFFER_GB
+    components = [
+        {
+            "kind": str(c.get("kind", "aux")),
+            "label": str(c.get("label", "")),
+            "size_gb": round(float(c.get("size_gb") or 0.0), 2),
+        }
+        for c in (aux_components or [])
+    ]
+    if draft_aux is not None:
+        # El draft se re-estima para ESTE ctx (su KV propio crece con la fila;
+        # tratarlo como peso fijo subestimaría los contextos largos). El tamaño
+        # real del base y las capas declaradas viajan al clamp de U6: sin ellos
+        # un sidecar con header copiado presupuesta capas que no existen.
+        draft_gb = estimate_draft_aux_gb(
+            meta, int(n_ctx),
+            float(draft_aux.get("weights_gb") or 0.0),
+            draft_aux.get("metadata"),
+            base_size_gb=float(model_size_gb),
+            max_layers=draft_aux.get("max_layers"),
+        )
+        if draft_gb is not None:
+            aux_gb += draft_gb
+            components.append({
+                "kind": "draft_model",
+                "label": str(draft_aux.get("label") or "draft"),
+                "size_gb": round(draft_gb, 2),
+            })
     total_gb = weights_gb + aux_gb + kv_gb + ssm_gb + compute_gb
 
     state = "unknown"
@@ -192,14 +253,7 @@ def estimate_vram_usage(
         "error": None,
         "weights_gb": round(weights_gb, 2),
         "aux_gb": round(aux_gb, 2),
-        "aux_components": [
-            {
-                "kind": str(c.get("kind", "aux")),
-                "label": str(c.get("label", "")),
-                "size_gb": round(float(c.get("size_gb") or 0.0), 2),
-            }
-            for c in (aux_components or [])
-        ],
+        "aux_components": components,
         "kv_gb": round(kv_gb, 2),
         "ssm_gb": round(ssm_gb, 2),
         "compute_gb": round(compute_gb, 2),
@@ -219,6 +273,133 @@ def estimate_vram_usage(
     }
 
 
+def _declared_layers(value: Any) -> int:
+    """Capas declaradas utilizables (>=1); 0 si el valor no es utilizable."""
+    try:
+        declared = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return declared if declared >= 1 else 0
+
+
+def _clamp_draft_layers(
+    base: dict[str, Any],
+    base_meta: dict[str, Any],
+    base_size_gb: float,
+    max_layers: int | None,
+    weights_gb: float,
+) -> None:
+    """Ajusta IN-PLACE el nº de capas del draft a las que DE VERDAD tiene
+    (LL-4 U6). Dos clamps independientes:
+
+    - `max_layers` (fuente declarada): la arquitectura del modelo base sabe
+      cuántas capas MTP/NextN tiene — `{arch}.nextn_predict_layers`, publicado
+      en la entry como `mtp_embedded_layers`. Un sidecar MTP auto-detectado es
+      una copia de esa cabeza y no puede tener más capas que ella.
+    - Guard físico (`base_size_gb` + peso real): un header copiado del base
+      (mismas dims, mismas capas) implicaría un draft proporcional al base al
+      mismo quant; si ese peso implicado supera DRAFT_HEADER_GUARD_RATIO veces
+      el archivo real, las capas sobrantes no existen y se corta a lo que el
+      archivo físicamente cabe.
+
+    Al cortar se eliminan del dict las capas del mapa híbrido copiado
+    (`full_attention_interval` / `n_head_kv_layers`): en un base híbrido
+    (interval=4) las primeras N capas de ese mapa serían SSM, y un draft no
+    tiene SSM — sus capas decoder son de atención. Dejar el mapa dejaría al
+    head cortado sin su KV propio (peor que la aproximación sin metadata)."""
+    claimed = int(base["n_layer"])
+    layers = claimed
+
+    declared = _declared_layers(max_layers)
+    if declared:
+        layers = min(layers, declared)
+
+    if base_size_gb and weights_gb > 0:
+        base_layers = int(base_meta.get("n_layer") or 0)
+        base_head = base_meta.get("n_head")
+        if base_layers >= 1 and base_head and (
+            base.get("n_embd") == base_meta.get("n_embd")
+            and base.get("n_head") == base_head
+            and base.get("n_head_kv") == base_meta.get("n_head_kv")
+            and (base.get("head_dim") or max(1, base["n_embd"] // base_head))
+            == (base_meta.get("head_dim") or max(1, base_meta["n_embd"] // base_head))
+        ):
+            implied_gb = float(base_size_gb) * layers / base_layers
+            if implied_gb > DRAFT_HEADER_GUARD_RATIO * weights_gb:
+                layers = max(1, int(layers * weights_gb / implied_gb))
+
+    if layers != claimed:
+        base["n_layer"] = layers
+        base.pop("full_attention_interval", None)
+        base.pop("n_head_kv_layers", None)
+
+
+def estimate_draft_aux_gb(
+    base_meta: dict[str, Any],
+    n_ctx: int,
+    draft_weights_gb: float = 0.0,
+    draft_meta: dict[str, Any] | None = None,
+    base_size_gb: float = 0.0,
+    max_layers: int | None = None,
+) -> float | None:
+    """VRAM que un draft especulativo suma al modelo principal (pesos + KV
+    propio + cómputo) al ctx dado. Generaliza a todos los modos de
+    SPEC_DRAFT_MODES (mtp/dflash/simple/eagle3, LL-4 U3) el presupuesto que
+    antes vivía privado en el motor de fit (A2F-1), con el MISMO estimador del
+    fit base:
+
+    - .gguf de draft con metadata legible: usa sus dims reales y su tamaño
+      real de archivo. Su KV usa los tipos de cache propios del draft, que
+      LaunchConfig define q8_0 por defecto (--spec-draft-type-k/-v).
+    - Sin metadata del draft (cabeza embebida, o .gguf sin header legible):
+      aproximación conservadora = una capa de atención completa del modelo
+      principal al ctx pedido (dims completas, sin ventanas SWA); los pesos
+      van aparte solo si vienen en archivo.
+
+    El overhead de cómputo no es una constante aparte: es el propio buffer FA
+    que usa el estimador (COMPUTE_BUFFER_GB_FA). Medido en vivo con llama.cpp
+    b11827 (RTX 3090, ctx 131072, mtp-gemma-4-26B-A4B): ~690 MiB de cómputo
+    del draft junto a ~425 MiB de pesos y ~290 MiB de KV — el buffer ya cubre
+    esa suma con holgura.
+
+    Capas reales del draft (LL-4 U6): el header de muchos sidecars MTP es una
+    COPIA del modelo base (declara sus N layers completos y sus dims) y
+    presupuestar esas capas infla la card (medido: 6.42 GB estimados vs ~2.2
+    reales en Qwen3.8-27B). `max_layers` son las capas DECLARADAS por una
+    fuente confiable (entry.mtp_embedded_layers = nextn_predict_layers del
+    base); `base_size_gb` es el tamaño real del archivo del base para el guard
+    físico DRAFT_HEADER_GUARD_RATIO. Ambos se aplican vía _clamp_draft_layers;
+    sin esos parámetros el resultado es idéntico al de U3. En el caso sin
+    metadata, `max_layers` dimensiona la aproximación: la cabeza declarada tiene
+    exactamente esas capas.
+
+    Devuelve None si no se puede estimar (ni el draft ni el modelo principal
+    traen metadata mínima): entonces el draft no entra en el fit ni al
+    presupuesto — mejor subestimar declarándolo que inventar un número."""
+    draft_meta = draft_meta or {}
+    if draft_meta.get("n_layer") and draft_meta.get("n_head") and draft_meta.get("n_embd"):
+        base = dict(draft_meta)  # copia: el clamp no debe reescribir la metadata del llamador
+        _clamp_draft_layers(
+            base, base_meta, float(base_size_gb or 0.0), max_layers,
+            float(draft_weights_gb or 0.0),
+        )
+    else:
+        base = {k: base_meta[k] for k in ("n_head", "n_embd") if base_meta.get(k)}
+        # Sin metadata propia, la aproximación usa las capas DECLARADAS si el
+        # llamador las conoce (cabeza MTP embebida); si no, una capa del base.
+        base["n_layer"] = max(1, _declared_layers(max_layers) or 1)
+        if base_meta.get("n_head_kv"):
+            base["n_head_kv"] = base_meta["n_head_kv"]
+    est = estimate_vram_usage(
+        base, float(draft_weights_gb or 0.0), int(n_ctx),
+        cache_type_k="q8_0", cache_type_v="q8_0",
+        n_parallel=1, flash_attn=True, gpu_vram_gb=0.0,
+    )
+    if not est.get("available"):
+        return None
+    return est["total_gb"]
+
+
 def estimate_vram_legend(
     meta: dict[str, Any],
     model_size_gb: float,
@@ -230,14 +411,17 @@ def estimate_vram_legend(
     ctx_values: tuple[int, ...] = LEGEND_CTXS,
     aux_weights_gb: float = 0.0,
     aux_components: list[dict[str, Any]] | None = None,
+    draft_aux: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Leyenda para la UI: para cada n_ctx común, el total de VRAM y su
     clasificación (comodo/justo/no_cabe). Mismo modelo y mismos parámetros que
     el estimador principal, variando solo el contexto. Devuelve [] si la
     metadata no alcanza (mismo criterio que estimate_vram_usage). Los auxiliares
-    (mmproj/draft) son constantes respecto del contexto: entran en cada fila de
-    la leyenda para que el estado clasificado coincida con la estimación principal.
+    fijos (mmproj) entran iguales en cada fila para que el estado clasificado
+    coincida con la estimación principal; el draft especulativo (draft_aux) NO
+    es constante: se re-estima en cada fila con el ctx de esa fila (LL-4 U3),
+    porque su KV propio crece con el contexto.
     """
     legend: list[dict[str, Any]] = []
     for n_ctx in ctx_values:
@@ -246,6 +430,7 @@ def estimate_vram_legend(
             cache_type_k=cache_type_k, cache_type_v=cache_type_v,
             n_parallel=n_parallel, flash_attn=flash_attn, gpu_vram_gb=gpu_vram_gb,
             aux_weights_gb=aux_weights_gb, aux_components=aux_components,
+            draft_aux=draft_aux,
         )
         if not r.get("available"):
             break  # sin metadata mínima no hay leyenda que mostrar

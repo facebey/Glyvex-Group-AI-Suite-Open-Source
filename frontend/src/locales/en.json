@@ -151,7 +151,7 @@
         "ctx": "ctx (context)",
         "queue": "queue",
         "cache": "cache",
-        "mtp": "MTP (only if active)"
+        "mtp": "Speculation (only if active)"
       }
     }
   },
@@ -497,6 +497,9 @@
     "detectedEmbedded": "detected · included in the model",
     "visionModule": "Vision module (mmproj)",
     "configure": "Configure",
+    "speculation": "Speculation (draft model)",
+    "specDrafts_one": "{{count}} draft",
+    "specDrafts_other": "{{count}} drafts",
     "draftPathPlaceholder": "C:\\path\\to\\your-draft.gguf",
     "mmprojPathPlaceholder": "C:\\path\\to\\your-mmproj.gguf"
   },
@@ -519,11 +522,21 @@
     "inProgress": " in progress",
     "waitingCount": "{{n}} waiting",
     "cacheLabel": "cache",
+    "specLabel": "speculation",
     "cacheTitle": "Prompt tokens reused from the cache since the server started",
     "cacheLast": ". Last request: {{n}} %",
-    "mtpTitle": "Tokens proposed by the draft (MTP) that the model accepted, since startup",
+    "mtpTitle": "Tokens proposed by the draft model that the target model accepted, since startup",
     "mtpLast": ". Last interval: {{n}} %",
     "mtpAccepted": "{{n}} % accepted"
+  },
+  "processSpec": {
+    "title": "llama-server rejected the speculation for this launch",
+    "hints": {
+      "draft_load": "The draft model could not be loaded. Check that the draft .gguf belongs to the same family as the base model, or switch to a mode with no file (ngram) or to 'None'.",
+      "vocab_mismatch": "The draft's vocabulary does not match the base model's: llama-server won't use it. Use a draft generated for this exact model.",
+      "spec_type_unsupported": "The installed llama-server build does not recognize that speculation mode. Update the backend or pick a mode listed in its --help.",
+      "draft_incompatible": "llama-server declares this draft incompatible with the base model. Get a draft for this exact model or use an ngram mode (no file)."
+    }
   },
   "logTerminal": {
     "title": "Log terminal",
@@ -596,6 +609,34 @@
     "faQuantsWarning": "⚠ With flash_attn=on the KV cache must be symmetric and be q4_0/q4_0, q8_0/q8_0, f16/f16 or bf16/bf16 (the build FA_QUANTS).",
     "loadModeHint": "Replaces mlock/mmap: how the binary loads the model file (--load-mode).",
     "optionalModules": "Optional modules",
+    "specTypeLabel": "Speculation (--spec-type)",
+    "specTypeHint": "Generation speed-up: draft modes (a draft .gguf model or an embedded head) or ngram plans (no file, no extra VRAM). 'None' disables speculation.",
+    "specModes": {
+      "none": "None",
+      "draft-mtp": "MTP draft (embedded or file)",
+      "draft-dflash": "DFlash draft (file)",
+      "draft-simple": "Simple draft (file)",
+      "draft-eagle3": "EAGLE3 draft (file)",
+      "ngram-simple": "Simple ngram (no file)",
+      "ngram-mod": "Moderate ngram (no file)"
+    },
+    "specDraftHintDraftMtp": "Optional: without a path it uses the embedded MTP head or an mtp-*.gguf detected in the model folder.",
+    "specDraftHintDraftDflash": "Requires a DFlash draft file compatible with the base model.",
+    "specDraftHintDraftSimple": "Requires a .gguf draft file compatible with the base model architecture.",
+    "specDraftHintDraftEagle3": "Requires an EAGLE3 draft file trained for this base model.",
+    "specWarnMtpEither": "draft-mtp needs a draft file or the embedded MTP head enabled: without either one the launch fails.",
+    "specWarnNeedDraft": "This draft mode requires a draft .gguf file: the backend would reject the launch without it.",
+    "ngramModeNote": "ngram modes use no draft file and add no weight VRAM: their lookup lives in RAM. Empty field = build default.",
+    "ngramSizeNHint": "Maximum ngram length searched in the context (--spec-ngram-simple-size-n). Build default: 12.",
+    "ngramSizeMHint": "Maximum draft length proposed from the matched ngram (--spec-ngram-simple-size-m). Build default: 48.",
+    "ngramMinHitsHint": "Times an ngram must appear to be considered reliable (--spec-ngram-simple-min-hits). Build default: 1.",
+    "ngramNMinHint": "Minimum context window observed by the ngram plan (--spec-ngram-mod-n-min). Build default: 48.",
+    "ngramNMaxHint": "Maximum context window observed by the ngram plan (--spec-ngram-mod-n-max). Build default: 64.",
+    "ngramNMatchHint": "Matches required to propose the draft (--spec-ngram-mod-n-match). Build default: 24.",
+    "specPreflightOk": "The draft vocabulary matches the base model's in everything both declare.",
+    "specPreflightMismatch": "The draft declares differences with the base model: {{fields}}. It may still work; check the log if llama-server rejects it.",
+    "specPreflightUnverified": "Unverified (one side does not declare it): {{fields}}",
+    "specPreflightUnavailable": "Preflight unavailable: {{error}}",
     "mtpEmbeddedLabel": "MTP included in the model",
     "mtpLayers_one": " ({{count}} nextn layer)",
     "mtpLayers_other": " ({{count}} nextn layers)",
@@ -639,10 +680,10 @@
     "vramJustFit": "It fits, but right at the limit: consider reducing n_ctx or using fit_target.",
     "vramUnknown": "Declare your GPU's VRAM in Configuration to find out if it fits.",
     "vramMoE": "MoE: the weights are the total parameters (only the active ones run per token).",
-    "vramMtpDraft": "An MTP draft is available for this model: if you enable it, real usage can be ~1–2 GB higher than this estimate (llama.cpp's own fit doesn't count it either).",
     "vramAuxMmproj": "Vision (mmproj)",
-    "vramAuxMtp": "MTP draft",
-    "vramAuxNote": "The estimate already adds these auxiliary components ({{aux}} GB) because a launch with vision/MTP loads them on top of the weights; if you don't use them, real usage will be lower.",
+    "vramAuxSpec": "Speculation (draft)",
+    "vramSpecApplied": "{{mode}} mode budgeted: the draft weights and KV are already included in the estimate.",
+    "vramAuxNote": "The estimate already adds these auxiliary components ({{aux}} GB) because a launch with vision/speculation loads them on top of the weights; if you don't use them, real usage will be lower.",
     "server": "Server",
     "kvParallelWarning": "⚠ With n_parallel > 1 and kv_unified off, each slot reserves its own full KV cache (x{{n}} the context VRAM).",
     "apiKeyLabel": "API key (optional)",
@@ -652,8 +693,6 @@
     "advCheckpointsCard": "Checkpoints",
     "advKvSessionCard": "KV memory & session",
     "cacheReuseDisabled": "0 (disabled)",
-    "defragDisabled": "-1 (disabled)",
-    "defragDeprecatedHint": "Marked DEPRECATED in the binary's --help; the backend still sends it for now.",
     "oneDisabled": "1 = disabled",
     "ctxCheckpointsHint": "Max context checkpoints per slot (~150 MiB of VRAM each). Build default: 32.",
     "checkpointMinStepHint": "Minimum spacing between checkpoints (tokens). Build default: 8192.",
@@ -896,7 +935,7 @@
         "inProgress": "In progress",
         "waiting": "Waiting",
         "cacheHit": "Prompt cache",
-        "mtpAccept": "MTP accepted"
+        "mtpAccept": "Speculation accepted"
       }
     },
     "processes": {

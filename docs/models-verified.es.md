@@ -32,6 +32,28 @@ revalidan antes de seguir figurando como vigentes.
 | Qwen3-Coder-30B-A3B (MoE) | Unsloth Dynamic `UD-Q4_K_XL` | NVIDIA RTX 3090 24 GB | llama.cpp b11827 | Modelo orientado a programación; medido frente a un denso de 27B con el protocolo M4 de la Suite; KV cache `q8_0` |
 | Qwen3-1.7B | Unsloth Dynamic `UD-Q4_K_XL` | RTX 3090 24 GB y CPU pura | llama.cpp b11827 | Modelo utilitario liviano: chat rápido en CPU y pruebas de humo de todo el pipeline |
 
+### Estado: revalidación en b12359 (2026-11-13, en curso)
+
+El pin del runtime pasó de b11827 a **b12359**. Ya se corrió una revalidación
+parcial en la máquina de desarrollo (RTX 3090); evidencia en
+`Files/Docs/design/runtime-bump-b11827-v1.0.0-analisis.md` §10:
+
+- **Gate del launcher, sin regresiones**: el probe + filtro de flags emite los
+  mismos comandos default y de spec en ambas builds (cero descartes). El único
+  flag removido por upstream en b12359 (`--defrag-thold`) ya no es emitido por
+  la Suite.
+- **Qwen3-Coder-30B-A3B `UD-Q4_K_XL`**: A/B full-GPU con metodología pareja —
+  igual o levemente mejor en b12359 (pp 3435 t/s, decode 154.3 t/s a ctx
+  65536). Revalidado para esta build.
+- **Control denso Qwen3.8-27B** (no es entrada del registro): carga −20%,
+  pp/decode iguales o mejores; los modos spec MTP y DFlash2 funcionan.
+- **Sidecars mtmd** (mmproj de Gemma 4 26B-A4B y de Qwen3.8-27B): cargan OK en
+  b12359 — el endurecimiento de visión 1.0.0 no los rompe.
+
+Entradas **aún pendientes** de su ciclo completo de estabilidad/benchmark en
+b12359: Gemma 4 26B A4B (sesión completa MTP + visión) y Qwen3-1.7B. Su estado
+Verificado/Optizado rige contra b11827 hasta que ese ciclo se corra.
+
 ### Gemma 4 26B A4B — `UD-Q4_K_XL` (verificado, optimizado)
 
 - **Archivos probados**: `gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf` (≈15,8 GiB,

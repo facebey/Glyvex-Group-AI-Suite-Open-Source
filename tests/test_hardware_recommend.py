@@ -3,11 +3,12 @@ test_hardware_recommend.py — A2 (M6): motor de recomendaciones + A2F-1
 (escalera adaptativa y fit que incluye draft MTP / visión).
 
 Los números esperados son aritmética pura determinista sobre las constantes
-del propio módulo (CTX_LADDER, CTX_LADDER_EXTENDED, FIT_RATIO,
-MTP_COMPUTE_OVERHEAD_GB) y las del estimador (q8_0 = 1.0625 B/elemento,
-COMPUTE_BUFFER_GB_FA = 0.75). Ejemplo del modelo genérico (48 capas, 8 heads
-KV, head_dim 128): KV q8_0 = 104 448 B/token → 32k ≈ 3.19 GiB, 16k ≈ 1.59,
-8k ≈ 0.80, 4k ≈ 0.40; f16 duplica el KV (6.0 GiB a 32k).
+del propio módulo (CTX_LADDER, CTX_LADDER_EXTENDED, FIT_RATIO) y las del
+estimador (q8_0 = 1.0625 B/elemento, COMPUTE_BUFFER_GB_FA = 0.75 — el coste
+del draft MTP se calcula con vram_estimate.estimate_draft_aux_gb, LL-4 U3).
+Ejemplo del modelo genérico (48 capas, 8 heads KV, head_dim 128): KV q8_0 =
+104 448 B/token → 32k ≈ 3.19 GiB, 16k ≈ 1.59, 8k ≈ 0.80, 4k ≈ 0.40; f16
+duplica el KV (6.0 GiB a 32k).
 
 Invariantes duras que cubre (diseño §4 aprobado + extensiones A2F-1):
 - cpu_only => n_gpu_layers = 0 SIEMPRE.
@@ -166,10 +167,10 @@ def test_low_vram_ctx_cap():
 
 def test_mtp_embedded_fits_budget():
     # Modelo con cabeza MTP embebida: se sugiere porque su coste (1 capa de KV
-    # del modelo al ctx elegido + MTP_COMPUTE_OVERHEAD ≈ 0.82 GB) entra en el
-    # presupuesto del 32k (11.94 + 0.82 = 12.76 <= 22.8). Con MTP emitido, el
-    # f16 se re-estima sobre el bundle (14.75 + 0.82 = 15.57 <= 22.8): también
-    # cabe.
+    # del modelo al ctx elegido + buffer FA del estimador ≈ 0.82 GB, vía
+    # estimate_draft_aux_gb) entra en el presupuesto del 32k (11.94 + 0.82 =
+    # 12.76 <= 22.8). Con MTP emitido, el f16 se re-estima sobre el bundle
+    # (14.75 + 0.82 = 15.57 <= 22.8): también cabe.
     model = dict(GENERIC_MODEL, size_gb=8.0, mtp_embedded=True)
     snap = _snapshot(gpus=[_nvidia(24576)], cpu_physical=8, ram_available_mb=32768)
     out = rec.recommend(snap, model)

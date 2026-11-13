@@ -201,7 +201,8 @@ _LAUNCH_REPORT_KEYS = (
     "flash_attn",
     "gpu_mode",
     "mtp_embedded",
-    "mtp_draft_model",
+    "spec_type",
+    "draft_model",
     "mmproj_path",
 )
 
@@ -313,13 +314,15 @@ async def _build_launch_config(
                 f"El modelo {entry.name} no tiene MTP: ni tensores nextn embebidos "
                 "ni un archivo draft .gguf en su carpeta.",
             )
+            merged["spec_type"] = "draft-mtp"
             if entry.mtp_embedded:
                 merged["mtp_embedded"] = True
             else:
-                merged["mtp_draft_model"] = companion
+                merged["draft_model"] = companion
         else:
+            merged["spec_type"] = "none"
             merged["mtp_embedded"] = False
-            merged["mtp_draft_model"] = None
+            merged["draft_model"] = None
 
     if "mmproj" in ov:
         value = ov["mmproj"]

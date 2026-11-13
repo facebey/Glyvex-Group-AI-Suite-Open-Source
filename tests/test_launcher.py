@@ -395,7 +395,6 @@ def test_build_command_advanced_params():
         numa=True,
         no_kv_offload=True,
         cache_reuse=64,
-        defrag_thold=0.1,
         grp_attn_n=4,
         grp_attn_w=256,
     )
@@ -407,7 +406,6 @@ def test_build_command_advanced_params():
     assert "--numa" in cmd
     assert "--no-kv-offload" in cmd
     assert "--cache-reuse" in cmd and cmd[cmd.index("--cache-reuse") + 1] == "64"
-    assert "--defrag-thold" in cmd
     assert "--grp-attn-n" in cmd and cmd[cmd.index("--grp-attn-n") + 1] == "4"
     assert "--grp-attn-w" in cmd and cmd[cmd.index("--grp-attn-w") + 1] == "256"
 
@@ -681,13 +679,20 @@ FRONTEND_LAUNCH_PAYLOAD = {
     "cache_type_v": "q8_0",
     "flash_attn": True,
     "load_mode": "auto",
-    "mtp_draft_model": None,
+    "spec_type": "none",
+    "draft_model": None,
     "mtp_embedded": False,
     "n_draft": 5,
     "n_draft_min": None,
     "p_draft_min": None,
     "cache_type_k_draft": "q8_0",
     "cache_type_v_draft": "q8_0",
+    "ngram_size_n": None,
+    "ngram_size_m": None,
+    "ngram_min_hits": None,
+    "ngram_n_min": None,
+    "ngram_n_max": None,
+    "ngram_n_match": None,
     "mmproj_path": None,
     "lora_path": None,
     "lora_scale": 1.0,
@@ -706,7 +711,6 @@ FRONTEND_LAUNCH_PAYLOAD = {
     "numa": False,
     "no_kv_offload": False,
     "cache_reuse": 0,
-    "defrag_thold": -1,
     "grp_attn_n": 1,
     "grp_attn_w": 512,
     "jinja": True,
@@ -1465,7 +1469,7 @@ def test_build_command_no_reasoning_preserve():
 TOGGLE_FIELDS = (
     "n_ctx", "n_batch", "n_ubatch", "cache_type_k", "cache_type_v",
     "rope_scaling_type", "rope_freq_base", "yarn_ext_factor",
-    "cache_reuse", "defrag_thold", "grp_attn_n", "grp_attn_w",
+    "cache_reuse", "grp_attn_n", "grp_attn_w",
     "cache_ram_mib", "fit", "fit_target_mib",
     "checkpoint_min_step", "ctx_checkpoints", "n_parallel", "n_threads",
 )
@@ -1489,7 +1493,7 @@ def test_all_toggles_off_emits_none_of_the_toggled_flags():
     for flag in ("--ctx-size", "--batch-size", "--ubatch-size",
                  "--cache-type-k", "--cache-type-v",
                  "--rope-scaling", "--rope-freq-base", "--yarn-ext-factor",
-                 "--cache-reuse", "--defrag-thold", "--grp-attn-n", "--grp-attn-w",
+                 "--cache-reuse", "--grp-attn-n", "--grp-attn-w",
                  "--cache-ram", "--fit", "--fit-target", "--checkpoint-min-step",
                  "--ctx-checkpoints", "--parallel", "--threads", "--host"):
         assert flag not in cmd, f"{flag} no debe emitirse con su toggle OFF"
@@ -1506,7 +1510,6 @@ def test_all_toggles_off_emits_none_of_the_toggled_flags():
     ({"rope_scaling_type": "yarn", "rope_freq_base": 10000.0, "yarn_ext_factor": 460.8},
      "--rope-scaling"),
     ({"cache_reuse": 128}, "--cache-reuse"),
-    ({"defrag_thold": 0.5}, "--defrag-thold"),
     ({"grp_attn_n": 2, "grp_attn_w": 1024}, "--grp-attn-n"),
     ({"cache_ram_mib": 4096}, "--cache-ram"),
     ({"fit": True}, "--fit"),

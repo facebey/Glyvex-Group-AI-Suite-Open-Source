@@ -17,10 +17,14 @@ El fit se verifica con el mismo estimador del semáforo del Launcher
 discrepan en el encaje base (pesos + KV + compute). A2F-1 añade además la
 cuenta de los componentes auxiliares que la ficha del modelo trae de hecho
 (draft MTP y mmproj de visión): se presupuestan con su tamaño REAL de archivo
-o, si no hay archivo que medir, con constantes medidas en hardware real. El
-semáforo sigue mostrando solo la estimación base con su aviso explícito
-`mtp_available` (EST-SWA); aquí el draft directamente no propone el componente
-si no cabe.
+o, si no hay archivo que medir, con la aproximación del propio estimador
+(vram_estimate.estimate_draft_aux_gb). LL-4 U3: el presupuesto del draft es ya
+compartido para cualquier modo draft, pero la PROPUESTA automática de fit
+sigue siendo MTP-única en v1 — hoy MTP es el único draft auto-descubrible con
+confianza; dflash/simple/eagle3 se presupuestan en /vram-estimate y se eligen
+a mano. El semáforo sigue mostrando solo la estimación base con su aviso
+explícito `mtp_available` (EST-SWA); aquí el draft directamente no propone el
+componente si no cabe.
 """
 
 from __future__ import annotations
@@ -30,7 +34,7 @@ import math
 from typing import Any
 
 from launcher import LaunchConfig
-from vram_estimate import estimate_vram_usage
+from vram_estimate import estimate_draft_aux_gb, estimate_vram_usage
 
 from hardware_detection import GpuInfo, HardwareSnapshot
 
@@ -65,14 +69,10 @@ LOW_VRAM_MAX_CTX = 16384
 
 # Fit completo: pesos + KV + compute deben quedar bajo este % de la VRAM total.
 FIT_RATIO = 0.95
-# Overhead de cómputo del draft MTP cuando no hay archivo sidecar que medir
-# (cabeza embebida u offset MTP externo): mismo buffer FA que usa el estimador
-# con flash_attn. Medido con llama.cpp b11827 en vivo (RTX 3090, ctx 131072,
-# mtp-gemma-4-26B-A4B): ~690 MiB de cómputo del draft junto a sus 425 MiB de
-# pesos y ~290 MiB de KV. La política anterior era un umbral fijo "pct ≤ 60"
-# (KV_HEADROOM_PCT) ciego al KV real; A2F-1 lo reemplazó por presupuestar el
-# componente y re-estimar el bundle completo, que es exacto con SWA.
-MTP_COMPUTE_OVERHEAD_GB = 0.75
+# El coste del draft MTP ya no es una constante aquí: se presupuesta con el
+# helper compartido vram_estimate.estimate_draft_aux_gb (LL-4 U3), que usa el
+# buffer FA del propio estimador y los datos reales del archivo cuando los hay
+# (los valores medidos en vivo con b11827 quedaron documentados ahí).
 # Con GPU pero sin fit completo: se intenta partial offload por capas mientras
 # el KV + compute no supere esta fracción de la VRAM (el resto es para pesos).
 HYBRID_KV_BUDGET_RATIO = 0.5
@@ -169,47 +169,22 @@ def _model_aux(
             "path": str(sidecar),
             "weights_gb": float(model.get("mtp_draft_size_gb") or 0.0),
             "metadata": model.get("mtp_draft_metadata") or None,
+            # Capas declaradas del head (U6): el sidecar auto-detectado es una
+            # copia de la cabeza MTP que el base declara y su header suele
+            # copiar los layers completos del base.
+            "max_layers": model.get("mtp_embedded_layers"),
         }
     elif model.get("mtp_embedded"):
-        mtp = {"path": None, "weights_gb": 0.0, "metadata": None}
+        mtp = {
+            "path": None, "weights_gb": 0.0, "metadata": None,
+            "max_layers": model.get("mtp_embedded_layers"),
+        }
     vision: dict[str, Any] | None = None
     mmproj_path = model.get("mmproj_path")
     mmproj_size = float(model.get("mmproj_size_gb") or 0.0)
     if mmproj_path and mmproj_size > 0:
         vision = {"path": str(mmproj_path), "weights_gb": mmproj_size}
     return mtp, vision
-
-
-def _mtp_aux_gb(
-    meta: dict[str, Any], ctx: int, mtp: dict[str, Any],
-) -> float | None:
-    """VRAM que el draft MTP suma al modelo principal (pesos + KV suyo +
-    cómputo), calculada con el MISMO estimador del fit base:
-
-    - Sidecar (mtp-*.gguf): se usa su metadata real cuando está disponible y
-      su tamaño de archivo real. El KV del draft usa los tipos de cache del
-      draft, que LaunchConfig define q8_0 por defecto (--spec-draft-type-k/-v).
-    - Sin metadata del draft (embebido, o sidecar sin header legible):
-      aproximación conservadora = una capa de atención completa del modelo
-      principal al ctx pedido (dims completas, sin ventanas SWA) más
-      MTP_COMPUTE_OVERHEAD_GB; los pesos van aparte si vienen en archivo.
-    Devuelve None si no se puede estimar (entonces MTP no se propone)."""
-    draft_meta = mtp.get("metadata") or {}
-    if draft_meta.get("n_layer") and draft_meta.get("n_head") and draft_meta.get("n_embd"):
-        base = draft_meta
-    else:
-        base = {k: meta[k] for k in ("n_head", "n_embd") if meta.get(k)}
-        base["n_layer"] = 1
-        if meta.get("n_head_kv"):
-            base["n_head_kv"] = meta["n_head_kv"]
-    est = estimate_vram_usage(
-        base, float(mtp.get("weights_gb") or 0.0), ctx,
-        cache_type_k="q8_0", cache_type_v="q8_0",
-        n_parallel=1, flash_attn=True, gpu_vram_gb=0.0,
-    )
-    if not est.get("available"):
-        return None
-    return est["total_gb"]
 
 
 def _plan_gpu(
@@ -238,14 +213,25 @@ def _plan_gpu(
                              "args": {"ctx": ctx, "vram_gb": round(vram_gb, 1),
                                       "pct": est["pct"]}})
             # 2) Draft MTP (A2F-1): se emite solo si su coste real entra en el
-            #    presupuesto del ctx elegido. Antes la regla era un umbral fijo
-            #    "pct ≤ 60" que ignoraba cuánto cuesta el draft de verdad; con
-            #    el presupuesto explícito el umbral extra es redundante.
+            #    presupuesto del ctx elegido, con el helper compartido del
+            #    estimador. Antes la regla era un umbral fijo "pct ≤ 60" que
+            #    ignoraba cuánto cuesta el draft de verdad; con el presupuesto
+            #    explícito el umbral extra es redundante. OJO (LL-4 U3): la
+            #    propuesta automática sigue siendo MTP-only en v1 — es el único
+            #    draft auto-descubrible con confianza; los demás modos draft se
+            #    presupuestan igual en /vram-estimate pero se eligen a mano
+            #    (extender el fit a dflash requeriría oferta HF de sidecars).
             #    No se baja de ctx para hacer hueco al draft: el contexto
             #    manda sobre la velocidad de especulación (el usuario puede
-            #    activar MTP a mano con otro ctx).
+            #    activar la especulación a mano con otro ctx).
             if aux_mtp is not None:
-                mtp_gb = _mtp_aux_gb(meta, ctx, aux_mtp)
+                mtp_gb = estimate_draft_aux_gb(
+                    meta, ctx,
+                    float(aux_mtp.get("weights_gb") or 0.0),
+                    aux_mtp.get("metadata"),
+                    base_size_gb=float(weights_gb),
+                    max_layers=aux_mtp.get("max_layers"),
+                )
                 if mtp_gb is not None:
                     new_total = total + mtp_gb
                     if new_total <= limit:

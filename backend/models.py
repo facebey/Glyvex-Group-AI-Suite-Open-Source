@@ -35,7 +35,12 @@ from pydantic import BaseModel, Field
 
 from config import config
 from paths import DATA_DIR
-from vram_estimate import estimate_vram_usage, estimate_vram_legend
+from vram_estimate import (
+    SPEC_DRAFT_MODES,
+    SPEC_NO_AUX_MODES,
+    estimate_vram_usage,
+    estimate_vram_legend,
+)
 
 logger = logging.getLogger("glyvex.models")
 
@@ -129,8 +134,8 @@ class ScanRequest(BaseModel):
 class ModelGroup(BaseModel):
     """
     Agrupación de modelos por carpeta padre (mejora M5): una cuantización
-    base más, opcionalmente, sus draft models MTP y módulos de visión
-    mmproj asociados, todos detectados dentro del mismo directorio.
+    base más, opcionalmente, sus draft models MTP y DFlash y módulos de
+    visión mmproj asociados, todos detectados dentro del mismo directorio.
     """
 
     group_id: str
@@ -138,6 +143,9 @@ class ModelGroup(BaseModel):
     folder: str
     base_models: list[ModelEntry] = Field(default_factory=list)
     mtp_models: list[ModelEntry] = Field(default_factory=list)
+    # Sidecars dflash-*.gguf (LL-4 U2): la UI los ofrece como draft del modo
+    # draft-dflash. eagle3 NO entra: se elige por path manual (ver build_groups).
+    draft_models: list[ModelEntry] = Field(default_factory=list)
     mmproj_models: list[ModelEntry] = Field(default_factory=list)
 
 
@@ -379,9 +387,11 @@ _GGUF_MAX_SCALAR_ARRAY = 4096
 # Unicos KVs STRING que se materializan; los demás (p. ej. tokenizer.hf_json,
 # de varios MB) se saltan sin decodificar. general.sampling es un JSON corto
 # (valores de sampling del autor del cuantizado) que alimenta el preset "auto".
+# tokenizer.ggml.model es un identificador corto ("llama3", "gpt2"…): lo
+# necesita el preflight de vocabulario base↔draft (LL-4 U2).
 _FAST_STRING_KEYS = frozenset(
-    {"general.architecture", "general.name", "tokenizer.chat_template",
-     "general.sampling"}
+    {"general.architecture", "general.name", "general.sampling",
+     "tokenizer.chat_template", "tokenizer.ggml.model"}
 )
 
 # Sentinel: el bloque termina a mitad del header (hacen falta más bytes).
@@ -463,7 +473,9 @@ def _parse_gguf_header_blob(blob: bytes) -> Any:
                     # Array de strings (tokens/merges/scores/token_type): se
                     # recorre byte a byte sin materializar — el caso de 250k+
                     # strings que antes tomaba minutos en la librería.
-                    if key == "tokenizer.ggml.tokens":
+                    if key in ("tokenizer.ggml.tokens", "tokenizer.ggml.added_tokens"):
+                        # Solo el COUNT: alimenta vocab_size y la comparación
+                        # added_tokens del preflight de draft (LL-4 U2).
                         kvs[key] = count
                     for _i in range(count):
                         (slen,) = _u(cur, "<Q")
@@ -684,6 +696,11 @@ def _metadata_from_kv(header: dict[str, Any]) -> dict[str, Any]:
         "ffn_expert_count": ffn_expert_count,
         "ffn_expert_shared_count": _as_int(kvs.get(f"{arch}.ffn_expert_shared_count")),
         "vocab_size": vocab_size,
+        # Campos del preflight de vocabulario base↔draft (LL-4 U2): tipo de
+        # tokenizer y cantidad de added_tokens. En drafts sin tokenizer propio
+        # quedan None y el preflight los marca como sin verificar.
+        "tokenizer_model": kvs.get("tokenizer.ggml.model"),
+        "added_tokens_count": _as_int(kvs.get("tokenizer.ggml.added_tokens")),
         "chat_template": chat_template or None,
         "bos_token": _as_int(kvs.get("tokenizer.ggml.bos_token_id")),
         "eos_token": _as_int(kvs.get("tokenizer.ggml.eos_token_id")),
@@ -789,6 +806,10 @@ def _metadata_from_reader(reader: Any) -> dict[str, Any]:
         "ffn_expert_count": ffn_expert_count,
         "ffn_expert_shared_count": _field_int(fields.get(f"{arch}.ffn_expert_shared_count")),
         "vocab_size": vocab_size,
+        # Preflight de vocabulario base↔draft (LL-4 U2): mismos campos que
+        # _metadata_from_kv, contados por índices sin decodificar el vocab.
+        "tokenizer_model": _field_str(fields.get("tokenizer.ggml.model")),
+        "added_tokens_count": _field_len(fields.get("tokenizer.ggml.added_tokens")),
         "chat_template": chat_template or None,
         "bos_token": _field_int(fields.get("tokenizer.ggml.bos_token_id")),
         "eos_token": _field_int(fields.get("tokenizer.ggml.eos_token_id")),
@@ -1441,8 +1462,12 @@ def build_groups(entries: list[ModelEntry]) -> list[ModelGroup]:
     (no exige que sea prefijo estricto, porque en la práctica muchos GGUF
     llevan "mtp"/"mmproj" en medio del nombre, ej. "Qwen2.5-VL-7B-mmproj-f16.gguf"):
       - contiene "mtp"    -> draft model MTP
+      - contiene "dflash" -> draft model DFlash (LL-4 U2)
       - contiene "mmproj" -> módulo de visión
       - resto             -> cuantización base
+    eagle3 NO se auto-clasifica a propósito: sus archivos usan formatos muy
+    variados (a menudo .safetensors no-GGUF) → el modo draft-eagle3 funciona
+    con path manual elegido por el usuario.
     """
     by_folder: dict[str, list[ModelEntry]] = {}
     for entry in entries:
@@ -1459,11 +1484,15 @@ def build_groups(entries: list[ModelEntry]) -> list[ModelGroup]:
     groups: list[ModelGroup] = []
     for folder_str, items in by_folder.items():
         folder = Path(folder_str)
-        base_models, mtp_models, mmproj_models = [], [], []
+        base_models, mtp_models, draft_models, mmproj_models = [], [], [], []
         for item in items:
             lowered = item.filename.lower()
             if "mtp" in lowered:
                 mtp_models.append(item)
+            elif "dflash" in lowered:
+                # Familia DFlash (LL-4 U2): sidecars dflash-*.gguf, oficialmente
+                # publicados en HF como Zypho/DFlash-* y similares.
+                draft_models.append(item)
             elif "mmproj" in lowered:
                 mmproj_models.append(item)
             else:
@@ -1476,6 +1505,7 @@ def build_groups(entries: list[ModelEntry]) -> list[ModelGroup]:
                 folder=str(folder),
                 base_models=base_models,
                 mtp_models=mtp_models,
+                draft_models=draft_models,
                 mmproj_models=mmproj_models,
             )
         )
@@ -1548,18 +1578,189 @@ async def get_model_metadata(model_id: str) -> dict[str, Any]:
     return await get_entry_metadata(entry)
 
 
-def mtp_companion_file(entry: ModelEntry) -> str | None:
-    """Archivo draft MTP que acompaña a este modelo: cualquier .gguf con "mtp"
-    en el nombre en la MISMA carpeta (la misma regla "contiene mtp" que usan
-    build_groups y el aviso mtp_available del semáforo). None si no hay."""
+@router.get("/{model_id}/draft-preflight")
+async def draft_preflight(model_id: str, draft_path: str) -> dict[str, Any]:
+    """
+    Aviso pre-lanzamiento del par base+draft (LL-4 U2): compara la metadata
+    de vocabulario de ambos .gguf (architecture / tokenizer.ggml.model /
+    cantidad de added_tokens) leyendo por la cache de metadata.
+    `draft_path` es SIEMPRE el path elegido por la UI (manual o detectado):
+    el endpoint no decide por la UI, solo verifica lo que la UI va a lanzar.
+    Como /metadata: 404 solo por modelo inexistente; archivo ilegible o
+    metadata ilegible responden 200 con {"available": false, "error": ...}.
+    Nunca bloquea: el ground-truth del rechazo es el log de llama-server (U5).
+    """
+    await inventory.ensure_loaded()
+    entry = inventory.get(model_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Modelo no encontrado en el inventario")
+
+    draft = Path(draft_path)
+    for label, path in (("modelo base", Path(entry.path)), ("draft", draft)):
+        if not path.is_file():
+            return {"available": False, "error": f"El {label} ya no existe en disco: {path}"}
+
+    # Lectura directa por la cache (no get_entry_metadata): un archivo scanneado
+    # con el esquema viejo puede tener metadata persistida SIN los campos nuevos,
+    # y aquí necesitamos comparar justamente esos campos.
+    base_meta = await read_gguf_metadata_cached(Path(entry.path))
+    if base_meta.get("error"):
+        return {"available": False, "error": f"No se pudo leer la metadata del modelo base: {base_meta['error']}"}
+    draft_meta = await read_gguf_metadata_cached(draft)
+    if draft_meta.get("error"):
+        return {"available": False, "error": f"No se pudo leer la metadata del draft: {draft_meta['error']}"}
+
+    result = compare_draft_vocab(base_meta, draft_meta)
+    result["available"] = True
+    result["note"] = (
+        "Aviso heurístico pre-lanzamiento: compara solo lo que ambos archivos "
+        "declaran. Si llama-server rechaza el draft, el motivo exacto está en su log."
+    )
+    return result
+
+
+# Token de nombre de archivo que identifica la familia de draft auto-detectable
+# de cada modo (LL-4 U2): la MISMA regla "contiene <token>" que usan
+# build_groups y el aviso mtp_available. draft-simple/draft-eagle3 no tienen
+# familia auto-detectable (su draft se elige por path manual); los modos
+# ngram no usan archivo.
+SPEC_DRAFT_NAME_TOKENS: dict[str, str] = {"draft-mtp": "mtp", "draft-dflash": "dflash"}
+
+
+def draft_companion_file(entry: ModelEntry, spec_type: str = "draft-mtp") -> str | None:
+    """Archivo draft que acompaña a este modelo para el modo dado: cualquier
+    .gguf con el token de la familia ("mtp" o "dflash") en el nombre en la
+    MISMA carpeta — el sidecar elegido es el cuya familia coincide con el
+    modo seleccionado (draft-dflash → dflash-*, draft-mtp → mtp-*).
+    None si el modo no tiene familia auto-detectable o no hay archivo.
+    El path manual de la UI siempre pisa a esta detección (prioridad que ya
+    tenía el viejo mtp_draft_model)."""
+    token = SPEC_DRAFT_NAME_TOKENS.get(spec_type)
+    if token is None:
+        return None
     folder = str(Path(entry.path).parent)
     for o in inventory.list():
-        if o.id != entry.id and "mtp" in o.filename.lower() and str(Path(o.path).parent) == folder:
+        if o.id != entry.id and token in o.filename.lower() and str(Path(o.path).parent) == folder:
             return o.path
     return None
 
 
-def _vram_aux_components(entry: ModelEntry) -> tuple[float, list[dict[str, Any]]]:
+def mtp_companion_file(entry: ModelEntry) -> str | None:
+    """Alias de la familia MTP de draft_companion_file: la usan el semáforo
+    (mtp_available), el VRAM estimate y el override MCP, que siguen trabajando
+    solo con sidecars MTP (fit automático MTP-only en v1, documentado LL-4 U3)."""
+    return draft_companion_file(entry, "draft-mtp")
+
+
+# --------------------------------------------------------------------------
+# Preflight de vocabulario base ↔ draft (LL-4 U2)
+# --------------------------------------------------------------------------
+#
+# Heurística de AVISO, no un bloqueo: llama-server rechaza un draft cuyo
+# vocabulario no coincide con el del modelo base, y eso solo lo confirma el
+# log del proceso (U5). Antes de lanzar comparamos los campos de tokenizer
+# que ambos .gguf declaran. La mayoría de los GGUF draft no traen tokenizer
+# propio: ausencia de un campo NO es disidencia, se reporta como sin verificar
+# (la app no afirma lo que no puede leer). Los valores ausentes en un solo
+# lado tampoco son mismatch.
+
+DRAFT_PREFLIGHT_FIELDS: tuple[tuple[str, str], ...] = (
+    # (campo de metadata, nombre GGUF mostrado en la UI)
+    ("architecture", "general.architecture"),
+    ("tokenizer_model", "tokenizer.ggml.model"),
+    ("added_tokens_count", "tokenizer.ggml.added_tokens (cantidad)"),
+)
+
+
+def compare_draft_vocab(base_meta: dict[str, Any], draft_meta: dict[str, Any]) -> dict[str, Any]:
+    """Compara base vs draft SOLO los campos presentes en ambos lados.
+    Devuelve {"ok", "mismatches", "unverified"} — nunca levanta."""
+    mismatches: list[dict[str, Any]] = []
+    unverified: list[str] = []
+    for field, label in DRAFT_PREFLIGHT_FIELDS:
+        base_value = base_meta.get(field)
+        draft_value = draft_meta.get(field)
+        if base_value is None or draft_value is None:
+            unverified.append(label)
+        elif base_value != draft_value:
+            mismatches.append(
+                {"field": label, "base": base_value, "draft": draft_value}
+            )
+    return {"ok": not mismatches, "mismatches": mismatches, "unverified": unverified}
+
+
+async def _resolve_spec_draft(
+    entry: ModelEntry,
+    spec_type: str,
+    draft_model: str | None,
+    mtp_embedded: bool | None,
+) -> dict[str, Any] | None:
+    """Draft a presupuestar para un modo explícito (LL-4 U3): el path manual
+    de la UI (`draft_model`, que siempre pisa a la detección) o el sidecar de
+    la familia del modo; si no hay archivo y el modo lo permite (draft-mtp),
+    la cabeza embebida de la entry — pesos 0 (ya están en entry.size_gb) pero
+    con su KV y cómputo. `mtp_embedded` explícito de la UI pisa a lo que la
+    entry declara; cuando no se pasa, se asume el de la entry (la UI lo
+    preselecciona desde ahí).
+    None si el modo no tiene draft (none/ngram) o no hay draft que
+    presupuestar: el endpoint lo dice en `spec_budget`, nunca inventa un
+    archivo."""
+    if spec_type not in SPEC_DRAFT_MODES:
+        return None
+    companion = draft_companion_file(entry, spec_type)
+    chosen = draft_model or companion
+    if chosen:
+        path = Path(chosen)
+        try:
+            weights = path.stat().st_size / (1024 ** 3)
+        except OSError:
+            weights = 0.0
+        meta = await read_gguf_metadata_cached(path) if path.is_file() else None
+        if meta is not None and meta.get("error"):
+            meta = None  # ilegible: estimate_draft_aux_gb cae a la aproximación
+        # Capas DECLARADAS de la cabeza (LL-4 U6): solo cuando el archivo
+        # elegido es el companion auto-detectado del modo — una copia de la
+        # cabeza que la entry declara (mtp_embedded_layers =
+        # nextn_predict_layers del base). Un path manual fuera de ese pairing
+        # es un archivo ajeno: para él solo vale el guard físico del
+        # estimador, no la declaración de la entry.
+        max_layers = None
+        if (
+            spec_type == "draft-mtp"
+            and entry.mtp_embedded_layers
+            and companion
+            and str(Path(companion).resolve()) == str(path.resolve())
+        ):
+            max_layers = int(entry.mtp_embedded_layers)
+        return {
+            "label": path.name,
+            "weights_gb": weights,
+            "metadata": meta,
+            "path": str(path),
+            "embedded": False,
+            "max_layers": max_layers,
+        }
+    embedded = entry.mtp_embedded if mtp_embedded is None else bool(mtp_embedded)
+    if spec_type == "draft-mtp" and embedded:
+        return {
+            "label": "cabeza MTP embebida",
+            "weights_gb": 0.0,
+            "metadata": None,
+            "path": None,
+            "embedded": True,
+            # La aproximación sin metadata se dimensiona con las capas que el
+            # base declara para su cabeza (U6); sin declaración, una capa.
+            "max_layers": entry.mtp_embedded_layers,
+        }
+    return None
+
+
+def _vram_aux_components(
+    entry: ModelEntry,
+    spec_type: str | None = None,
+    use_vision: bool | None = None,
+    vision_path: str | None = None,
+) -> tuple[float, list[dict[str, Any]]]:
     """(aux_gb, desglose) — los pesos auxiliares REALES que un launch de esta
     entry cargaría además del .gguf principal (VRAM-MMPROJ).
 
@@ -1569,34 +1770,67 @@ def _vram_aux_components(entry: ModelEntry) -> tuple[float, list[dict[str, Any]]
     entry.size_gb (el flag mtp_available sigue avisando aparte). Guard: si la
     propia entry ES un mmproj suelto registrado como modelo, su mmproj_path
     apunta a sí mismo y no se cuenta dos veces.
+
+    Con spec_type explícito (LL-4 U3) el draft NO se cuenta aquí: el
+    presupuesto del modo va por `draft_aux` en estimate_vram_usage (pesos +
+    KV propio + cómputo, re-estimado por ctx) y contarlo también como peso
+    fijo sería duplicarlo. Sin spec_type el comportamiento es el legacy.
+
+    Visión según la selección real (LL-4 U6): antes la card presupuestaba el
+    mmproj SIEMPRE que la entry lo tuviera, aunque el usuario no fuera a
+    cargarlo (caso real Qwen3.8-27B embedded: +0.86 GB inventados). Con
+    `use_vision` explícito: `false` = visión apagada, no suma; `true` con
+    `vision_path` = el tamaño real de ESE archivo (sidecar elegido o path
+    manual; fuera del inventario se mide en disco); `true` sin path = visión
+    embebida: sus tensores ya están dentro del .gguf principal y están
+    contados en model_size_gb, agregarlos sería doble conteo. Sin `use_vision`
+    (None) el comportamiento es el legacy conservador: se presupuesta el
+    mmproj de la entry si existe.
     """
     components: list[dict[str, Any]] = []
     own = str(Path(entry.path).resolve())
 
-    if entry.mmproj_path and str(Path(entry.mmproj_path).resolve()) != own:
-        try:
-            size = Path(entry.mmproj_path).stat().st_size / (1024 ** 3)
-        except OSError:
-            size = 0.0
-        if size > 0:
-            components.append({
-                "kind": "mmproj",
-                "label": Path(entry.mmproj_path).name,
-                "size_gb": size,
-            })
+    if use_vision is None:
+        if entry.mmproj_path and str(Path(entry.mmproj_path).resolve()) != own:
+            try:
+                size = Path(entry.mmproj_path).stat().st_size / (1024 ** 3)
+            except OSError:
+                size = 0.0
+            if size > 0:
+                components.append({
+                    "kind": "mmproj",
+                    "label": Path(entry.mmproj_path).name,
+                    "size_gb": size,
+                })
+    elif use_vision and vision_path:
+        chosen = Path(vision_path)
+        if str(chosen.resolve()) != own:
+            try:
+                size = chosen.stat().st_size / (1024 ** 3)
+            except OSError:
+                size = 0.0  # archivo ilegible: no se inventan pesos
+            if size > 0:
+                components.append({
+                    "kind": "mmproj",
+                    "label": chosen.name,
+                    "size_gb": size,
+                })
+    # use_vision=False (apagada) o True sin path (embebida: ya contada en
+    # model_size_gb): ningún peso de visión que añadir.
 
-    mtp = mtp_companion_file(entry)
-    if mtp and not entry.mtp_embedded:
-        try:
-            size = Path(mtp).stat().st_size / (1024 ** 3)
-        except OSError:
-            size = 0.0
-        if size > 0:
-            components.append({
-                "kind": "mtp_draft",
-                "label": Path(mtp).name,
-                "size_gb": size,
-            })
+    if spec_type is None:
+        mtp = mtp_companion_file(entry)
+        if mtp and not entry.mtp_embedded:
+            try:
+                size = Path(mtp).stat().st_size / (1024 ** 3)
+            except OSError:
+                size = 0.0
+            if size > 0:
+                components.append({
+                    "kind": "mtp_draft",
+                    "label": Path(mtp).name,
+                    "size_gb": size,
+                })
 
     return sum(float(c["size_gb"]) for c in components), components
 
@@ -1609,6 +1843,11 @@ async def get_model_vram_estimate(
     cache_type_v: str = "f16",
     n_parallel: int = 1,
     flash_attn: bool = False,
+    spec_type: str | None = None,
+    draft_model: str | None = None,
+    mtp_embedded: bool | None = None,
+    use_vision: bool | None = None,
+    vision_path: str | None = None,
 ) -> dict[str, Any]:
     """
     VRAM estimada (pesos + KV + cómputo) para este modelo con los parámetros
@@ -1618,11 +1857,43 @@ async def get_model_vram_estimate(
     para que el Launcher oculte la tarjeta sin romper nada. Con éxito incluye
     además "legend": el total de VRAM para cada contexto común (N_CTX_PRESETS),
     para que la UI muestre cómo crece el consumo al subir el contexto.
+
+    Modos de especulación (LL-4 U3): `spec_type` presupuesta el lanzamiento
+    para el modo elegido. Los modos draft suman al total el coste REAL del
+    draft seleccionado (pesos del archivo + KV propio q8_0 + cómputo, vía
+    estimate_draft_aux_gb) como componente {"kind": "draft_model"}; ngram y
+    none no suman VRAM (su lookup vive en RAM-CPU). `draft_model` es el path
+    que la UI va a lanzar y siempre pisa a la auto-detección;
+    `mtp_embedded`/`draft-mtp` presupuestan la cabeza embebida (0 pesos, KV
+    propio). Sin `spec_type` el comportamiento es el legacy: pesos crudos del
+    sidecar MTP como aux fijo y la flag `mtp_available`. La respuesta echoa
+    en "spec_budget" lo que realmente se aplicó, y la leyenda re-estima el
+    draft en cada fila de contexto. `spec_type` desconocido responde 422: la
+    UI manda valores de su propio selector.
+
+    Visión (LL-4 U6): `use_vision`/`vision_path` reflejan la selección real
+    del Launcher para que la card no presupueste lo que el usuario no va a
+    cargar. `use_vision` omitido = comportamiento legacy conservador (mmproj
+    de la entry si existe, para llamantes sin selector). `use_vision=false` =
+    visión apagada: no suma pesos. `use_vision=true` con `vision_path` = el
+    tamaño REAL de ese archivo (sidecar elegido o path manual; si no está en
+    el inventario se mide en disco). `use_vision=true` sin path = visión
+    embebida: sus tensores ya están dentro del .gguf principal (contados en
+    weights_gb), no se agregan. Los sidecars con header copiado del base
+    quedan cortados a sus capas reales: el clamp del draft es compartido con
+    el fit (vram_estimate._clamp_draft_layers).
     """
     await inventory.ensure_loaded()
     entry = inventory.get(model_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Modelo no encontrado en el inventario")
+
+    if spec_type is not None and spec_type not in (SPEC_DRAFT_MODES | SPEC_NO_AUX_MODES):
+        validos = ", ".join(sorted(SPEC_DRAFT_MODES | SPEC_NO_AUX_MODES))
+        raise HTTPException(
+            status_code=422,
+            detail=f"spec_type desconocido: {spec_type!r} (modos válidos: {validos})",
+        )
 
     if entry.format != "gguf":
         return {
@@ -1639,10 +1910,44 @@ async def get_model_vram_estimate(
         return {"available": False, "error": meta["error"]}
 
     gpu_vram_gb = float(config.get("hardware.vram_gb") or 0)
-    # VRAM-MMPROJ: los auxiliares que este launch usaría (mmproj de la entry,
-    # draft sidecar en la misma carpeta) entran al total y al estado, con su
-    # desglose publicado para que la UI sea honesta sobre el escenario visión/MTP.
-    aux_gb, aux_components = _vram_aux_components(entry)
+    # VRAM-MMPROJ: los auxiliares que este launch usaría (según la selección
+    # de visión recibida; en modo legacy también el draft sidecar de la misma
+    # carpeta) entran al total y al estado, con su desglose publicado para que
+    # la UI sea honesta sobre el escenario visión/MTP. Con spec_type el draft
+    # NO va por aquí: va por draft_aux, cuyo coste crece con el ctx y necesita
+    # re-estimación por fila (LL-4 U3).
+    aux_gb, aux_components = _vram_aux_components(
+        entry, spec_type=spec_type, use_vision=use_vision, vision_path=vision_path,
+    )
+    draft_aux: dict[str, Any] | None = None
+    spec_budget: dict[str, Any] | None = None
+    if spec_type is not None:
+        resolved = await _resolve_spec_draft(
+            entry, spec_type, draft_model, mtp_embedded
+        )
+        family = "draft" if spec_type in SPEC_DRAFT_MODES else "no-aux"
+        if resolved is not None:
+            draft_aux = {
+                "label": resolved["label"],
+                "weights_gb": resolved["weights_gb"],
+                "metadata": resolved["metadata"],
+                "max_layers": resolved.get("max_layers"),
+            }
+        spec_budget = {
+            "spec_type": spec_type,
+            "family": family,
+            "draft_path": resolved["path"] if resolved else None,
+            "draft_embedded": bool(resolved and resolved["embedded"]),
+        }
+        if family == "draft" and resolved is None:
+            spec_budget["note"] = (
+                "Sin draft especificado ni autodetectado para este modo: no "
+                "entra al presupuesto (un lanzamiento con él requeriría uno)."
+            )
+        elif family == "no-aux":
+            spec_budget["note"] = (
+                "Este modo no suma VRAM: su lookup vive en RAM-CPU."
+            )
     result = estimate_vram_usage(
         meta,
         model_size_gb=entry.size_gb,
@@ -1654,16 +1959,22 @@ async def get_model_vram_estimate(
         gpu_vram_gb=gpu_vram_gb,
         aux_weights_gb=aux_gb,
         aux_components=aux_components,
+        draft_aux=draft_aux,
     )
     if result.get("available"):
-        # Margen del draft MTP (documentado en EST-SWA): ni esta estimación ni
-        # el fit de llama.cpp (--fit) cuentan el draft, así que con MTP activo
-        # el uso real es ~1–2 GB mayor que la proyección. Se marca cuando el
-        # modelo trae el draft embebido o hay un archivo draft en su carpeta
-        # (regla compartida mtp_companion_file) para que la UI avise.
-        result["mtp_available"] = bool(entry.mtp_embedded) or (
-            mtp_companion_file(entry) is not None
-        )
+        if spec_type is None:
+            # Margen del draft MTP (documentado en EST-SWA): ni esta estimación ni
+            # el fit de llama.cpp (--fit) cuentan el draft, así que con MTP activo
+            # el uso real es ~1–2 GB mayor que la proyección. Se marca cuando el
+            # modelo trae el draft embebido o hay un archivo draft en su carpeta
+            # (regla compartida mtp_companion_file) para que la UI avise. Solo en
+            # modo legacy: con spec_type explícito la estimación ya incluye el
+            # draft exacto y la flag avisaría dos veces del mismo coste.
+            result["mtp_available"] = bool(entry.mtp_embedded) or (
+                mtp_companion_file(entry) is not None
+            )
+        else:
+            result["spec_budget"] = spec_budget
         result["legend"] = estimate_vram_legend(
             meta,
             model_size_gb=entry.size_gb,
@@ -1674,6 +1985,7 @@ async def get_model_vram_estimate(
             gpu_vram_gb=gpu_vram_gb,
             aux_weights_gb=aux_gb,
             aux_components=aux_components,
+            draft_aux=draft_aux,
         )
     return result
 

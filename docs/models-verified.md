@@ -31,6 +31,27 @@ before being listed as current.
 | Qwen3-Coder-30B-A3B (MoE) | Unsloth Dynamic `UD-Q4_K_XL` | NVIDIA RTX 3090 24 GB | llama.cpp b11827 | Coding-focused model; benchmarked against a dense 27B model with the Suite's M4 protocol; KV cache `q8_0` |
 | Qwen3-1.7B | Unsloth Dynamic `UD-Q4_K_XL` | RTX 3090 24 GB and pure CPU | llama.cpp b11827 | Light utility model: fast chat on CPU and smoke tests of the full pipeline |
 
+### Status: revalidation on b12359 (2026-11-13, in progress)
+
+The runtime pin moved from b11827 to **b12359**. Partial revalidation was already
+run on the dev machine (RTX 3090); evidence in
+`Files/Docs/design/runtime-bump-b11827-v1.0.0-analisis.md` §10:
+
+- **Launcher gate, no regressions**: the probe + flag-filter gate emits the same
+  default and spec commands on both builds (zero drops). The only upstream flag
+  removed in b12359 (`--defrag-thold`) is no longer emitted by the Suite.
+- **Qwen3-Coder-30B-A3B `UD-Q4_K_XL`**: A/B full-GPU with matched methodology —
+  equal or slightly better on b12359 (pp 3435 t/s, decode 154.3 t/s at ctx
+  65536). Revalidated for this build.
+- **Dense control Qwen3.8-27B** (not a registry entry): load −20%, pp/decode equal
+  or better; MTP and DFlash2 spec modes work.
+- **mtmd sidecars** (Gemma 4 26B-A4B mmproj and Qwen3.8-27B mmproj): load fine on
+  b12359 — the stricter 1.0.0 vision loading does not break them.
+
+Entries **still pending** their full stability/benchmark cycle on b12359: Gemma 4
+26B A4B (full MTP + vision session) and Qwen3-1.7B. Their Verified/Optimized
+status currently stands against b11827 until that cycle runs.
+
 ### Gemma 4 26B A4B — `UD-Q4_K_XL` (verified, optimized)
 
 - **Files tested**: `gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf` (≈15.8 GiB, 5.39 BPW),

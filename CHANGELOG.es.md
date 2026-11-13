@@ -7,6 +7,56 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-11-13
+
+El runtime embebido pasa a **llama.cpp b12359** (la línea v1.0.0-dev) y la
+**decodificación especulativa se vuelve multi-modo**: cada lanzamiento puede
+elegir su draft asistente —MTP o un GGUF draft externo— con presupuesto real
+de VRAM por modo y un preflight antes de cargar.
+
+### Añadido
+- **Decodificación especulativa multi-modo (LL-4)**: el selector de spec del
+  Launcher ahora expone los modos que la build soporta (`auto`, `none`,
+  asistente MTP, GGUF draft externo — incluida la familia `dflash`) con
+  campos por modo; los sidecars de draft se detectan y agrupan con su modelo
+  base (compañero MTP, mmproj); la VRAM del draft se presupuesta por modo en
+  `/vram-estimate` y en la card Estimated VRAM; un draft cuyo vocabulario no
+  coincide con el del modelo base se detecta antes de cargar; y si
+  llama-server rechaza el draft, la UI muestra la razón real leída del log
+  del servidor en lugar de un fallo genérico.
+- **GPUs AMD en Linux (preview)**: el catálogo del runtime gestionado suma los
+  paquetes `ubuntu-vulkan` y `ubuntu-rocm-10.0`, y una detección fallback vía
+  sysfs PCI reconoce AMD/Intel cuando NVML no está disponible. Antes de este
+  release una máquina linux con AMD solo podía correr en CPU; ahora puede
+  recibir el paquete Vulkan o ROCm. Preview: aún no validado en hardware
+  linux real.
+- **Badge de runtime con CUDA 13.5**: la etiqueta de flavor muestra 13.5 en el
+  bundle nuevo para Blackwell; la etiqueta 13.4 se conserva para que las
+  instalaciones previas al bump sigan mostrando el flavor que realmente tienen.
+
+### Cambiado
+- **Runtime: pin llama.cpp b11827 → b12359**. Mismo esquema de instalación en
+  dos niveles (base ~24 MB + aceleración CUDA/Vulkan/ROCm) y misma división
+  por driver/arquitectura (CUDA 12.4 para Pascal→Hopper, CUDA 13.5 para
+  Blackwell con driver ≥590). Medido en una RTX 3090 con un A/B de metodología
+  pareja: carga de modelos ~20% más rápida; pp/decode iguales o mejores en
+  denso y en MoE full-GPU (Qwen3-Coder-30B-A3B: pp 3435 t/s, decode
+  154.3 t/s a ctx 65536); los drafts MTP y DFlash2 funcionan; los sidecars de
+  visión mtmd cargan sin cambios. Todos los assets del catálogo quedan
+  re-pineados con su sha256, y las estimaciones de descarga ahora reflejan los
+  archives nuevos.
+- **Se elimina el parámetro avanzado `--defrag-thold`**: es el único flag que
+  upstream removió entre b11827 y b12359. Las configs guardadas con ese campo
+  siguen cargando sin problema; su valor queda simplemente inerte.
+
+### Corregido
+- **Consumo de CPU en reposo**: el loop de métricas ahora pide a psutil solo
+  los atributos de los procesos que realmente emparejó — la Suite deja de
+  quemar CPU estando idle.
+- **Procesos zombis de los probes**: un probe de binarios que expira ahora
+  mata a su hijo; un probe fallado ya no deja procesos `cmd.exe` ni
+  `llama-server` huérfanos.
+
 ## [0.14.0] — 2026-11-06
 
 El runtime ahora elige su bundle CUDA **teniendo en cuenta el driver

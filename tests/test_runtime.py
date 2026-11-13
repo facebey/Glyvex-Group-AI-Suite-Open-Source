@@ -350,8 +350,8 @@ def test_extract_archive_dispatches_by_suffix(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 
 
-def test_select_base_source_official_b11827_verifiable(monkeypatch):
-    # Bump b11827: la fuente es la build oficial de la release (los archives
+def test_select_base_source_official_b12359_verifiable(monkeypatch):
+    # Bump b12359: la fuente es la build oficial de la release (los archives
     # propios "glyvex" eran específicos de b11009).
     _force_windows(monkeypatch)
     source = runtime_module._select_base_source()
@@ -360,7 +360,7 @@ def test_select_base_source_official_b11827_verifiable(monkeypatch):
     assert source["id"] == "official"
     assert len(files) == 1
     assert all(len(f["sha256"]) == 64 for f in files)
-    assert all("b11827" in f["url"] for f in files)
+    assert all("b12359" in f["url"] for f in files)
     assert all(f["url"].endswith(".zip") for f in files)
 
 
@@ -378,7 +378,7 @@ def test_select_accel_source_windows_default_cuda12(monkeypatch):
     assert source["cuda_major"] == 12
     assert all(len(f["sha256"]) == 64 for f in files)
     assert len(files) == 2
-    assert all("b11827" in f["url"] for f in files)
+    assert all("b12359" in f["url"] for f in files)
     assert all(f["url"].endswith(".zip") for f in files)
     assert all("cuda-12.4" in f["url"] for f in files)
 
@@ -408,19 +408,19 @@ def test_select_accel_source_turing_uses_cuda12_windows(monkeypatch):
 
 def test_select_accel_source_ampere_cuda13_with_modern_driver_windows(monkeypatch):
     # RT-15B: Ampere sm_86 (RTX 3090) con driver moderno (p. ej. 621) → CUDA
-    # 13.4 preferido: la 30 serie está oficialmente soportada por 13.x y el
-    # build 13.4 compila sm_86.
+    # 13.5 preferido: la 30 serie está oficialmente soportada por 13.x y el
+    # build 13.5 compila sm_86.
     _force_windows(monkeypatch)
     _force_cc(monkeypatch, (8, 6))
     _force_driver(monkeypatch, 621)
     source = runtime_module._select_accel_source("nvidia")
     assert source["id"] == "official"
     assert source["cuda_major"] == 13
-    assert all("cuda-13.4" in f["url"] for f in runtime_module._platform_files(source["files"]))
+    assert all("cuda-13.5" in f["url"] for f in runtime_module._platform_files(source["files"]))
 
 
 def test_select_accel_source_ampere_cuda12_with_old_driver_windows(monkeypatch):
-    # RT-15B: la misma Ampere con driver < gate → 12.4 (13.4 no arrancaría).
+    # RT-15B: la misma Ampere con driver < gate → 12.4 (13.5 no arrancaría).
     _force_windows(monkeypatch)
     _force_cc(monkeypatch, (8, 6))
     _force_driver(monkeypatch, 570)
@@ -428,17 +428,17 @@ def test_select_accel_source_ampere_cuda12_with_old_driver_windows(monkeypatch):
 
 
 def test_select_accel_source_ampere_cuda13_with_modern_driver_linux(monkeypatch):
-    # RT-15B en Linux: Ampere + driver r59x → 13.4 linux (.tar.gz de "official").
+    # RT-15B en Linux: Ampere + driver r59x → 13.5 linux (.tar.gz de "official").
     _force_linux(monkeypatch)
     _force_cc(monkeypatch, (8, 6))
     _force_driver(monkeypatch, 591)
     source = runtime_module._select_accel_source("nvidia")
     assert source["id"] == "official"
-    assert all("cuda-13.4" in f["url"] for f in runtime_module._platform_files(source["files"]))
+    assert all("cuda-13.5" in f["url"] for f in runtime_module._platform_files(source["files"]))
 
 
 def test_select_accel_source_ampere_cuda12_8_with_580_driver_linux(monkeypatch):
-    # RT-15B en Linux: driver 580 queda POR DEBAJO del gate (el build 13.4 se
+    # RT-15B en Linux: driver 580 queda POR DEBAJO del gate (el build 13.5 se
     # validó solo con r590+) → se baja CUDA 12.8, la ruta de mayor compatibilidad.
     _force_linux(monkeypatch)
     _force_cc(monkeypatch, (8, 6))
@@ -447,13 +447,13 @@ def test_select_accel_source_ampere_cuda12_8_with_580_driver_linux(monkeypatch):
 
 
 def test_select_accel_source_blackwell_uses_cuda13_windows(monkeypatch):
-    # Blackwell sm_120 (cc 12.0): solo 13.x la compila → "official" (win 13.4).
+    # Blackwell sm_120 (cc 12.0): solo 13.x la compila → "official" (win 13.5).
     _force_windows(monkeypatch)
     _force_cc(monkeypatch, (12, 0))
     source = runtime_module._select_accel_source("nvidia")
     assert source["id"] == "official"
     assert source["cuda_major"] == 13
-    assert all("cuda-13.4" in f["url"] for f in runtime_module._platform_files(source["files"]))
+    assert all("cuda-13.5" in f["url"] for f in runtime_module._platform_files(source["files"]))
 
 
 def test_select_accel_source_blackwell_uses_cuda13_linux(monkeypatch):
@@ -462,7 +462,7 @@ def test_select_accel_source_blackwell_uses_cuda13_linux(monkeypatch):
     _force_cc(monkeypatch, (10, 0))
     source = runtime_module._select_accel_source("nvidia")
     assert source["id"] == "official"
-    assert all("cuda-13.4" in f["url"] for f in runtime_module._platform_files(source["files"]))
+    assert all("cuda-13.5" in f["url"] for f in runtime_module._platform_files(source["files"]))
 
 
 def test_required_cuda_major_by_architecture(monkeypatch):
@@ -543,16 +543,16 @@ def test_platform_files_selects_current_platform(monkeypatch):
         runtime_module._select_base_source()["files"]
     )
     assert [f["url"].rsplit("/", 1)[-1] for f in base_files] == [
-        "llama-b11827-bin-ubuntu-x64.tar.gz",
+        "llama-b12359-bin-ubuntu-x64.tar.gz",
     ]
     accel = runtime_module._select_accel_source("nvidia")
     # Sin NVML → safe default 12 → en Linux la primera fuente verificable
-    # (CUDA 13.4 exigiría arch ≥7.5 con driver >= gate).
+    # (CUDA 13.5 exigiría arch ≥7.5 con driver >= gate).
     assert accel["id"] == "official-cuda-12.8"
     accel_files = runtime_module._platform_files(accel["files"])
     assert [f["url"].rsplit("/", 1)[-1] for f in accel_files] == [
-        "llama-b11827-bin-ubuntu-cuda-12.8-x64.tar.gz",
-        "cudart-llama-b11827-bin-ubuntu-cuda-12.8-x64.tar.gz",
+        "llama-b12359-bin-ubuntu-cuda-12.8-x64.tar.gz",
+        "cudart-llama-b12359-bin-ubuntu-cuda-12.8-x64.tar.gz",
     ]
 
     _force_windows(monkeypatch)
@@ -560,7 +560,7 @@ def test_platform_files_selects_current_platform(monkeypatch):
         runtime_module._select_base_source()["files"]
     )
     assert [f["url"].rsplit("/", 1)[-1] for f in base_files] == [
-        "llama-b11827-bin-win-cpu-x64.zip",
+        "llama-b12359-bin-win-cpu-x64.zip",
     ]
     accel_files = runtime_module._platform_files(
         runtime_module._select_accel_source("nvidia")["files"]
@@ -571,32 +571,47 @@ def test_platform_files_selects_current_platform(monkeypatch):
 
 def test_select_accel_source_none_for_family_without_package(monkeypatch):
     # Sin paquete para la familia → None (runtime degradado a CPU). B1
-    # (RT-10): AMD ya tiene paquete Vulkan en Windows (ver
-    # test_select_accel_source_amd_vulkan); en Linux sigue sin package
-    # validado (solo hay build Windows aprobada por el protocolo).
+    # (RT-10): AMD tiene paquete Vulkan en Windows (validado en hardware por
+    # el protocolo) y también en Linux desde el bump b12359 (validación en
+    # hardware pendiente); Intel y la familia "cpu" siguen sin paquete.
     _force_windows(monkeypatch)
     assert runtime_module._select_accel_source("intel") is None
     assert runtime_module._select_accel_source("cpu") is None
     _force_linux(monkeypatch)
-    assert runtime_module._select_accel_source("amd") is None
     assert runtime_module._select_accel_source("intel") is None
     assert runtime_module._select_accel_source("cpu") is None
 
 
 def test_select_accel_source_amd_vulkan(monkeypatch):
-    # RT-10 B1: AMD ofrece la build Vulkan b11827 (win-only) pinnada por el
-    # protocolo PRUEBA-VULKAN-AMD-b11827.md. Sin tag cuda_major: se elige en
-    # la 1ª pasada para cualquier arquitectura. El merge a main queda
-    # condicionado a la aprobación del protocolo en hardware real.
+    # RT-10 B1: AMD ofrece la build Vulkan pinnada por el protocolo
+    # PRUEBA-VULKAN-AMD-b11827.md (re-pineada sin cambios de ruta en b12359).
+    # Sin tag cuda_major: se elige en la 1ª pasada para cualquier arquitectura.
     _force_windows(monkeypatch)
     _force_cc(monkeypatch, None)
     src = runtime_module._select_accel_source("amd")
     assert src["id"] == "official-vulkan"
     files = runtime_module._platform_files(src["files"])
     assert [f["url"].rsplit("/", 1)[-1] for f in files] == [
-        "llama-b11827-bin-win-vulkan-x64.zip",
+        "llama-b12359-bin-win-vulkan-x64.zip",
     ]
     assert all(f["sha256"] for f in files)
+
+
+def test_select_accel_source_amd_vulkan_linux(monkeypatch):
+    # Bump b12359: AMD en Linux pasa a tener paquete oficial ubuntu-vulkan
+    # (matriz §9.3 del análisis de bump). Validación en hardware real aún
+    # pendiente: el catálogo lo declara, los docs no lo anuncian hasta probarlo.
+    _force_linux(monkeypatch)
+    _force_cc(monkeypatch, None)
+    src = runtime_module._select_accel_source("amd")
+    assert src["id"] == "official-vulkan"
+    files = runtime_module._platform_files(src["files"])
+    assert [f["url"].rsplit("/", 1)[-1] for f in files] == [
+        "llama-b12359-bin-ubuntu-vulkan-x64.tar.gz",
+    ]
+    assert [f["sha256"] for f in files] == [
+        "19b60f00395a3f4954e46a5037695bc1d843404fc9d3124f82a612ecd8fbe9f0",
+    ]
 
 
 def test_select_accel_source_amd_choice_rocm(monkeypatch):
@@ -610,10 +625,25 @@ def test_select_accel_source_amd_choice_rocm(monkeypatch):
     assert src["id"] == "official-rocm-10.0"
     files = runtime_module._platform_files(src["files"])
     assert [f["url"].rsplit("/", 1)[-1] for f in files] == [
-        "llama-b11827-bin-win-rocm-10.0-x64.zip",
+        "llama-b12359-bin-win-rocm-10.0-x64.zip",
     ]
     assert [f["sha256"] for f in files] == [
-        "290c51fc21ce1ae2a1918fdc91334ca3cec571eb8cc84b524fbfd2c124b92c43",
+        "d5021cebbd3bd50a7cab3b9f121a887e45df76c360ecfa927940aac3bb64a982",
+    ]
+
+
+def test_select_accel_source_amd_choice_rocm_linux(monkeypatch):
+    # Bump b12359: la elección ROCm también existe en Linux (ubuntu-rocm).
+    _force_linux(monkeypatch)
+    _force_cc(monkeypatch, None)
+    src = runtime_module._select_accel_source("amd", "rocm")
+    assert src["id"] == "official-rocm-10.0"
+    files = runtime_module._platform_files(src["files"])
+    assert [f["url"].rsplit("/", 1)[-1] for f in files] == [
+        "llama-b12359-bin-ubuntu-rocm-10.0-x64.tar.gz",
+    ]
+    assert [f["sha256"] for f in files] == [
+        "2d934c367e613ec67a5f78dffa450ee30bc3a6024f559b70c207896ee4bc9108",
     ]
 
 
@@ -624,19 +654,19 @@ def test_select_accel_source_choice_without_package_degrades(monkeypatch):
     _force_cc(monkeypatch, None)
     assert runtime_module._select_accel_source("amd", "cuda") is None
     _force_linux(monkeypatch)
-    assert runtime_module._select_accel_source("amd", "rocm") is None
+    assert runtime_module._select_accel_source("amd", "sycl") is None
 
 
-def test_accel_choices_lists_amd_paths_on_windows(monkeypatch):
-    # RT-10 B2: AMD en Windows ofrece dos rutas seleccionables; las familias
-    # sin rutas seleccionables (NVIDIA se fija por cuda_major) y Linux (sin
-    # package validado aún) ofrecen lista vacía.
+def test_accel_choices_lists_amd_paths(monkeypatch):
+    # RT-10 B2 / bump b12359: AMD ofrece dos rutas seleccionables en Windows
+    # Y en Linux (ubuntu-vulkan/rocm). Las familias sin rutas seleccionables
+    # (NVIDIA se fija por cuda_major; Intel sin package) ofrecen lista vacía.
     _force_windows(monkeypatch)
     assert runtime_module.accel_choices("amd") == ["vulkan", "rocm"]
     assert runtime_module.accel_choices("nvidia") == []
     assert runtime_module.accel_choices("intel") == []
     _force_linux(monkeypatch)
-    assert runtime_module.accel_choices("amd") == []
+    assert runtime_module.accel_choices("amd") == ["vulkan", "rocm"]
 
 
 def test_select_sources_none_when_nothing_verifiable(monkeypatch):
@@ -812,7 +842,7 @@ def test_accel_flavors_declared_in_catalog(monkeypatch):
     expected = {
         "official-cuda-12.4": "cuda-12.4",
         "official-cuda-12.8": "cuda-12.8",
-        "official": "cuda-13.4",
+        "official": "cuda-13.5",
         "official-vulkan": "vulkan",
         "official-rocm-10.0": "rocm",
     }
@@ -943,6 +973,54 @@ def test_detect_gpu_family(monkeypatch, gpu, family):
 def test_detect_gpu_family_unknown_name_falls_to_cpu(monkeypatch):
     monkeypatch.setattr(runtime_module, "detect_gpu", lambda: "GPU Genérica XYZ")
     assert runtime_module.detect_gpu_family() == "cpu"
+
+
+# --------------------------------------------------------------------------
+# _gpu_via_sys_pci (bump b12359: familia AMD en Linux)
+# --------------------------------------------------------------------------
+
+
+def _make_sysfs_device(root, name, cls, vendor):
+    d = root / name
+    d.mkdir(parents=True)
+    (d / "class").write_text(cls + "\n", encoding="ascii")
+    (d / "vendor").write_text(vendor + "\n", encoding="ascii")
+
+
+# Nombres de directorio SIN los dos puntos del formato sysfs real
+# ("0000:03:00.0"): NTFS reserva ':' (streams de datos alternativos) y no
+# permite crear esas carpetas. El backend no parsea el nombre — solo lee
+# class/vendor — así que el fixture es equivalente en cualquier SO.
+
+
+def _fake_sysfs(monkeypatch, tmp_path):
+    monkeypatch.setattr(runtime_module, "_SYS_PCI_ROOT", str(tmp_path))
+    monkeypatch.setattr(runtime_module.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(runtime_module, "_gpu_via_pynvml", lambda: None)
+    monkeypatch.setattr(runtime_module, "_gpu_via_video_controller", lambda: None)
+
+
+def test_gpu_via_sys_pci_detects_amd_display(monkeypatch, tmp_path):
+    _fake_sysfs(monkeypatch, tmp_path)
+    _make_sysfs_device(tmp_path, "0000-03-00.0", "0x030000", "0x1002")  # AMD VGA
+    _make_sysfs_device(tmp_path, "0000-01-00.0", "0x010601", "0x1002")  # SATA AMD (no display)
+    assert runtime_module._gpu_via_sys_pci() == "AMD"
+    assert runtime_module.detect_gpu_family() == "amd"
+
+
+def test_gpu_via_sys_pci_ignores_non_display_and_unknown_vendor(monkeypatch, tmp_path):
+    _fake_sysfs(monkeypatch, tmp_path)
+    _make_sysfs_device(tmp_path, "0000-00-00.0", "0x060100", "0x8086")  # ISA bridge
+    _make_sysfs_device(tmp_path, "0000-04-00.0", "0x030000", "0x1234")  # display unknown
+    assert runtime_module._gpu_via_sys_pci() is None
+    assert runtime_module.detect_gpu_family() == "cpu"
+
+
+def test_gpu_via_sys_pci_missing_root_or_windows_is_none(monkeypatch, tmp_path):
+    _fake_sysfs(monkeypatch, tmp_path / "inexistente")
+    assert runtime_module._gpu_via_sys_pci() is None
+    monkeypatch.setattr(runtime_module.platform, "system", lambda: "Windows")
+    assert runtime_module._gpu_via_sys_pci() is None
 
 
 # --------------------------------------------------------------------------

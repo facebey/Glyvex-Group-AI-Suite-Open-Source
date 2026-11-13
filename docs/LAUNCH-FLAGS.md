@@ -70,7 +70,6 @@ default differs, it's noted in the Impact or Default column.
 | `--cache-reuse` | Reuse cached prefix KV across requests. | Higher = more reuse, slightly more bookkeeping. `0` = off. | `0` (toggle). | Bump (0–256) for repeated long system prompts. |
 | `--kv-unified` | Share one KV pool across parallel slots. | Without it, each slot reserves its full ctx (× N VRAM). | off (toggle). | On when `--parallel > 1` to avoid N× ctx VRAM. |
 | `--kv-unified-per-slot` | Per-slot context cap when `--kv-unified` is on. `0` = unlimited (uses global `--ctx-size`). | Caps per-slot VRAM. | `0` (toggle). | Set with `--kv-unified` to bound per-slot memory. |
-| `--defrag-thold` | KV defragmentation threshold. | Marked **DEPRECATED** in recent builds; still emitted for now. | `-1` (off; toggle). | Leave off; the probe drops it if the build removed it. |
 
 ## Memory & auto-fit
 

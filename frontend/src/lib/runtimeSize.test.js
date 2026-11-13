@@ -42,29 +42,29 @@ describe("formatDeltaMb", () => {
 });
 
 describe("runtimeSizeMb", () => {
-  it("nvidia: base + CUDA (RT-10 fase A)", () => {
-    expect(runtimeSizeMb("nvidia")).toBe(656);
+  it("nvidia: base + CUDA (RT-10 fase A, tamaños b12359)", () => {
+    expect(runtimeSizeMb("nvidia")).toBe(701);
   });
 
   it("amd: base + Vulkan (RT-10 B1)", () => {
-    expect(runtimeSizeMb("amd")).toBe(58);
+    expect(runtimeSizeMb("amd")).toBe(60);
   });
 
   it("amd por elección (RT-10 B2): rocm paga el paquete ROCm; default sigue siendo vulkan", () => {
-    expect(runtimeSizeMb("amd", "rocm")).toBe(274);
-    expect(runtimeSizeMb("amd", "vulkan")).toBe(58);
-    expect(runtimeSizeMb("amd", null)).toBe(58);
-    expect(runtimeSizeMb("amd", "cuda")).toBe(58);
+    expect(runtimeSizeMb("amd", "rocm")).toBe(291);
+    expect(runtimeSizeMb("amd", "vulkan")).toBe(60);
+    expect(runtimeSizeMb("amd", null)).toBe(60);
+    expect(runtimeSizeMb("amd", "cuda")).toBe(60);
   });
 
   it("nvidia no tiene selector: la elección no cambia su tamaño", () => {
-    expect(runtimeSizeMb("nvidia", "rocm")).toBe(656);
+    expect(runtimeSizeMb("nvidia", "rocm")).toBe(701);
   });
 
   it("familias sin paquete y desconocidas → solo base (degradado a CPU)", () => {
-    expect(runtimeSizeMb("intel")).toBe(23);
-    expect(runtimeSizeMb("cpu")).toBe(23);
-    expect(runtimeSizeMb(undefined)).toBe(23);
+    expect(runtimeSizeMb("intel")).toBe(24);
+    expect(runtimeSizeMb("cpu")).toBe(24);
+    expect(runtimeSizeMb(undefined)).toBe(24);
   });
 });
 
@@ -100,6 +100,7 @@ describe("accelFlavorLabel", () => {
     expect(accelFlavorLabel("cuda-12.4")).toBe("CUDA 12.4");
     expect(accelFlavorLabel("cuda-12.8")).toBe("CUDA 12.8");
     expect(accelFlavorLabel("cuda-13.4")).toBe("CUDA 13.4");
+    expect(accelFlavorLabel("cuda-13.5")).toBe("CUDA 13.5");
     expect(accelFlavorLabel("vulkan")).toBe("Vulkan");
     expect(accelFlavorLabel("rocm")).toBe("ROCm");
   });

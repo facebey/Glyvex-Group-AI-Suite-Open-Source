@@ -121,7 +121,6 @@ is ~16k tokens (~12–16 s at pp ~1300 t/s), almost never noticeable.
 | `numa` | `--numa` | off | The flag REQUIRES a value: `distribute` \| `isolate` \| `numactl`. |
 | `no_kv_offload` | `--no-kv-offload` | off | |
 | `cache_reuse` | `--cache-reuse` | 0 | 0–256. |
-| `defrag_thold` | `--defrag-thold` | -1 (off) | |
 | `kv_unified` | `--kv-unified` | off | Without this and with `n_parallel > 1`, **each slot reserves its own full ctx** (KV VRAM × N). |
 | `kv_unified_per_slot` | `--kv-unified-per-slot` | 0 | 0 = no limit (each slot uses the global `n_ctx`). Only with `kv_unified`. |
 | `sleep_idle_seconds` | `--sleep-idle-seconds` | 0 (off) | The server "sleeps" (frees VRAM) after N s of inactivity. |

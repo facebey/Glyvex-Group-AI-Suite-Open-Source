@@ -367,20 +367,23 @@ async def test_launch_model_mtp_true_solo_con_draft_real_del_modelo(client, tmp_
     assert "no tiene MTP" in str(exc.value)
 
     # Draft sidecar en la misma carpeta (regla mtp_companion_file): mtp=True lo
-    # engancha como mtp_draft_model.
+    # engancha como draft_model con spec_type=draft-mtp (schema LL-4).
     (tmp_path / "models" / "mtp-draft.gguf").touch()
     await scan_and_wait(client)
     data = await _call("launch_model", {"model_id": model_id, "template": "test-mtp",
                                         "overrides": {"mtp": True}})
-    draft = data["applied_config"]["mtp_draft_model"]
+    draft = data["applied_config"]["draft_model"]
     assert draft and draft.lower().endswith("mtp-draft.gguf")
-    assert captured["cfg"].mtp_draft_model == draft
+    assert captured["cfg"].draft_model == draft
+    assert captured["cfg"].spec_type == "draft-mtp"
 
     # false desactiva (aunque la plantilla o el escaneo lo hubieran dejado activo).
     data = await _call("launch_model", {"model_id": model_id, "template": "test-mtp",
                                         "overrides": {"mtp": False}})
-    assert data["applied_config"]["mtp_draft_model"] is None
-    assert captured["cfg"].mtp_draft_model is None
+    assert data["applied_config"]["spec_type"] == "none"
+    assert data["applied_config"]["draft_model"] is None
+    assert captured["cfg"].spec_type == "none"
+    assert captured["cfg"].draft_model is None
 
 
 async def test_launch_model_mmproj_true_solo_con_sidecar_real(client, tmp_path, monkeypatch):

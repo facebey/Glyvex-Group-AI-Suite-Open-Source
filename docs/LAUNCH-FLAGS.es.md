@@ -71,7 +71,6 @@ Donde el default de la build difiere, se nota en la columna de Impacto o Default
 | `--cache-reuse` | Reusa el KV de prefijos cacheados entre requests. | Más alto = más reuso, un poquito más de bookkeeping. `0` = off. | `0` (toggle). | Subilo (0–256) si repetís system prompts largos. |
 | `--kv-unified` | Comparte un solo pool de KV entre slots paralelos. | Sin esto, cada slot reserva su ctx completo (× N de VRAM). | off (toggle). | On cuando `--parallel > 1` para evitar N× ctx de VRAM. |
 | `--kv-unified-per-slot` | Tope de contexto por slot con `--kv-unified` activo. `0` = sin límite (usa el `--ctx-size` global). | Limita VRAM por slot. | `0` (toggle). | Ponelo con `--kv-unified` para acotar la memoria por slot. |
-| `--defrag-thold` | Umbral de defragmentación del KV. | Marcado **DEPRECATED** en builds recientes; se sigue enviando por ahora. | `-1` (off; toggle). | Dejalo off; el probe lo tira si la build lo quitó. |
 
 ## Memoria y auto-fit
 

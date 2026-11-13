@@ -160,7 +160,7 @@ function OnboardingScreen({ onDismiss }) {
   // la familia (espejo de ACCEL_SOURCES del backend en lib/runtimeSize.js).
   const offerAccel = accelOffered(runtime?.gpu_family);
   const sizeMb = runtimeSizeMb(runtime?.gpu_family, runtime?.accel_choice);
-  // RT-16: etiqueta del flavor instalado (p. ej. "CUDA 13.4") para el paso 3;
+  // RT-16: etiqueta del flavor instalado (p. ej. "CUDA 13.5") para el paso 3;
   // null (CPU/legado/experto) → texto original sin sufijo.
   const flavorLabel = accelFlavorLabel(runtime?.accel_flavor);
 

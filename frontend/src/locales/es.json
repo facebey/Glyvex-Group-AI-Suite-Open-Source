@@ -151,7 +151,7 @@
         "ctx": "ctx (contexto)",
         "queue": "cola",
         "cache": "caché",
-        "mtp": "MTP (solo si está activo)"
+        "mtp": "Especulación (solo si está activa)"
       }
     }
   },
@@ -497,6 +497,9 @@
     "detectedEmbedded": "detectado · incluido en el modelo",
     "visionModule": "Módulo de visión (mmproj)",
     "configure": "Configurar",
+    "speculation": "Especulación (modelo draft)",
+    "specDrafts_one": "{{count}} draft",
+    "specDrafts_other": "{{count}} drafts",
     "draftPathPlaceholder": "C:\\ruta\\a\\tu-draft.gguf",
     "mmprojPathPlaceholder": "C:\\ruta\\a\\tu-mmproj.gguf"
   },
@@ -519,11 +522,21 @@
     "inProgress": " en curso",
     "waitingCount": "{{n}} en espera",
     "cacheLabel": "caché",
+    "specLabel": "especulación",
     "cacheTitle": "Tokens de prompt reutilizados del caché desde que arrancó el servidor",
     "cacheLast": ". Último request: {{n}} %",
-    "mtpTitle": "Tokens propuestos por el draft (MTP) que el modelo aceptó, desde que arrancó",
+    "mtpTitle": "Tokens propuestos por el modelo draft que el modelo aceptó, desde que arrancó",
     "mtpLast": ". Último intervalo: {{n}} %",
     "mtpAccepted": "{{n}} % aceptado"
+  },
+  "processSpec": {
+    "title": "llama-server rechazó la especulación de este lanzamiento",
+    "hints": {
+      "draft_load": "El modelo draft no se pudo cargar. Verifica que el .gguf del draft sea de la misma familia que el modelo base, o cambia a un modo sin archivo (ngram) o a «Ninguna».",
+      "vocab_mismatch": "El vocabulario del draft no coincide con el del modelo base: llama-server no lo usará. Usa un draft generado para este modelo exacto.",
+      "spec_type_unsupported": "La build instalada de llama-server no reconoce ese modo de especulación. Actualiza el backend o elige un modo que aparezca en su --help.",
+      "draft_incompatible": "llama-server declara este draft incompatible con el modelo base. Consigue un draft para este modelo exacto o usa un modo ngram (sin archivo)."
+    }
   },
   "logTerminal": {
     "title": "Terminal de logs",
@@ -596,6 +609,34 @@
     "faQuantsWarning": "⚠ Con flash_attn=on el KV cache debe ser simétrico y estar en q4_0/q4_0, q8_0/q8_0, f16/f16 o bf16/bf16 (FA_QUANTS de la build).",
     "loadModeHint": "Reemplaza a mlock/mmap: cómo carga el binario el archivo del modelo (--load-mode).",
     "optionalModules": "Módulos opcionales",
+    "specTypeLabel": "Especulación (--spec-type)",
+    "specTypeHint": "Aceleración de generación: modos draft (modelo .gguf de borrador o cabeza embebida) o planes ngram (sin archivo, sin VRAM extra). «Ninguna» desactiva la especulación.",
+    "specModes": {
+      "none": "Ninguna",
+      "draft-mtp": "Draft MTP (embebido o archivo)",
+      "draft-dflash": "Draft DFlash (archivo)",
+      "draft-simple": "Draft simple (archivo)",
+      "draft-eagle3": "Draft EAGLE3 (archivo)",
+      "ngram-simple": "Ngram simple (sin archivo)",
+      "ngram-mod": "Ngram moderado (sin archivo)"
+    },
+    "specDraftHintDraftMtp": "Opcional: sin path se usa la cabeza MTP embebida o un archivo mtp-*.gguf detectado en la carpeta del modelo.",
+    "specDraftHintDraftDflash": "Requiere un archivo de draft DFlash compatible con el modelo base.",
+    "specDraftHintDraftSimple": "Requiere un archivo .gguf de draft compatible con la arquitectura del modelo base.",
+    "specDraftHintDraftEagle3": "Requiere un archivo de draft EAGLE3 entrenado para este modelo base.",
+    "specWarnMtpEither": "draft-mtp necesita un archivo de draft o la cabeza MTP embebida activada: sin ninguna de las dos el lanzamiento falla.",
+    "specWarnNeedDraft": "Este modo draft requiere un archivo .gguf de draft: el backend rechazaría el lanzamiento sin él.",
+    "ngramModeNote": "Los modos ngram no usan archivo de draft ni suman VRAM de pesos: su lookup vive en RAM. Campo vacío = default de la build.",
+    "ngramSizeNHint": "Longitud máxima del ngrama buscado en el contexto (--spec-ngram-simple-size-n). Default de la build: 12.",
+    "ngramSizeMHint": "Longitud máxima del borrador propuesto desde el ngrama encontrado (--spec-ngram-simple-size-m). Default de la build: 48.",
+    "ngramMinHitsHint": "Repeticiones necesarias de un ngrama para considerarlo fiable (--spec-ngram-simple-min-hits). Default de la build: 1.",
+    "ngramNMinHint": "Ventana mínima del contexto que observa el plan ngram (--spec-ngram-mod-n-min). Default de la build: 48.",
+    "ngramNMaxHint": "Ventana máxima del contexto que observa el plan ngram (--spec-ngram-mod-n-max). Default de la build: 64.",
+    "ngramNMatchHint": "Coincidencias necesarias para proponer el borrador (--spec-ngram-mod-n-match). Default de la build: 24.",
+    "specPreflightOk": "El vocabulario del draft coincide con el del modelo base en todo lo que ambos declaran.",
+    "specPreflightMismatch": "El draft declara diferencias con el modelo base: {{fields}}. Puede funcionar igualmente; revisa el log si llama-server lo rechaza.",
+    "specPreflightUnverified": "Sin verificar (un lado no lo declara): {{fields}}",
+    "specPreflightUnavailable": "Preflight no disponible: {{error}}",
     "mtpEmbeddedLabel": "MTP incluido en el modelo",
     "mtpLayers_one": " ({{count}} capa nextn)",
     "mtpLayers_other": " ({{count}} capas nextn)",
@@ -639,10 +680,10 @@
     "vramJustFit": "Cabe, pero justo al límite: considerá reducir n_ctx o usar fit_target.",
     "vramUnknown": "Declará la VRAM de tu GPU en Configuración para saber si cabe.",
     "vramMoE": "MoE: los pesos son los parámetros totales (por token solo corren los activos).",
-    "vramMtpDraft": "Hay un draft MTP disponible para este modelo: si lo activas, el uso real puede ser ~1–2 GB mayor que esta estimación (el auto-ajuste de llama.cpp tampoco lo cuenta).",
     "vramAuxMmproj": "Visión (mmproj)",
-    "vramAuxMtp": "Draft MTP",
-    "vramAuxNote": "La estimación ya suma estos componentes auxiliares ({{aux}} GB) porque en un lanzamiento con visión/MTP se cargan además de los pesos; si no los usas, el uso real será menor.",
+    "vramAuxSpec": "Especulación (draft)",
+    "vramSpecApplied": "Modo {{mode}} presupuestado: los pesos y el KV del draft ya están incluidos en la estimación.",
+    "vramAuxNote": "La estimación ya suma estos componentes auxiliares ({{aux}} GB) porque en un lanzamiento con visión/especulación se cargan además de los pesos; si no los usas, el uso real será menor.",
     "server": "Servidor",
     "kvParallelWarning": "⚠ Con n_parallel > 1 y kv_unified apagado, cada slot reserva su propio KV cache completo (x{{n}} la VRAM de contexto).",
     "apiKeyLabel": "API key (opcional)",
@@ -652,8 +693,6 @@
     "advCheckpointsCard": "Checkpoints",
     "advKvSessionCard": "Memoria KV y sesión",
     "cacheReuseDisabled": "0 (desactivado)",
-    "defragDisabled": "-1 (desactivado)",
-    "defragDeprecatedHint": "Marcado DEPRECATED en el --help del binario; el backend lo sigue enviando por ahora.",
     "oneDisabled": "1 = desactivado",
     "ctxCheckpointsHint": "Máx. checkpoints de contexto por slot (~150 MiB de VRAM c/u). Default de la build: 32.",
     "checkpointMinStepHint": "Espaciado mínimo entre checkpoints (tokens). Default de la build: 8192.",
@@ -896,7 +935,7 @@
         "inProgress": "En curso",
         "waiting": "En espera",
         "cacheHit": "Caché de prompt",
-        "mtpAccept": "MTP aceptados"
+        "mtpAccept": "Especulación aceptada"
       }
     },
     "processes": {

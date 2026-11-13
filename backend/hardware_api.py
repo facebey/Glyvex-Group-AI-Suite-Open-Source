@@ -45,7 +45,13 @@ async def _model_inputs(model_id: str) -> dict[str, Any]:
     añade los componentes auxiliares reales: mmproj con su tamaño de archivo y
     el draft MTP sidecar (path + tamaño + header) vía la regla compartida
     mtp_companion_file. Con tamaño 0 o metadata None el motor trata el
-    componente como no-medido (el fit honesto prefiere no inventar datos)."""
+    componente como no-medido (el fit honesto prefiere no inventar datos).
+
+    Limitación honesta v1 (LL-4 U3): el fit automático sigue resolviendo solo
+    el sidecar MTP — hoy es el único draft auto-descubrible con confianza.
+    Los demás modos draft (dflash/simple/eagle3) se presupuestan en
+    /vram-estimate y se eligen a mano; extender esta propuesta a dflash
+    requeriría oferta HF de sidecars."""
     entry = models_module.inventory.get(model_id)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Modelo no encontrado: {model_id}")
@@ -79,6 +85,10 @@ async def _model_inputs(model_id: str) -> dict[str, Any]:
         "size_gb": entry.size_gb,
         "metadata": metadata or {},
         "mtp_embedded": entry.mtp_embedded,
+        # Capas MTP que la arquitectura del base declara (U6): la ficha las
+        # pasa al fit para que un sidecar con header copiado no se presupuesta
+        # con las capas completas del base.
+        "mtp_embedded_layers": entry.mtp_embedded_layers,
         "mmproj_path": entry.mmproj_path,
         "mmproj_size_gb": mmproj_size,
         "mtp_draft_model": mtp_path,

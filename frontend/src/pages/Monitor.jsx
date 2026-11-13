@@ -1626,7 +1626,7 @@ export default function Monitor() {
                       {llmLast.cache_hit_pct_total != null && llmLast.spec_accept_pct_total != null && " · "}
                       {llmLast.spec_accept_pct_total != null && (
                         <span title={t("vitals.mtpTitle")}>
-                          MTP {t("vitals.mtpAccepted", { n: llmLast.spec_accept_pct_total.toFixed(1) })}
+                          {t("vitals.specLabel")} {t("vitals.mtpAccepted", { n: llmLast.spec_accept_pct_total.toFixed(1) })}
                         </span>
                       )}
                     </p>

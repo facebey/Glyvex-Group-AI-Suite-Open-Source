@@ -61,7 +61,7 @@ try:
 except ImportError:
     winreg = None
 
-RUNTIME_PIN = "b11827"
+RUNTIME_PIN = "b12359"
 META_FILENAME = ".runtime-meta.json"
 BINARY_NAME = "llama-server.exe" if platform.system() == "Windows" else "llama-server"
 
@@ -87,33 +87,36 @@ def _platform_files(files: list[dict]) -> list[dict]:
 
 # Split de RT-10 en 2 niveles: motor base (CPU) siempre, y aceleración de la
 # familia detectada encima cuando existe paquete verificable. La fuente es la
-# build oficial de la release ggml-org/llama.cpp del pin (b11827, familia
-# v0.7.0), descargada y verificada en la máquina de desarrollo. El bump
-# b11349 -> b11827 creció la superficie de flags de 257 a 262 long-flags
-# (0 removidos; +5: moe-cache-mib, spec-draft-n-ubatch, spec-draft-sampling,
-# connect, connect-code), verificado contra el --help real de los binarios.
-# La versión 0.7.0 no cambió el formato de --version: el probe sigue
-# extrayendo el build con el mismo parseo.
+# build oficial de la release ggml-org/llama.cpp del pin (b12359, línea
+# v1.0.0-dev; la release v1.0.0 no publica binarios propios, el pipeline sigue
+# apuntando al nightly bNNNNN), descargada y verificada en la máquina de
+# desarrollo. El bump b11827 -> b12359 creció la superficie de flags de 335 a
+# 342 long-flags (1 removido: defrag-thold; +8: moe-cache-cpu-share, ple,
+# shard, models-memory-margin, media-allow-private-urls,
+# allow-unauthenticated-tools, tts-lang, tts-voice), verificado contra el
+# --help real de los binarios (Fase A, 2026-11-13). La línea 1.0.0 no cambió
+# el formato de --version: el probe sigue extrayendo el build con el mismo
+# parseo.
 
 # Nivel 1: motor base (CPU). Corre en cualquier hardware x64 (Windows y
 # Linux); la aceleración, cuando existe para la familia, se extrae encima.
 BASE_SOURCES: list[dict] = [
     {
         "id": "official",
-        "description": "Build oficial ggml-org/llama.cpp b11827 (CPU)",
+        "description": "Build oficial ggml-org/llama.cpp b12359 (CPU)",
         "files": [
             {
                 "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                       "b11827/llama-b11827-bin-win-cpu-x64.zip",
-                "sha256": "2740eeac6ed9b727a3a1002f5a42e74defa3c4cbb9a8b42b11356a07f969cb13",
+                       "b12359/llama-b12359-bin-win-cpu-x64.zip",
+                "sha256": "837c1655e87df3b66989f4be33a792a1399c785bf259038dc75c900096683e69",
                 "platforms": ["win"],
             },
             {
                 # Builds "ubuntu" target glibc vieja → compatibles con
                 # versiones nuevas (probado contra Ubuntu 26.04, RT-14).
                 "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                       "b11827/llama-b11827-bin-ubuntu-x64.tar.gz",
-                "sha256": "7c1de2b2a139aa90e28b88d44a75f5966485604f68aa0ccdc2339959bca9b5f6",
+                       "b12359/llama-b12359-bin-ubuntu-x64.tar.gz",
+                "sha256": "0bc1f091e8916102b6d8f2cf944233a620e90a0f856c72d0ce41150c65c2e72e",
                 "platforms": ["linux"],
             },
         ],
@@ -121,15 +124,21 @@ BASE_SOURCES: list[dict] = [
 ]
 
 # Nivel 2: aceleración por familia de GPU, en orden de preferencia.
-# Fase A: "nvidia" (aprobada). "vulkan" (todas las AMD) entra en fase B con
-# la build b11827 VALIDADA en hardware real por el protocolo
-# PRUEBA-VULKAN-AMD-b11827.md; vive en la rama de las builds de prueba B1/B2 y
-# su merge a main queda condicionado al reporte aprobado (política dura: solo
-# versiones probadas). "rocm" (RDNA2/3, B2): ambas rutas AMD conviven y el
+# Fase A: "nvidia" (aprobada). "vulkan" (todas las AMD) entró en fase B con la
+# build b11827 VALIDADA en hardware real por el protocolo
+# PRUEBA-VULKAN-AMD-b11827.md (política dura: solo versiones probadas). El
+# bump b11827 -> b12359 re-pinea esas mismas rutas sin regresiones en el gate
+# de flags ni en los comandos emitidos (Fase A, 2026-11-13); el re-benchmark
+# AMD (amd-test-kit, RX 7600) queda en cola para este ciclo. "rocm" (RDNA2/3,
+# B2): ambas rutas AMD conviven y el
 # usuario elige cuál instala (config.runtime.accel → ?accel= en el download);
 # sin elección manda el orden de esta lista: Vulkan primero por cubrir toda la
 # familia. El orden definitivo sale de la comparativa t/s de la Parte 2 del
 # protocolo. Familia ausente → runtime degradado a CPU, no error.
+# AMD en Linux (b12359): por primera vez existen paquetes oficiales
+# (ubuntu-vulkan / ubuntu-rocm) y el catálogo los declara; la detección de
+# familia AMD en Linux es nueva (_gpu_via_sys_pci) y la validación en hardware
+# real sigue pendiente → NO se anuncia AMD-Linux en docs hasta probarla.
 ACCEL_SOURCES: dict[str, list[dict]] = {
     "nvidia": [
         {
@@ -139,22 +148,22 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
             # y para 7.5 ≤ cc < 10 cuando el driver instalado no llega al gate
             # de CUDA 13 (bundle autocontenido, el usuario no instala toolkit).
             "id": "official-cuda-12.4",
-            "description": "Build oficial ggml-org/llama.cpp b11827 (CUDA 12.4 + cuDART, Windows)",
+            "description": "Build oficial ggml-org/llama.cpp b12359 (CUDA 12.4 + cuDART, Windows)",
             "cuda_major": 12,
             # (RT-16) Flavor legible que se guarda en la meta y se muestra en
             # el badge: NUNCA se deriva del id (los ids no son estables entre
-            # pins — "official" fue CUDA 12.4 en b11349 y es 13.4 aquí).
+            # pins — "official" fue CUDA 12.4 en b11349 y es 13.5 aquí).
             "flavor": "cuda-12.4",
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                            "b11827/llama-b11827-bin-win-cuda-12.4-x64.zip",
-                    "sha256": "de09bcd70c917debda692025b751e753af4891e0807d991b44b2996fa44794b9",
+                            "b12359/llama-b12359-bin-win-cuda-12.4-x64.zip",
+                    "sha256": "e9c0abf442e8339c06728366c1ad2c711332f9939c0c00603fb75d85fd44c914",
                     "platforms": ["win"],
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                            "b11827/cudart-llama-bin-win-cuda-12.4-x64.zip",
+                            "b12359/cudart-llama-bin-win-cuda-12.4-x64.zip",
                     "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
                     "platforms": ["win"],
                 },
@@ -162,61 +171,62 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
         },
         {
             # Linux, CUDA 12.8: máxima compatibilidad — corre con driver
-            # NVIDIA >=570 (p. ej. 580.x). CUDA 13.4 exige driver >=590
+            # NVIDIA >=570 (p. ej. 580.x). CUDA 13.5 exige driver >=590
             # (gate RT-15B: _CUDA13_DRIVER_GATE), así que en equipos con
-            # driver 580 la GPU jamás se inicializaría con 13.4.
+            # driver 580 la GPU jamás se inicializaría con 13.5. La split
+            # R580/R590 (12.8 | 13.5) es la misma que en Windows (12.4 | 13.5).
             "id": "official-cuda-12.8",
-            "description": "Build oficial ggml-org/llama.cpp b11827 (CUDA 12.8 + cuDART, Linux)",
+            "description": "Build oficial ggml-org/llama.cpp b12359 (CUDA 12.8 + cuDART, Linux)",
             "cuda_major": 12,
             "flavor": "cuda-12.8",
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                            "b11827/llama-b11827-bin-ubuntu-cuda-12.8-x64.tar.gz",
-                    "sha256": "c1f538781281ec07841badf0f3972ed88e4f4b60b5aa7598139cadfa3d51a484",
+                            "b12359/llama-b12359-bin-ubuntu-cuda-12.8-x64.tar.gz",
+                    "sha256": "50c937bec5bbd9f74c99138034f7403283ee21f1943f2429d7b1e4c079eafc11",
                     "platforms": ["linux"],
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                            "b11827/cudart-llama-b11827-bin-ubuntu-cuda-12.8-x64.tar.gz",
-                    "sha256": "613ba629acfefe64bc35acc5b25af9bcecfdb4f114a8f137a674cc4a003bc83d",
+                            "b12359/cudart-llama-b12359-bin-ubuntu-cuda-12.8-x64.tar.gz",
+                    "sha256": "75a12d227f44a391608992329241765343bd143ee9445b90dc62e154ee726e5d",
                     "platforms": ["linux"],
                 },
             ],
         },
         {
-            # CUDA 13.4: Blackwell (sm_100/120/121, cc major >= 10) siempre;
+            # CUDA 13.5: Blackwell (sm_100/120/121, cc major >= 10) siempre;
             # Turing→Hopper (7.5 ≤ cc < 10) solo si el driver instalado llega
             # al gate _CUDA13_DRIVER_GATE (RT-15B); o elección explícita.
-            # TIRÓ Maxwell/Pascal/Volta (13.4 compila 75/80/86/89/90/120a/
-            # 121a; cero Pascal), por eso NUNCA es default para cc < 7.5 (RT-15).
+            # TIRÓ Maxwell/Pascal/Volta (13.5 compila de 75 hasta 120a/121a;
+            # cero Pascal), por eso NUNCA es default para cc < 7.5 (RT-15).
             "id": "official",
-            "description": "Build oficial ggml-org/llama.cpp b11827 (CUDA 13.4 + cuDART)",
+            "description": "Build oficial ggml-org/llama.cpp b12359 (CUDA 13.5 + cuDART)",
             "cuda_major": 13,
-            "flavor": "cuda-13.4",
+            "flavor": "cuda-13.5",
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11827/llama-b11827-bin-win-cuda-13.4-x64.zip",
-                    "sha256": "5d54c5fa2f26d9c80fa7439692e5929e8f7f1e7b2d00e3d6ab5a919154c768fa",
+                           "b12359/llama-b12359-bin-win-cuda-13.5-x64.zip",
+                    "sha256": "1de9ca1ff408d6e348ea0007c6880ad2393311a02e7799bcde26dc16daef03dd",
                     "platforms": ["win"],
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11827/cudart-llama-bin-win-cuda-13.4-x64.zip",
-                    "sha256": "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668",
+                           "b12359/cudart-llama-bin-win-cuda-13.5-x64.zip",
+                    "sha256": "c2bf4cc202bfbaaa7a0b75f5082457c3811326947bb216059b72839d844e9cba",
                     "platforms": ["win"],
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11827/llama-b11827-bin-ubuntu-cuda-13.4-x64.tar.gz",
-                    "sha256": "1baf6ae4459bfcccb04b66bc6acb2914923ae5698bc40cf475be0ab1c939d95a",
+                           "b12359/llama-b12359-bin-ubuntu-cuda-13.5-x64.tar.gz",
+                    "sha256": "9440f417615bed0e191acef03bff0249117d2be74335358265a6d28475a9baf0",
                     "platforms": ["linux"],
                 },
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                           "b11827/cudart-llama-b11827-bin-ubuntu-cuda-13.4-x64.tar.gz",
-                    "sha256": "7c55cfc0ab65e36c0fcb03868f7c281273fcf7a91426c4343c3960fff3b17c20",
+                           "b12359/cudart-llama-b12359-bin-ubuntu-cuda-13.5-x64.tar.gz",
+                    "sha256": "976a9146bb8a487a6ea701224d7fb14b05e494ab3c8f5c1799ffc4e5805d640c",
                     "platforms": ["linux"],
                 },
             ],
@@ -226,41 +236,60 @@ ACCEL_SOURCES: dict[str, list[dict]] = {
         {
             # (RT-10 B1) Vulkan cubre a TODA AMD (GCN→RDNA3) con una sola
             # ruta cross-brand: no hace falta distinguir RDNA2/3 (eso solo
-            # importa para ROCm, fase B2). Win-only por ahora: el protocolo de
-            # validación cubre Windows; Linux vulkan queda para después de la
-            # aprobación (misma política: solo builds probadas).
+            # importa para ROCm, fase B2). Validado en hardware real en
+            # Windows (b11827); en b12359 se re-pinea sin regresiones en el
+            # gate. Linux entra con los paquetes ubuntu-vulkan publicados por
+            # upstream en b12359: catálogo declarado, validación en hardware
+            # pendiente (no anunciar en docs hasta probarla).
             # Tag "accel" (B2): permite la elección explícita del usuario
             # (config.runtime.accel). Las familias sin tag no tienen selector.
             "id": "official-vulkan",
             "accel": "vulkan",
             "flavor": "vulkan",
-            "description": "Build oficial ggml-org/llama.cpp b11827 (Vulkan, Windows)",
+            "description": "Build oficial ggml-org/llama.cpp b12359 (Vulkan)",
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                            "b11827/llama-b11827-bin-win-vulkan-x64.zip",
-                    "sha256": "760034ee144e5f0ab712abd55e2c46dfe9930fd4f38508eb0f0ec36890074e6d",
+                            "b12359/llama-b12359-bin-win-vulkan-x64.zip",
+                    "sha256": "e8d18c6e4210cca87e7307c2ea78363ac8d158e4e1397358ec96ab70b53a0d5e",
                     "platforms": ["win"],
+                },
+                {
+                    "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
+                            "b12359/llama-b12359-bin-ubuntu-vulkan-x64.tar.gz",
+                    "sha256": "19b60f00395a3f4954e46a5037695bc1d843404fc9d3124f82a612ecd8fbe9f0",
+                    "platforms": ["linux"],
                 },
             ],
         },
         {
-            # (RT-10 B2) ROCm 10.0: kernels oficiales para gfx1030/1035/1100/
-            # 1101/1102 (RDNA2/RDNA3) — más t/s que Vulkan en esas GPUs, pero
-            # NO cubre GCN/RDNA1. Por eso vive DETRÁS de Vulkan en la lista:
+            # (RT-10 B2) ROCm 10.0: kernels oficiales para RDNA2/RDNA3
+            # (gfx1030/1035/1100/1101/1102 y, según la matriz §9 del análisis,
+            # también gfx1010-12 RDNA1, gfx1150-53 y gfx1200-1201 RDNA4 en el
+            # asset b12359) — más t/s que Vulkan en esas GPUs, pero NO cubre
+            # GCN. Por eso vive DETRÁS de Vulkan en la lista:
             # sin elección la familia AMD sigue con la ruta universal; la
             # elección ROCm la hace el usuario (selector de Config → Runtime)
             # y la comparativa de la Parte 2 decide si ROCm pasa a default.
+            # El paquete b12359 además trae gfx1010-12 (RDNA1), gfx1150-53 y
+            # gfx1200-1201 (RDNA4). Linux: mismo criterio que Vulkan —
+            # catálogo declarado, validación en hardware pendiente.
             "id": "official-rocm-10.0",
             "accel": "rocm",
             "flavor": "rocm",
-            "description": "Build oficial ggml-org/llama.cpp b11827 (ROCm 10.0, Windows)",
+            "description": "Build oficial ggml-org/llama.cpp b12359 (ROCm 10.0)",
             "files": [
                 {
                     "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
-                            "b11827/llama-b11827-bin-win-rocm-10.0-x64.zip",
-                    "sha256": "290c51fc21ce1ae2a1918fdc91334ca3cec571eb8cc84b524fbfd2c124b92c43",
+                            "b12359/llama-b12359-bin-win-rocm-10.0-x64.zip",
+                    "sha256": "d5021cebbd3bd50a7cab3b9f121a887e45df76c360ecfa927940aac3bb64a982",
                     "platforms": ["win"],
+                },
+                {
+                    "url": "https://github.com/ggml-org/llama.cpp/releases/download/"
+                            "b12359/llama-b12359-bin-ubuntu-rocm-10.0-x64.tar.gz",
+                    "sha256": "2d934c367e613ec67a5f78dffa450ee30bc3a6024f559b70c207896ee4bc9108",
+                    "platforms": ["linux"],
                 },
             ],
         },
@@ -341,9 +370,10 @@ def _system_driver_major() -> int | None:
 
 # Gate de driver para bajar CUDA 13.x (RT-15B). Docs NVIDIA: CUDA 13.x
 # requiere driver r580+ (minor version compatibility); el build upstream
-# 13.4 pinnado aquí se validó en Linux solo con r590+ (ver ACCEL_SOURCES),
+# 13.5 pinnado aquí se validó en Linux solo con r590+ (ver ACCEL_SOURCES),
 # así que el gate usa el valor conservativo que satisface ambos. Ajustable
-# tras confirmación en vivo (QA del ítem).
+# tras confirmación en vivo (QA del ítem). Split R580/R590 intacta en b12359:
+# driver < 590 baja a CUDA 12.8 (Linux) / 12.4 (Windows).
 _CUDA13_DRIVER_GATE = 590
 
 
@@ -438,7 +468,7 @@ def accel_choices(family: str) -> list[str]:
 
 def _accel_flavor_from_catalog(source_id: str | None) -> str | None:
     """(RT-16) Flavor declarado por el catálogo para un id de fuente
-    ('official-cuda-12.4' → 'cuda-12.4', 'official' → 'cuda-13.4'). None si el
+    ('official-cuda-12.4' → 'cuda-12.4', 'official' → 'cuda-13.5'). None si el
     id no está en el catálogo (meta de un pin viejo: no hay qué mostrar).
     Se busca por id en el catálogo, NO se parsea del id: los ids no son
     estables entre pins."""
@@ -594,24 +624,65 @@ def _gpu_via_video_controller() -> str | None:
     return nvidia or (names[0] if names else None)
 
 
+# Raíz sysfs para detectar GPUs por PCI en Linux (b12359): lectura directa de
+# vendor/class de cada dispositivo, sin subprocess ni dependencias nuevas. Solo
+# se usa como último fallback antes de degradar a CPU.
+_SYS_PCI_ROOT = "/sys/bus/pci/devices"
+# Vendors PCI conocidos → nombre legible para el mapeo de detect_gpu_family.
+_PCI_VENDOR_NAMES = {"0x1002": "AMD", "0x8086": "Intel", "0x10de": "NVIDIA"}
+# Clase PCI 0x03xx: controladores de display (VGA/3D/otro).
+_DISPLAY_CLASS_PREFIX = "0x03"
+
+
+def _gpu_via_sys_pci() -> str | None:
+    """Nombre de la GPU vía sysfs PCI en Linux, o None si no hay dispositivos
+    de display reconocibles. Con NVIDIA presente, pynvml ya respondió antes."""
+    if platform.system() != "Linux":
+        return None
+    try:
+        devices = sorted(os.listdir(_SYS_PCI_ROOT))
+    except OSError:
+        return None
+    found: list[str] = []
+    for dev in devices:
+        dev_path = os.path.join(_SYS_PCI_ROOT, dev)
+        try:
+            with open(os.path.join(dev_path, "class"), encoding="ascii") as f:
+                cls = f.read().strip().lower()
+            if not cls.startswith(_DISPLAY_CLASS_PREFIX):
+                continue
+            with open(os.path.join(dev_path, "vendor"), encoding="ascii") as f:
+                vendor = f.read().strip().lower()
+        except OSError:
+            continue
+        name = _PCI_VENDOR_NAMES.get(vendor)
+        if name:
+            found.append(name)
+    return found[0] if found else None
+
+
 def detect_gpu() -> str:
-    """Cascada de detección de GPU: pynvml → video controller de Windows → "cpu".
+    """Cascada de detección de GPU: pynvml → video controller de Windows →
+    sysfs PCI en Linux → "cpu".
 
     Granularidad (verificación RT-10, fase A): en Windows distingue nvidia/amd/
-    intel/cpu por el nombre del video controller; en Linux solo detecta NVIDIA
-    (pynvml) — AMD/Intel sin NVIDIA caen a "cpu" (la accel AMD/Intel es fase B,
-    bloqueada por la prueba en hardware real). Multi-GPU devuelve el index 0,
-    suficiente para la oferta del runtime (MON-1 cubre el detalle por GPU).
+    intel/cpu por el nombre del video controller. En Linux, con NVIDIA responde
+    pynvml; si NVML no responde, sysfs PCI distingue AMD/Intel para habilitar
+    las rutas ubuntu-vulkan/rocm del bump b12359 (pendiente de validación en
+    hardware real: no anunciar en docs hasta probarla). Multi-GPU devuelve el
+    index 0, suficiente para la oferta del runtime (MON-1 cubre el detalle por
+    GPU).
     """
-    return _gpu_via_pynvml() or _gpu_via_video_controller() or "cpu"
+    return _gpu_via_pynvml() or _gpu_via_video_controller() or _gpu_via_sys_pci() or "cpu"
 
 
 def detect_gpu_family() -> str:
     """Familia para el gate del runtime: nvidia | amd | intel | cpu.
 
-    Granularidad a propósito (fase A): solo nvidia cambia la oferta
-    (aceleración CUDA). Distinguir AMD RDNA2/3 (ROCm) de AMD antigua (solo
-    Vulkan) es fase B, bloqueada por la prueba en hardware real.
+    Granularidad a propósito: nvidia y amd cambian la oferta (CUDA en
+    NVIDIA; Vulkan/ROCm en AMD). Distinguir AMD RDNA2/3 (ROCm) de AMD antigua
+    (solo Vulkan) no se hace aquí: sin elección, la lista de ACCEL_SOURCES da
+    Vulkan por cubrir toda la familia.
     """
     name = (detect_gpu() or "").lower()
     if "nvidia" in name:
