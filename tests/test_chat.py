@@ -2,8 +2,9 @@
 
 import json
 
+import chat as chat_module
 from helpers import drain_sse
-from mock_llm_server import set_models_auth
+from mock_llm_server import set_models_auth, set_props
 
 
 def _parse_events(raw_lines: list[str]) -> list[dict]:
@@ -231,3 +232,72 @@ async def test_estimate_con_contexto_medido(client, mock_llama_server):
     assert data["source"] == "measured"
     assert data["base_tokens"] == 1500
     assert data["tokens"] == 1500              # sin re-contar el system prompt
+    # Sin /props en el mock no hay n_ctx conocido: headroom 0 y fits True —
+    # sin contexto medido no se puede afirmar un desborde.
+    assert data["context_size"] == 0
+    assert data["headroom"] == 0
+    assert data["fits"] is True
+
+
+async def test_estimate_headroom_prompt_con_n_props(client, mock_llama_server):
+    """CHAT-CTX-W: el desborde lo define SOLO el prompt vs n_ctx (semántica de
+    llama-server, tools/server/server-context.cpp). max_tokens ya no participa:
+    la generación se autolimita al hueco. Con n_ctx 32768 y un prompt de 1500
+    el envío cabe holgado aunque el cliente mande el max_tokens gigante que
+    guardaban las versiones viejas de la UI (131072 == n_ctx de Qwen3.8)."""
+    chat_module._caps_cache.clear()
+    set_props({"n_ctx": 32768, "model_alias": "test-model"})
+    try:
+        payload = {
+            "endpoint": mock_llama_server,
+            "messages": [],
+            "system_prompt": "sos un asistente",
+            "base_tokens": 1500,
+        }
+        res = await client.post("/api/chat/estimate", json=payload)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["context_size"] == 32768
+        assert data["tokens"] == 1500
+        assert data["headroom"] == 32768 - 1500
+        assert data["fits"] is True
+
+        # Guard de regresión: un max_tokens heredado de localStorage viejo no
+        # debe alterar la estimación (el campo salió de EstimateRequest y
+        # Pydantic lo ignora).
+        res2 = await client.post("/api/chat/estimate", json={**payload, "max_tokens": 131072})
+        assert res2.json() == data
+    finally:
+        set_props(None)
+        chat_module._caps_cache.clear()
+
+
+async def test_estimate_desborde_real_prompt_vs_n_props(client, mock_llama_server):
+    """El aviso suena solo cuando el prompt NO entra en la ventana: ahí sí
+    llama-server rechaza el envío (prompt >= n_ctx)."""
+    chat_module._caps_cache.clear()
+    set_props({"n_ctx": 32768, "model_alias": "test-model"})
+    try:
+        payload = {
+            "endpoint": mock_llama_server,
+            "messages": [],
+            "base_tokens": 40000,  # historial medido que ya pasó la ventana
+        }
+        res = await client.post("/api/chat/estimate", json=payload)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["context_size"] == 32768
+        assert data["headroom"] == 32768 - 40000
+        assert data["fits"] is False
+
+        # Justo al límite todavía cabe: headroom 0 no es desborde.
+        res2 = await client.post(
+            "/api/chat/estimate",
+            json={"endpoint": mock_llama_server, "messages": [], "base_tokens": 32768},
+        )
+        data2 = res2.json()
+        assert data2["headroom"] == 0
+        assert data2["fits"] is True
+    finally:
+        set_props(None)
+        chat_module._caps_cache.clear()

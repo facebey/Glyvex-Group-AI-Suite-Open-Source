@@ -229,6 +229,54 @@ async def test_metadata_think_only_template(client, tmp_path):
     assert data["suggested_preset"] == "thinking"
 
 
+# Flags del visor de plantilla (CHAT-TPL-VIEW): los mismos que chat.py lee
+# en runtime, expuestos en metadata para que la UI afirme solo lo medido.
+
+
+async def test_metadata_template_flags_full_qwen_style(client, tmp_path):
+    # Plantilla tipo Qwen3 con todas las variables: thinking, preserve,
+    # effort y tools (par tools+tool_call, como detecta llama.cpp).
+    template = (
+        "{%- if tools %}# Tools\n{%- for tool in tools %}"
+        "<tool_call>{{ tool }}</tool_call>{%- endfor %}{%- endif %}\n"
+        "{%- if enable_thinking %}<|think|>"
+        "{%- if preserve_thinking %}{{ history_thinking }}{% endif %}"
+        "{%- if reasoning_effort %}<effort>{{ reasoning_effort }}</effort>{% endif %}"
+        "{%- endif %}"
+    )
+    data = await _metadata_for(
+        client, tmp_path,
+        "FullFlags-8B-Q4_K_M.gguf", "qwen3",
+        template,
+    )
+    assert data["thinking_support"] is True
+    assert data["enable_thinking_kwarg"] is True
+    assert data["preserve_thinking_kwarg"] is True
+    assert data["reasoning_effort_kwarg"] is True
+    assert data["tools_in_template"] is True
+
+
+async def test_metadata_template_flags_gemma_style(client, tmp_path):
+    # Plantilla tipo Gemma 4 (verificada en HF, 2026-11): lee
+    # enable_thinking y preserve_thinking, pero NO reasoning_effort. Sin
+    # tools en el template.
+    template = (
+        "{{ bos }}{%- if enable_thinking %}<|thinking|>"
+        "{%- if preserve_thinking %}<|keep_thinking|>{% endif %}"
+        "<|thinking|>{%- endif %}"
+    )
+    data = await _metadata_for(
+        client, tmp_path,
+        "GemmaLike-8B-Q4_K_M.gguf", "gemma4",
+        template,
+    )
+    assert data["thinking_support"] is True
+    assert data["enable_thinking_kwarg"] is True
+    assert data["preserve_thinking_kwarg"] is True
+    assert data["reasoning_effort_kwarg"] is False
+    assert data["tools_in_template"] is False
+
+
 # --------------------------------------------------------------------------
 # general.sampling del GGUF -> suggested_sampling (preset "auto")
 # --------------------------------------------------------------------------

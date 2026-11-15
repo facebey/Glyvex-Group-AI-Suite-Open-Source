@@ -1,6 +1,7 @@
 """Tests de launcher.py — construcción de comandos, templates en SQLite, ciclo de vida de procesos."""
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -728,6 +729,7 @@ FRONTEND_LAUNCH_PAYLOAD = {
     "warmup": True,
     "lazy_mode": "auto",
     "reasoning_budget": -1,
+    "chat_template_text": None,
     "host": "127.0.0.1",
     "port": 18080,
     "n_threads": -1,
@@ -1911,3 +1913,201 @@ async def test_preview_command_sends_reasoning_for_thinking_template(client, pro
     cmd = res.json()["command"]
     assert cmd[cmd.index("--reasoning") + 1] == "on"
     assert cmd[cmd.index("--reasoning-budget") + 1] == "4096"
+
+
+# --------------------------------------------------------------------------
+# chat template override (CHAT-TPL-FLAG): --chat-template-file / --chat-template
+# justo después de --jinja, materializado bajo data/, con fallback inline y
+# degradación silenciosa en builds que no conocen ninguno de los dos flags.
+# --------------------------------------------------------------------------
+
+TPL_TEXT = "{% for message in messages %}{{ '<|im_start|>' + message['role'] }}{% endfor %}"
+
+
+def test_build_command_no_chat_template_by_default():
+    # Sin override: el modelo usa su template embebido, ningún flag sale.
+    cmd = launcher_module.build_llama_server_command(
+        launcher_module.LaunchConfig(model_id="m"), "/opt/llama-server", "/models/m.gguf")
+    assert "--chat-template" not in cmd
+    assert "--chat-template-file" not in cmd
+
+
+def test_build_command_chat_template_file_goes_right_after_jinja():
+    cfg = launcher_module.LaunchConfig(model_id="m", chat_template_text=TPL_TEXT)
+    cmd = launcher_module.build_llama_server_command(
+        cfg, "/opt/llama-server", "/models/m.gguf", chat_template_path="/data/chat_templates/abc.jinja")
+    # El --help del binario: los templates no-built-in solo se aceptan "unless
+    # --jinja is set before this flag" -> la adyacencia es parte del contrato.
+    assert cmd[cmd.index("--jinja") + 1] == "--chat-template-file"
+    assert cmd[cmd.index("--chat-template-file") + 1] == "/data/chat_templates/abc.jinja"
+    assert "--chat-template" not in cmd
+
+
+def test_build_command_chat_template_inline_fallback_for_builds_without_file_flag():
+    cfg = launcher_module.LaunchConfig(model_id="m", chat_template_text=TPL_TEXT)
+    cmd = launcher_module.build_llama_server_command(
+        cfg, "/opt/llama-server", "/models/m.gguf",
+        chat_template_path="/data/chat_templates/abc.jinja",
+        supported_flags={"--chat-template"},
+    )
+    assert cmd[cmd.index("--jinja") + 1] == "--chat-template"
+    assert cmd[cmd.index("--chat-template") + 1] == TPL_TEXT
+    assert "--chat-template-file" not in cmd
+
+
+def test_build_command_chat_template_skipped_when_binary_knows_neither_flag():
+    # Build vieja sin ninguno: no se emite nada (en vez de mandar un flag que
+    # el server rechazaría y dejar el chat sin template alguno).
+    cfg = launcher_module.LaunchConfig(model_id="m", chat_template_text=TPL_TEXT)
+    cmd = launcher_module.build_llama_server_command(
+        cfg, "/opt/llama-server", "/models/m.gguf",
+        chat_template_path="/data/chat_templates/abc.jinja",
+        supported_flags={"--model", "--chat-template-kwargs"},
+    )
+    assert "--chat-template" not in cmd
+    assert "--chat-template-file" not in cmd
+
+
+def test_build_command_chat_template_applies_in_auto_mode():
+    # El override es una elección explícita del usuario, no tuning: ignorarlo
+    # en modo automático sería silencioso. Va con --jinja explícito y antes.
+    cfg = launcher_module.LaunchConfig(model_id="m", auto_mode=True, chat_template_text=TPL_TEXT)
+    cmd = launcher_module.build_llama_server_command(
+        cfg, "/opt/llama-server", "/models/m.gguf", chat_template_path="/data/chat_templates/abc.jinja")
+    assert cmd[cmd.index("--jinja") + 1] == "--chat-template-file"
+    # Ningún otro flag de tuning se filtró por el override.
+    assert "--ctx-size" not in cmd
+    assert "--reasoning" not in cmd
+
+
+def test_chat_template_validation_blank_rejected():
+    with pytest.raises(ValidationError, match="chat_template_text está vacío"):
+        launcher_module.LaunchConfig(model_id="m", chat_template_text="   ")
+    # La forma correcta de "no usar override" es null, no "".
+    assert launcher_module.LaunchConfig(model_id="m", chat_template_text=None).chat_template_text is None
+
+
+def test_chat_template_validation_requires_jinja():
+    with pytest.raises(ValidationError, match="jinja=true"):
+        launcher_module.LaunchConfig(model_id="m", jinja=False, chat_template_text=TPL_TEXT)
+
+
+def test_chat_template_validation_max_chars():
+    too_long = "x" * (launcher_module.CHAT_TEMPLATE_MAX_CHARS + 1)
+    with pytest.raises(ValidationError, match="excede"):
+        launcher_module.LaunchConfig(model_id="m", chat_template_text=too_long)
+
+
+def test_materialize_chat_template_is_content_addressed_under_data_dir():
+    # Mismo texto -> mismo archivo (no se acumulan copias en cada lanzamiento);
+    # texto distinto -> archivo distinto. Siempre cuelga del DATA_DIR actual.
+    first = launcher_module.materialize_chat_template(TPL_TEXT)
+    again = launcher_module.materialize_chat_template(TPL_TEXT)
+    other = launcher_module.materialize_chat_template(TPL_TEXT + "!")
+    assert first == again
+    assert first != other
+    path = Path(first)
+    assert path.is_relative_to(launcher_module.DATA_DIR.resolve())
+    assert path.parent.name == launcher_module.CHAT_TEMPLATES_DIRNAME
+    assert path.suffix == ".jinja"
+    assert path.read_text(encoding="utf-8") == TPL_TEXT
+
+
+def test_resolve_chat_template_path_none_without_override():
+    cfg = launcher_module.LaunchConfig(model_id="m")
+    assert launcher_module.resolve_chat_template_path(cfg) is None
+
+
+async def test_preview_command_chat_template_materializes_file_and_orders_after_jinja(
+    client, sample_model_dir, make_probeable_binary
+):
+    model_id = await _first_model_id(client, sample_model_dir)
+    binary = make_probeable_binary([
+        "--model PATH",
+        "--host 127.0.0.1",
+        "--port 8080",
+        "--ctx-size 4096",
+        "--jinja",
+        "--chat-template-file PATH",
+    ])
+    await _configure_llama_binary(client, binary)
+
+    res = await client.post(
+        "/api/launcher/preview-command",
+        json={"model_id": model_id, "chat_template_text": TPL_TEXT},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    cmd = data["command"]
+    assert cmd[cmd.index("--jinja") + 1] == "--chat-template-file"
+    tpl_path = Path(cmd[cmd.index("--chat-template-file") + 1])
+    assert tpl_path.is_relative_to(launcher_module.DATA_DIR.resolve())
+    assert tpl_path.read_text(encoding="utf-8") == TPL_TEXT
+    # Preview y launch comparten el mismo archivo: no hay nada descartado.
+    assert "--chat-template-file" not in data["dropped"]
+
+
+async def test_preview_command_chat_template_inline_when_build_lacks_file_flag(
+    client, sample_model_dir, make_probeable_binary
+):
+    model_id = await _first_model_id(client, sample_model_dir)
+    binary = make_probeable_binary([
+        "--model PATH",
+        "--host 127.0.0.1",
+        "--port 8080",
+        "--ctx-size 4096",
+        "--jinja",
+        "--chat-template STRING",
+    ])
+    await _configure_llama_binary(client, binary)
+
+    res = await client.post(
+        "/api/launcher/preview-command",
+        json={"model_id": model_id, "chat_template_text": TPL_TEXT},
+    )
+    assert res.status_code == 200
+    cmd = res.json()["command"]
+    assert cmd[cmd.index("--jinja") + 1] == "--chat-template"
+    assert cmd[cmd.index("--chat-template") + 1] == TPL_TEXT
+    assert "--chat-template-file" not in cmd
+
+
+async def test_preview_command_chat_template_absent_on_build_without_the_flags(
+    client, sample_model_dir, probeable_binary
+):
+    # b11827 del fixture no conoce ninguno de los dos: el builder no los emite
+    # y el chat del modelo sigue funcionando con su template embebido.
+    model_id = await _first_model_id(client, sample_model_dir)
+    await _configure_llama_binary(client, probeable_binary)
+
+    res = await client.post(
+        "/api/launcher/preview-command",
+        json={"model_id": model_id, "chat_template_text": TPL_TEXT},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "--chat-template" not in data["command"]
+    assert "--chat-template-file" not in data["command"]
+    assert "--chat-template" not in data["dropped"]
+    assert "--chat-template-file" not in data["dropped"]
+
+
+async def test_preview_command_chat_template_rejects_blank_text(client, sample_model_dir):
+    model_id = await _first_model_id(client, sample_model_dir)
+    res = await client.post(
+        "/api/launcher/preview-command",
+        json={"model_id": model_id, "chat_template_text": "  "},
+    )
+    assert res.status_code == 422
+
+
+async def test_preview_command_chat_template_requires_jinja_enabled(client, sample_model_dir):
+    model_id = await _first_model_id(client, sample_model_dir)
+    res = await client.post(
+        "/api/launcher/preview-command",
+        json={"model_id": model_id, "chat_template_text": TPL_TEXT, "jinja": False},
+    )
+    assert res.status_code == 422
+    # El body es LaunchConfig: el ValueError del validador llega como 422 de
+    # FastAPI (detail = lista de errores pydantic).
+    assert any("jinja" in str(item) for item in res.json()["detail"])

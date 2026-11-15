@@ -76,22 +76,23 @@ VRAM se dispara.
 
 **Síntoma.** La UI avisa **antes de enviar**: el composer muestra "Este
 envío supera el contexto del modelo por unos N tokens" (y la barra de
-métricas muestra el uso del contexto y el margen tras la respuesta). Si se
+métricas muestra el uso del contexto y el margen libre tras el prompt). Si se
 envía igual, llama-server responde 400 y el chat muestra
 `Upstream 400: ... exceeds n_ctx ...`.
 
 **Qué pasa.** Cada mensaje suma al prompt completo que se reenvía (system +
-historial + adjuntos + tool calls). El chequeo de llama.cpp no es
-`prompt > n_ctx` sino **`prompt + max_tokens > n_ctx`**: el default de
-`max_tokens` del chat es 4096, así que una conversación "casi llena" ya se
-rechaza. Un adjunto grande o muchas herramientas pueden comer decenas de k
-tokens de golpe.
+historial + adjuntos + tool calls). El chequeo de llama.cpp es sobre el
+prompt a secas: falla cuando **`prompt >= n_ctx`** (`tools/server/
+server-context.cpp`). La generación se autolimita al hueco que queda, así
+que un `max_tokens` largo nunca provoca un desborde por sí solo — el chat
+envía `max_tokens: -1` (sin límite propio) y el server corta la generación
+al llenar el contexto o con el token de stop. Un adjunto grande o muchas
+herramientas sí pueden comer decenas de k tokens de golpe, y ahí el envío se
+rechaza.
 
 **Qué hacer.**
 - **Iniciá una conversación nueva** para la tarea nueva: es la salida más
   barata.
-- **Bajá `max_tokens`** en los ajustes del chat (default 4096): libera el
-  margen que el server reserva para la respuesta.
 - Subí `n_ctx` si la VRAM lo permite (ver `--fit-target`: llama.cpp reserva
   un margen y auto-reduce el ctx para que el modelo siga cabiendo).
 - Revisá adjuntos: un PDF de 100 páginas no entra en ningún contexto

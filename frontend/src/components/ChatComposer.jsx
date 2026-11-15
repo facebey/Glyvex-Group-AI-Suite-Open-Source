@@ -52,6 +52,7 @@ export default function ChatComposer({
   onRemoveAttachment,
   reasoning,
   onReasoningChange,
+  effortUnsupported = false,
   streaming,
   onSend,
   onStop,
@@ -139,7 +140,7 @@ export default function ChatComposer({
 
       <div className="flex items-end gap-2">
         <div className="flex items-center gap-1 shrink-0">
-          <ReasoningControl value={reasoning} onChange={onReasoningChange} />
+          <ReasoningControl value={reasoning} onChange={onReasoningChange} effortUnsupported={effortUnsupported} />
           <button
             type="button"
             onClick={() => onToolsToggle(!toolsEnabled)}

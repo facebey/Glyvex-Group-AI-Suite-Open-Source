@@ -33,6 +33,7 @@ import {
   ExternalLink,
   Bot,
   Wand2,
+  FileCode,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useLlmStream } from "../hooks/useLlmStream.js";
@@ -56,6 +57,13 @@ import {
   specRequiresDraftFile,
   specTypeForDraftFilename,
 } from "../lib/specModes.js";
+import {
+  TEMPLATE_FLAG_TERMS,
+  TEMPLATE_FLAGS,
+  embeddedTemplate,
+  flagState,
+  templateHighlightSegments,
+} from "../lib/chatTemplate.js";
 
 // Espejo de SAMPLING_PRESETS de backend/launcher.py. Vive acá para poder
 // previsualizar los valores sin round-trip; si cambian en el backend, hay
@@ -178,6 +186,13 @@ const DEFAULT_LAUNCH_CONFIG = {
   lazy_mode: "auto",
   // Token budget nativo del server para el reasoning (-1 = sin límite).
   reasoning_budget: -1,
+  // -- Chat template override (CHAT-TPL-FLAG) ---------------------------
+  // Jinja propio que reemplaza el chat template embebido del modelo: null =
+  // no se manda nada y el modelo usa su template (casi siempre lo correcto).
+  // El backend materializa el texto en data/chat_templates/ y lanza con
+  // --chat-template-file. "" en la UI significa "sin override" y se normaliza
+  // a null en el payload (un string vacío sería un 422).
+  chat_template_text: null,
   // -- P1.5: toggles por flag -------------------------------------------
   // fit = "ajusta los args sin fijar a la VRAM" (default on en la build;
   // OFF envía --fit off explícito, porque faltar el flag deja el default on).
@@ -217,6 +232,13 @@ const TOGGLE_GROUPS = {
 };
 
 const DEFAULT_TOGGLES = Object.fromEntries(Object.keys(TOGGLE_GROUPS).map((k) => [k, true]));
+
+// CHAT-TPL-FLAG: "" o espacios sueltos en la UI = sin override: el backend
+// espera null (un string en blanco es un 422 del validador). Se normaliza
+// igual en launch y preview para que mover el editor nunca rompa el preview.
+function normalizeChatTemplateText(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
 
 // La config serializada de un proceso vivo trae null justo donde el toggle
 // estaba OFF: se deduce el estado para restaurarlo al re-montar. Excepción:
@@ -283,6 +305,10 @@ const TEMPLATE_FIELDS = [
   "rope_freq_base", "rope_scaling_type", "yarn_ext_factor",
   "numa", "no_kv_offload", "cache_reuse",
   "grp_attn_n", "grp_attn_w", "jinja", "reasoning_effort",
+  // Chat template override (CHAT-TPL-FLAG): viaja con la receta porque el
+  // override es parte del lanzamiento; sin él la receta reaplicada no
+  // reproduce el launch.
+  "chat_template_text",
   // Fuera a propósito: mmproj_path (lo aporta el modelo seleccionado),
   // api_key/log_file/backend (fijos, no son parte de la receta).
 ];
@@ -336,6 +362,169 @@ function Panel({ icon: Icon, title, defaultOpen = true, children }) {
     >
       {children}
     </CollapsiblePanel>
+  );
+}
+
+// CHAT-TPL-VIEW: visor del chat template embebido en el GGUF. Los badges
+// muestran SOLO banderas medidas por el backend (_chat_template_flags en
+// models.py, las mismas que chat.py aplica en runtime); el resaltado del
+// texto es decorativo y cubre únicamente las confirmadas. Sin dato medido
+// (null) no se renderiza nada: ni afirma ni niega.
+function ChatTemplateViewer({ meta }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const template = embeddedTemplate(meta);
+  const segments = useMemo(() => templateHighlightSegments(template, meta), [template, meta]);
+
+  const copy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(template || "");
+    } catch {
+      // Sin permiso de portapapeles (o contexto no seguro): fallback manual.
+      const ta = document.createElement("textarea");
+      ta.value = template || "";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch { /* el usuario copia a mano */ }
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [template]);
+
+  return (
+    <Panel icon={FileCode} title={t("launcher.tplViewerTitle")} defaultOpen={false}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {TEMPLATE_FLAGS.map((key) => {
+          const state = flagState(meta, key);
+          if (state === null) return null;
+          const label = TEMPLATE_FLAG_TERMS[key].terms[0];
+          return (
+            <span
+              key={key}
+              className={
+                "px-2 py-0.5 rounded border text-xs font-mono " +
+                (state === true
+                  ? "border-glyvex-accent text-glyvex-accent bg-glyvex-accent/10"
+                  : "border-glyvex-border-soft text-glyvex-muted-2")
+              }
+            >
+              {label} {state ? "✓" : "✗"}
+            </span>
+          );
+        })}
+        {template && (
+          <button
+            type="button"
+            onClick={copy}
+            title={t("launcher.tplViewerCopy")}
+            className="ml-auto flex items-center gap-1 px-2 py-1 rounded-md text-xs border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text shrink-0"
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-glyvex-muted mt-2">
+        {template ? t("launcher.tplViewerNote") : t("launcher.tplViewerNone")}
+      </p>
+      {template && (
+        <>
+          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-glyvex-border-soft bg-glyvex-surface-code p-3 text-[11px] leading-relaxed text-glyvex-muted whitespace-pre-wrap break-all font-mono">
+            {segments.map((seg, i) =>
+              seg.hl ? (
+                <span key={i} className="text-glyvex-accent font-semibold">{seg.text}</span>
+              ) : (
+                <span key={i}>{seg.text}</span>
+              )
+            )}
+          </pre>
+          <p className="text-[11px] text-glyvex-muted-2 mt-2">
+            {t("launcher.tplViewerFlagsNote")}
+          </p>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+// CHAT-TPL-FLAG: override del chat template embebido del modelo. El texto se
+// envía como chat_template_text; el backend lo materializa en
+// data/chat_templates/ y lanza con --chat-template-file (fallback inline
+// --chat-template en builds sin el flag de archivo). El prefill desde el
+// template embebido es el flujo pretendido: editar sobre la base real del
+// modelo en vez de escribir Jinja desde cero. Parámetro estrictamente
+// avanzado: el panel solo existe en modo avanzado. Sin probe (supported=null)
+// queda habilitado: filter_command protege el launch en el backend.
+function ChatTemplateOverride({ cfg, updateConfig, meta, supported, build, flagHelp }) {
+  const { t } = useTranslation();
+  const embedded = embeddedTemplate(meta) || "";
+  // La build no conoce ninguno de los dos flags: el override no puede
+  // aplicarse, y mostrarlo activo sería prometer algo que filter_command va a
+  // descartar igual.
+  const unsupported = Boolean(
+    supported && !supported.has("--chat-template-file") && !supported.has("--chat-template")
+  );
+  // Con --no-jinja el server no usa ningún template Jinja, ni el propio: el
+  // backend respondería 422. El editor se apaga junto con ese toggle.
+  const blocked = unsupported || !cfg.jinja;
+  const value = cfg.chat_template_text ?? "";
+  const setText = (next) => updateConfig({ chat_template_text: next.trim() === "" ? null : next });
+  const textareaClasses =
+    "w-full bg-glyvex-veil-disabled border border-glyvex-border-soft rounded-md px-3 py-2 text-[11px] leading-relaxed " +
+    "text-glyvex-text font-mono placeholder:text-glyvex-muted/60 focus:outline-none " +
+    "focus:ring-2 focus:ring-glyvex-accent/60";
+  const buttonClasses =
+    "flex items-center gap-1 px-2 py-1 rounded-md text-xs border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text shrink-0";
+  return (
+    <Panel icon={FileCode} title={t("launcher.tplOverrideTitle")} defaultOpen={false}>
+      <Field
+        label="chat_template_text (--chat-template-file)"
+        hint={
+          unsupported
+            ? t("launcher.tplOverrideUnsupported", { build: build || "?" })
+            : !cfg.jinja
+              ? t("launcher.tplOverrideJinjaNote")
+              : t("launcher.tplOverrideHint")
+        }
+        flagHelp={unsupported ? "" : flagHelp}
+      >
+        <textarea
+          className={textareaClasses}
+          rows={10}
+          spellCheck={false}
+          disabled={blocked}
+          value={value}
+          placeholder={t("launcher.tplOverridePlaceholder")}
+          onChange={(e) => setText(e.target.value)}
+        />
+      </Field>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setText(embedded)}
+          disabled={blocked || !embedded}
+          className={buttonClasses}
+        >
+          <FileCode size={12} />
+          {t("launcher.tplOverrideFromEmbedded")}
+        </button>
+        <button
+          type="button"
+          onClick={() => setText("")}
+          disabled={blocked || !value}
+          className={buttonClasses}
+        >
+          <Check size={12} />
+          {t("launcher.tplOverrideClear")}
+        </button>
+      </div>
+      <p className="text-xs text-amber-400 mt-2">
+        {t("launcher.tplOverrideWarning")}
+      </p>
+      <p className="text-[11px] text-glyvex-muted-2 mt-1">
+        {t("launcher.tplOverrideStoredNote")}
+      </p>
+    </Panel>
   );
 }
 
@@ -1566,12 +1755,13 @@ export default function Launcher() {
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
+        const previewCfg = applyToggles(launchConfig);
         const res = await fetch("/api/launcher/preview-command", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(autoMode
-            ? { model_id: selectedId, host: launchConfig.host, port: launchConfig.port, auto_mode: true }
-            : { model_id: selectedId, ...applyToggles(launchConfig) }),
+            ? { model_id: selectedId, host: launchConfig.host, port: launchConfig.port, auto_mode: true, chat_template_text: normalizeChatTemplateText(previewCfg.chat_template_text) }
+            : { model_id: selectedId, ...previewCfg, chat_template_text: normalizeChatTemplateText(previewCfg.chat_template_text) }),
         });
         const data = await res.json();
         if (cancelled) return;
@@ -2047,7 +2237,7 @@ export default function Launcher() {
       if (autoMode) {
         const res = await fetch("/api/launcher/launch", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model_id: selectedModel.id, host: launchConfig.host, port: launchConfig.port, auto_mode: true }),
+          body: JSON.stringify({ model_id: selectedModel.id, host: launchConfig.host, port: launchConfig.port, auto_mode: true, chat_template_text: normalizeChatTemplateText(launchConfig.chat_template_text) }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || "launch_failed");
@@ -2066,6 +2256,7 @@ export default function Launcher() {
         cache_type_v_draft: toggled.cache_type_v_draft || null,
         mmproj_path: toggled.mmproj_path || null,
         lora_path: toggled.lora_path || null,
+        chat_template_text: normalizeChatTemplateText(toggled.chat_template_text),
       };
       const res = await fetch("/api/launcher/launch", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
@@ -2886,6 +3077,21 @@ export default function Launcher() {
             )}
 
             {samplingPanel}
+
+            {metaOk && <ChatTemplateViewer meta={modelMeta} />}
+
+            {/* CHAT-TPL-FLAG: solo modo avanzado, justo debajo del visor del
+                template embebido (es la base desde la que se edita). */}
+            {advancedMode && metaOk && (
+              <ChatTemplateOverride
+                cfg={launchConfig}
+                updateConfig={updateConfig}
+                meta={modelMeta}
+                supported={supportedFlags}
+                build={backendInfo?.build}
+                flagHelp={probeHelp("--chat-template-file") || probeHelp("--chat-template")}
+              />
+            )}
 
             {advancedMode && (
               <>

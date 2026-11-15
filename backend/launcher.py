@@ -59,6 +59,7 @@ y contra b11349 (bump de mantenimiento, 2026-10-02):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import platform
 import re
@@ -400,6 +401,18 @@ class LaunchConfig(BaseModel):
     # chat_template_kwargs solo con thinking enabled).
     reasoning_budget: int = -1           # --reasoning-budget
 
+    # -- Chat template override (CHAT-TPL-FLAG) --------------------------
+    # Jinja propio que reemplaza el chat template embebido del .gguf. None =
+    # no se manda nada: el modelo usa su template, que es el camino correcto
+    # para casi todos los casos. Ningún valor de este campo es inocuo: un
+    # template equivocado rompe las tools y el thinking del modelo, por eso la
+    # UI lo expone solo en modo avanzado y con el aviso explícito.
+    # El texto se materializa en data/chat_templates/ y viaja como
+    # --chat-template-file <ruta> (fallback --chat-template <texto> en builds
+    # sin ese flag). Requiere jinja=True: con --no-jinja el server no usa
+    # template Jinja alguno, el suyo propio incluido.
+    chat_template_text: str | None = None    # --chat-template-file / --chat-template
+
     # -- Sampling parameters (defaults del servidor) --------------------
     # Cuando se pasan como flags de arranque, llama-server los usa como
     # defaults para todos los clientes que no especifiquen sus propios valores.
@@ -650,6 +663,23 @@ class LaunchConfig(BaseModel):
             if (self.ngram_n_min is not None and self.ngram_n_max is not None
                     and self.ngram_n_max < self.ngram_n_min):
                 raise ValueError("ngram_n_max debe ser >= ngram_n_min")
+        # -- chat template override (CHAT-TPL-FLAG) -----------------------
+        if self.chat_template_text is not None:
+            if not self.chat_template_text.strip():
+                raise ValueError(
+                    "chat_template_text está vacío: usa null para no aplicar "
+                    "override y dejar el template embebido del modelo"
+                )
+            if len(self.chat_template_text) > CHAT_TEMPLATE_MAX_CHARS:
+                raise ValueError(
+                    f"chat_template_text excede {CHAT_TEMPLATE_MAX_CHARS} caracteres"
+                )
+            if not self.jinja:
+                raise ValueError(
+                    "el override de chat template requiere jinja=true: con "
+                    "--no-jinja llama-server no usa ningún template Jinja, ni "
+                    "el propio"
+                )
         return self
 
 
@@ -788,6 +818,33 @@ def resolve_log_path(log_file: str, process_id: str) -> Path:
             detail=f"log_file debe quedar dentro de {DATA_DIR}: {log_file}",
         ) from exc
     return log_path
+
+
+# El Jinja del override (CHAT-TPL-FLAG) se materializa en un archivo bajo
+# data/ y se pasa con --chat-template-file: el comando queda corto y legible,
+# el template queda auditable en disco, y no hay que escapar un Jinja
+# multilínea como argumento. Los archivos son contenido-direccionados (el hash
+# del texto es el nombre): el mismo template reutiliza el mismo archivo y no
+# se acumulan copias en cada lanzamiento. Se resuelve contra DATA_DIR en el
+# momento de escribir (no en el import) para que una instancia con
+# GLYVEX_DATA_DIR separado escriba sus templates en su propio data/.
+CHAT_TEMPLATES_DIRNAME = "chat_templates"
+CHAT_TEMPLATE_MAX_CHARS = 100_000
+
+
+def materialize_chat_template(text: str) -> str:
+    """Escribe el Jinja del override en data/chat_templates/ y devuelve la ruta."""
+    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+    directory = DATA_DIR / CHAT_TEMPLATES_DIRNAME
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{digest}.jinja"
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def resolve_chat_template_path(cfg: LaunchConfig) -> str | None:
+    """Ruta del archivo con el Jinja del override, o None si no hay override."""
+    return materialize_chat_template(cfg.chat_template_text) if cfg.chat_template_text else None
 
 
 # Flags que, si el binario no los conoce, indican que estamos ante un
@@ -999,6 +1056,7 @@ def build_llama_server_command(
     model_path: str,
     enable_thinking_supported: bool = True,
     supported_flags: set[str] | None = None,
+    chat_template_path: str | None = None,
 ) -> list[str]:
     # P1.5: solo --model y --port van siempre. Todo lo que tiene toggle es
     # Optional: None (toggle OFF) -> no se emite el flag -> default de build.
@@ -1006,6 +1064,19 @@ def build_llama_server_command(
         binary_path,
         "--model", model_path,
     ]
+    # Args del override de chat template (CHAT-TPL-FLAG), calculados una sola
+    # vez porque el modo automático también los aplica: el Jinja propio es una
+    # elección explícita del usuario, no un default de tuning, así que ignorarlo
+    # en auto sería silencioso. La ruta la resuelve el caller (materializa el
+    # texto en data/); acá solo se decide cómo viaja.
+    chat_template_args: list[str] = []
+    if cfg.chat_template_text and chat_template_path:
+        if supported_flags is None or "--chat-template-file" in supported_flags:
+            chat_template_args = ["--chat-template-file", chat_template_path]
+        elif "--chat-template" in supported_flags:
+            # Fallback para builds que conocen el template inline pero no el de
+            # archivo: el texto viaja directo en el comando.
+            chat_template_args = ["--chat-template", cfg.chat_template_text]
     if cfg.auto_mode:
         # Modo automático: ningún flag de tuning — mandarlo sería pisar el
         # default de la build, que es justo lo que este modo quiere probar.
@@ -1016,6 +1087,12 @@ def build_llama_server_command(
         cmd += ["--port", str(cfg.port), "--verbosity", str(LLAMA_SERVER_VERBOSITY)]
         if cfg.backend == "llama_server":
             cmd.append("--metrics")
+        if chat_template_args:
+            # En auto no se manda ningún tuning, pero el override sí se aplica:
+            # --jinja va explícito y ANTES del template porque el --help del
+            # binario solo acepta Jinja propio si --jinja precede (el
+            # validador ya exige jinja=True cuando hay override).
+            cmd += ["--jinja", *chat_template_args]
         return cmd
     if cfg.n_ctx is not None:
         cmd += ["--ctx-size", str(cfg.n_ctx)]
@@ -1063,6 +1140,13 @@ def build_llama_server_command(
     # (el server sigue con Jinja prendido). Por eso las dos ramas, no solo
     # el append condicional.
     cmd.append("--jinja" if cfg.jinja else "--no-jinja")
+    # -- chat template override (CHAT-TPL-FLAG) ---------------------------
+    # Inmediatamente después del flag de jinja: el --help de llama-server
+    # advierte que los templates que no están en su lista de built-in "solo se
+    # aceptan (unless --jinja is set before this flag)". No se emiten
+    # --in-prefix/--in-suffix: el propio help dice que con prefijo/sufijo el
+    # template queda deshabilitado.
+    cmd += chat_template_args
     # -- reasoning effort / budget: flags nativos del server (b11009) ----
     # --reasoning-effort pasa "reasoning effort level given to the chat
     # template": es la versión nativa del server del viejo kwarg
@@ -1684,12 +1768,16 @@ class ModelProcessManager:
             # faltantes son error duro.
             info = await probe_binary(binary_path)
             supported = set(info.flags) if info.probed else set()
+            # El Jinja del override se escribe antes de armar el comando: el
+            # launch y su preview comparten exactamente el mismo archivo.
+            chat_template_path = resolve_chat_template_path(cfg)
             cmd = build_llama_server_command(
                 cfg,
                 binary_path,
                 model.path,
                 enable_thinking_supported=enable_thinking_supported,
                 supported_flags=supported,
+                chat_template_path=chat_template_path,
             )
             if supported:
                 # Solo los críticos que el comando emite realmente: si
@@ -1882,12 +1970,16 @@ async def preview_command(cfg: LaunchConfig) -> CommandPreview:
     )
     info = await probe_binary(binary_path)
     supported = set(info.flags) if info.probed else set()
+    # Mismo archivo que el launch (contenido-direccionado): el preview muestra
+    # el comando real que va a correr, con la ruta del template incluida.
+    chat_template_path = resolve_chat_template_path(cfg)
     cmd = build_llama_server_command(
         cfg,
         binary_path,
         model.path,
         enable_thinking_supported=enable_thinking_supported,
         supported_flags=supported,
+        chat_template_path=chat_template_path,
     )
     cmd, dropped = filter_command(cmd, supported)
     return CommandPreview(

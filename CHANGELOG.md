@@ -7,6 +7,65 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-15
+
+The Chat learns to **read each model**: sampling presets faithful to the official
+model cards, reasoning controls that only offer what a model's chat template
+actually reads, a viewer that shows the real template behind every model, an
+advanced override that swaps that template for your own Jinja, and context
+accounting that matches what llama-server really checks.
+
+### Added
+- **Sampling presets in the chat**: built-in presets that reproduce the official
+  Hugging Face generation settings per model family — resolved by model name
+  (Gemma 4 matched through the endpoint name, Qwen3-Coder without colliding with
+  the other Qwen3 variants, and nothing invented for models outside the registry)
+  — plus **user presets** stored in a new `chat_presets` table with their own
+  API, mirroring the launcher's hardware-template pattern. The chat sidebar gets a
+  preset selector (auto / built-in / user / custom) with save-as-preset and
+  delete; built-in and user presets are merged per model when resolving.
+- **Chat template viewer**: the embedded Jinja chat template of each model is now
+  readable from the model info panel (collapsible section after the sampling
+  panel), with badges for the capabilities the template *actually* reads. The
+  detection lives in one place — `_chat_template_flags()` in `backend/models.py`
+  — and is exposed in the model metadata; the UI never claims a capability the
+  measured data doesn't support.
+- **Chat template override (advanced)**: the Launcher's advanced mode can replace
+  the model's embedded chat template with your own Jinja — a "start from the
+  embedded template" button prefills the real base. The text is saved under
+  `data/chat_templates/` as a content-addressed file (same text reuses the same
+  file; the `.gguf` is never modified) and launched with `--chat-template-file`
+  immediately after `--jinja`, exactly as llama-server requires; builds that
+  only know the inline `--chat-template` get that fallback, and builds that
+  know neither emit nothing instead of silently dropping the flag. The override
+  requires `--jinja` and applies even in auto mode — it is an explicit user
+  choice, not tuning.
+
+### Changed
+- **Reasoning controls honest about what the model supports**: the thinking budget
+  now travels per request as `reasoning_budget_tokens` (`-1` is sent explicitly so
+  the UI's "unlimited" overrides the launch-time budget), and `reasoning_effort`
+  is treated as what it really is — a chat-template variable. When the server
+  ships no `chat_template_caps`, capabilities are derived by scanning the model's
+  `chat_template`; a model whose template ignores effort shows that row grayed out
+  with an explanation of why.
+- **Tauri shell: `ureq` 2 → 3**: `health_ok()` and `restore_fans_before_exit()`
+  adapted to the new API (`timeout_global`, `read_json`, `send_empty`).
+- **Dependencies synced from the open-source distribution**: the 13 Dependabot
+  updates merged in the public repo are mirrored into the private manifests
+  (independent histories — manifests copied, not git-merged).
+
+### Fixed
+- **False "context overflow" warnings**: the overflow check measures the prompt
+  against `n_ctx` the way llama-server does, instead of subtracting a generation
+  allowance the server grants itself. The chat now sends `max_tokens: -1` (no
+  Suite-side limit — llama-server stops at the context or the stop token), the
+  chat UI drops the `max_tokens` and `seed` controls, and the estimate's
+  `headroom` is the room left after the prompt. `docs/TROUBLESHOOTING.md` now
+  states the real rule llama.cpp applies (`prompt >= n_ctx`).
+
+New tests: 36 backend + 17 frontend (1126 pytest, 130 vitest).
+
 ## [0.15.0] — 2026-11-13
 
 The embedded runtime moves to **llama.cpp b12359** (the v1.0.0-dev line), and

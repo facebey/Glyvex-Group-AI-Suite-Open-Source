@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Trash2, Upload } from "lucide-react";
+import { Bookmark, Download, Trash2, Upload } from "lucide-react";
 import CollapsibleSection from "./ui/CollapsibleSection.jsx";
 import Slider from "./ui/Slider.jsx";
 import { inputClasses } from "../lib/styles.js";
+import { PRESET_AUTO, PRESET_CUSTOM } from "../lib/chatPresets.js";
 
 // llama-server reporta como id del modelo la ruta completa del .gguf
 // (C:\LLM\gguf\Qwen…\modelo.gguf), que se corta en el selector. Se muestra
@@ -12,35 +13,6 @@ function modelLabel(id) {
   if (!id) return id;
   const base = String(id).split(/[\\/]/).pop();
   return base || id;
-}
-
-/** Switch chico y sin dependencias extra, mismo patrón que el del Launcher. */
-function MiniToggle({ checked, onChange, disabled = false }) {
-  function handleClick() {
-    if (disabled) return;
-    onChange(!checked);
-  }
-  return (
-    <span
-      role="switch"
-      aria-checked={checked}
-      tabIndex={disabled ? -1 : 0}
-      onClick={handleClick}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), handleClick())}
-      className={
-        "inline-flex items-center h-5 w-9 shrink-0 rounded-full border transition-colors cursor-pointer " +
-        (disabled ? "opacity-40 cursor-not-allowed " : "") +
-        (checked ? "bg-glyvex-accent border-glyvex-accent" : "bg-glyvex-veil-disabled border-glyvex-border-soft")
-      }
-    >
-      <span
-        className={
-          "h-3.5 w-3.5 rounded-full bg-white ring-1 ring-glyvex-border-hi transition-transform " +
-          (checked ? "translate-x-[19px]" : "translate-x-[3px]")
-        }
-      />
-    </span>
-  );
 }
 
 /**
@@ -64,10 +36,13 @@ export default function ChatSidebar({
   onApiKeyChange,
   systemPrompt,
   onSystemPromptChange,
-  appendFileConvention,
-  onAppendFileConventionChange,
   params,
   onParamChange,
+  presets = [],
+  presetChoice,
+  onPresetChange,
+  onPresetSave,
+  onPresetDelete,
   onClear,
   onExportJson,
   onExportMarkdown,
@@ -80,6 +55,11 @@ export default function ChatSidebar({
   const importInputRef = useRef(null);
 
   const contextSize = capabilities?.context_size ?? 0;
+
+  const builtinPresets = presets.filter((p) => p.builtin);
+  const userPresets = presets.filter((p) => !p.builtin);
+  // Solo los presets del usuario pueden borrarse; los built-in no viven en la DB.
+  const selectedUserPreset = userPresets.find((p) => p.id === presetChoice) || null;
 
   const pingColor =
     endpointStatus === "ok"
@@ -199,20 +179,6 @@ export default function ChatSidebar({
           onChange={(e) => onSystemPromptChange(e.target.value)}
           placeholder={t("chatSidebar.systemPromptPlaceholder")}
         />
-        <label className="flex items-start gap-2 mt-2.5 cursor-pointer select-none">
-          <MiniToggle
-            checked={Boolean(appendFileConvention)}
-            onChange={onAppendFileConventionChange}
-          />
-          <span className="text-xs text-glyvex-muted leading-snug">
-            {t("chatSidebar.fileConvention")}
-            <span className="block text-[11px] opacity-70">
-              {t("chatSidebar.fileConventionHintBefore")}
-              <code className="text-glyvex-text">lenguaje:nombre.ext</code>
-              {t("chatSidebar.fileConventionHintAfter")}
-            </span>
-          </span>
-        </label>
       </CollapsibleSection>
 
       <CollapsibleSection
@@ -220,29 +186,61 @@ export default function ChatSidebar({
         open={paramsOpen}
         onToggle={() => setParamsOpen((v) => !v)}
       >
+        <div>
+          <span className="block text-sm text-glyvex-muted mb-1">{t("chatSidebar.preset")}</span>
+          <div className="flex gap-2">
+            <select
+              className={inputClasses}
+              value={presetChoice}
+              onChange={(e) => onPresetChange(e.target.value)}
+            >
+              <option value={PRESET_AUTO}>{t("chatPresets.auto")}</option>
+              {builtinPresets.length > 0 && (
+                <optgroup label={t("chatPresets.groupBuiltin")}>
+                  {builtinPresets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.labelKey ? t(p.labelKey) : p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {userPresets.length > 0 && (
+                <optgroup label={t("chatPresets.groupUser")}>
+                  {userPresets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              <option value={PRESET_CUSTOM}>{t("chatPresets.custom")}</option>
+            </select>
+            <button
+              type="button"
+              onClick={onPresetSave}
+              title={t("chatPresets.save")}
+              className="px-2 py-1.5 rounded-md text-xs border border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil-disabled shrink-0"
+            >
+              <Bookmark size={14} />
+            </button>
+            {selectedUserPreset && (
+              <button
+                type="button"
+                onClick={onPresetDelete}
+                title={t("chatPresets.delete")}
+                className="px-2 py-1.5 rounded-md text-xs border border-glyvex-border-soft text-glyvex-muted hover:text-red-400 hover:bg-glyvex-veil-disabled shrink-0"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+          </div>
+        </div>
         <Slider label="Temperature" value={params.temperature} min={0} max={2} step={0.05} onChange={(v) => onParamChange({ temperature: v })} formatValue={(v) => v.toFixed(2)} />
         <Slider label="Top P" value={params.top_p} min={0} max={1} step={0.01} onChange={(v) => onParamChange({ top_p: v })} formatValue={(v) => v.toFixed(2)} />
         <Slider label="Top K" value={params.top_k} min={0} max={100} step={1} onChange={(v) => onParamChange({ top_k: v })} />
         <Slider label="Min P" value={params.min_p} min={0} max={1} step={0.01} onChange={(v) => onParamChange({ min_p: v })} formatValue={(v) => v.toFixed(2)} />
         <Slider label="Repeat penalty" value={params.repeat_penalty} min={1} max={1.5} step={0.01} onChange={(v) => onParamChange({ repeat_penalty: v })} formatValue={(v) => v.toFixed(2)} />
-        <label className="block">
-          <span className="block text-xs text-glyvex-muted mb-1">Max tokens</span>
-          <input
-            type="number"
-            className={inputClasses}
-            value={params.max_tokens}
-            onChange={(e) => onParamChange({ max_tokens: Number(e.target.value) })}
-          />
-        </label>
-        <label className="block">
-          <span className="block text-xs text-glyvex-muted mb-1">{t("chatSidebar.seed")}</span>
-          <input
-            type="number"
-            className={inputClasses}
-            value={params.seed}
-            onChange={(e) => onParamChange({ seed: Number(e.target.value) })}
-          />
-        </label>
+        <Slider label="Presence penalty" value={params.presence_penalty} min={-2} max={2} step={0.1} onChange={(v) => onParamChange({ presence_penalty: v })} formatValue={(v) => v.toFixed(2)} />
       </CollapsibleSection>
 
       <div className="border-t border-glyvex-border-soft pt-3 space-y-2">

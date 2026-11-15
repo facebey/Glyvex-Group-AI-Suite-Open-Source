@@ -210,6 +210,7 @@ export default function MessageBubble({
   onRegenerate,
   onContinue,
   reasoning,
+  effortUnsupported = false,
   busy = false,
   // Solo para la respuesta que se está generando: fase actual (ver
   // StreamStatus.streamPhase) y tools en curso.
@@ -226,8 +227,8 @@ export default function MessageBubble({
   useEffect(() => setRegenReasoning(reasoning), [reasoning]);
   const isUser = message.role === "user";
   const hasAttachments = Array.isArray(message.attachments) && message.attachments.length > 0;
-  // Solo tiene sentido continuar si el corte fue por max_tokens y la
-  // respuesta ya terminó de streamear.
+  // Solo tiene sentido continuar si el corte fue por límite de generación
+  // del server (finish_reason "length") y la respuesta ya terminó de streamear.
   const canContinue =
     !isUser && !streaming && !busy && message.finish_reason === "length" && Boolean(message.content);
 
@@ -372,7 +373,7 @@ export default function MessageBubble({
           {!isUser && !streaming && !busy && (
             <span className="inline-flex items-center gap-0.5">
               <span className="scale-90 origin-center">
-                <ReasoningControl value={regenReasoning} onChange={setRegenReasoning} />
+                <ReasoningControl value={regenReasoning} onChange={setRegenReasoning} effortUnsupported={effortUnsupported} />
               </span>
               <button
                 type="button"

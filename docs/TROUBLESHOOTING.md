@@ -76,22 +76,22 @@ VRAM spikes.
 
 **Symptom.** The UI warns **before sending**: the composer shows "This send
 exceeds the model context by about N tokens" (and the metrics bar shows the
-context usage and the margin after the response). If you send it anyway,
+context usage and the free margin after the prompt). If you send it anyway,
 llama-server responds 400 and the chat shows
 `Upstream 400: ... exceeds n_ctx ...`.
 
 **What happens.** Every message is added to the full prompt that gets resent
-(system + history + attachments + tool calls). The llama.cpp check is not
-`prompt > n_ctx` but **`prompt + max_tokens > n_ctx`**: the chat's
-`max_tokens` default is 4096, so a "nearly full" conversation is already
-rejected. A large attachment or many tools can eat tens of k
-tokens at once.
+(system + history + attachments + tool calls). The llama.cpp check is on the
+prompt alone: it errors when **`prompt >= n_ctx`** (`tools/server/
+server-context.cpp`). The generation is self-limited to whatever room is
+left, so a long `max_tokens` never by itself causes an overflow — the chat
+sends `max_tokens: -1` (no own limit) and the server cuts generation at the
+context or the stop token. A large attachment or many tools can still eat
+tens of k tokens at once, and then the send is rejected.
 
 **What to do.**
 - **Start a new conversation** for the new task: it is the cheapest
   way out.
-- **Lower `max_tokens`** in the chat settings (default 4096): it frees the
-  margin the server reserves for the response.
 - Raise `n_ctx` if VRAM allows (see `--fit-target`: llama.cpp reserves
   a margin and auto-reduces the ctx so the model keeps fitting).
 - Review attachments: a 100-page PDF does not fit in any reasonable

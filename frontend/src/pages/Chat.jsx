@@ -20,13 +20,17 @@ import { exportAsJson, exportAsMarkdown } from "../lib/export.js";
 import {
   ROOT_ID, appendChain, emptyTree, patchNode, siblingInfo, switchBranch, toTree, visiblePath,
 } from "../lib/conversationTree.js";
+import {
+  PRESET_AUTO, PRESET_CUSTOM, normalizePresetChoice, presetSaveScope, resolvePresetEntry,
+} from "../lib/chatPresets.js";
+import { effortUnsupported as effortUnsupportedByTemplate } from "../lib/chatReasoning.js";
 
 const SESSION_KEY = "glyvex_chat_messages";
 
-// Texto que se suma al system prompt cuando el toggle "convención de
-// archivos" está activo (ver appendFileConvention). Vive en los locales
-// (chat.fileConventionPrompt), no en el textarea del usuario, para no
-// pisarle lo que ya haya escrito: se concatena, nunca reemplaza.
+// Convención de nombres de archivos generados: siempre activa (ciclo
+// CHAT-CTX-W: dejó de ser un toggle, la instrucción se manda siempre). Vive
+// en los locales (chat.fileConventionPrompt), no en el textarea del usuario,
+// para no pisarle lo que ya haya escrito: se concatena, nunca reemplaza.
 
 const DEFAULT_PARAMS = {
   temperature: 0.7,
@@ -34,8 +38,10 @@ const DEFAULT_PARAMS = {
   top_k: 40,
   min_p: 0.0,
   repeat_penalty: 1.1,
-  max_tokens: 4096,
-  seed: -1,
+  // CHAT-PRESETS: 0 = default del server (no viaja al upstream). Existe acá
+  // porque el filtro de abajo descartaría la clave y presets como el de
+  // Qwen3.8 instruct (presence 1.5) la necesitan para llegar al request.
+  presence_penalty: 0.0,
 };
 
 /** La estimación de contexto pega contra /tokenize del upstream, así que se
@@ -88,15 +94,114 @@ export default function Chat() {
   const [apiKey, setApiKey] = useState("");
 
   const [systemPrompt, setSystemPrompt] = useState("");
-  // Se suma al system prompt en buildRequest, no lo reemplaza: si el
-  // usuario ya escribió algo en el cuadro, la convención se concatena al
+  // La convención de archivos se suma al system prompt en buildRequest, no lo
+  // reemplaza: si el usuario ya escribió algo en el cuadro, se concatena al
   // final. Si el cuadro está vacío, se manda sola.
-  const [appendFileConvention, setAppendFileConvention] = useLocalStorage(
-    "glyvex_chat_file_convention",
-    false
-  );
   const [reasoning, setReasoning] = useLocalStorage("glyvex_chat_reasoning", DEFAULT_REASONING);
-  const [params, setParams] = useLocalStorage("glyvex_chat_params", DEFAULT_PARAMS);
+  // CHAT-CTX-W: max_tokens y seed salieron de la UI (los recortes los maneja
+  // el server con sus propias reglas). Se filtra lo guardado por versiones
+  // anteriores para que esos campos viejos no viajen ni en el payload ni en
+  // la estimación: el backend usa sus defaults.
+  const [storedParams, setParams] = useLocalStorage("glyvex_chat_params", DEFAULT_PARAMS);
+  const params = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries({ ...DEFAULT_PARAMS, ...storedParams }).filter(
+          ([key]) => key in DEFAULT_PARAMS
+        )
+      ),
+    [storedParams]
+  );
+
+  // -- presets de muestreo (CHAT-PRESETS) -------------------------------------
+  // 'auto' aplica el preset que el backend recomienda para el modelo actual
+  // (si lo hay); 'custom' deja los parámetros intactos; cualquier otro valor
+  // es un id de preset (built-in o del usuario). La lista la decide el
+  // backend por modelo: la UI no replica las reglas de familia.
+  const [presetChoiceStored, setPresetChoice] = useLocalStorage(
+    "glyvex_chat_preset_choice",
+    PRESET_AUTO
+  );
+  const [presetOptions, setPresetOptions] = useState([]);
+  const presetChoice = normalizePresetChoice(presetChoiceStored, presetOptions);
+
+  const refreshPresets = useCallback(() => {
+    if (!selectedModel) {
+      setPresetOptions([]);
+      return Promise.resolve();
+    }
+    const qs = new URLSearchParams({
+      model: selectedModel,
+      mode: reasoning.mode !== "off" ? "thinking" : "instruct",
+    });
+    return fetch(`/api/chat/presets?${qs.toString()}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => setPresetOptions(Array.isArray(list) ? list : []))
+      .catch(() => setPresetOptions([]));
+  }, [selectedModel, reasoning.mode]);
+
+  useEffect(() => {
+    refreshPresets();
+  }, [refreshPresets]);
+
+  // Aplicar el preset elegido (o el recomendado en auto) cada vez que la
+  // lista o la elección cambian: los sliders pasan a mostrar sus valores.
+  useEffect(() => {
+    const entry = resolvePresetEntry(presetOptions, presetChoice);
+    if (entry?.params) setParams((prev) => ({ ...prev, ...entry.params }));
+  }, [presetOptions, presetChoice, setParams]);
+
+  const handleParamChange = useCallback(
+    (patch) => {
+      // Mover un slider es dejar de seguir a cualquier preset.
+      setPresetChoice(PRESET_CUSTOM);
+      setParams((prev) => ({ ...prev, ...patch }));
+    },
+    [setPresetChoice, setParams]
+  );
+
+  const handlePresetSave = useCallback(async () => {
+    const entry = resolvePresetEntry(presetOptions, presetChoice);
+    const name = (window.prompt(t("chatPresets.saveNamePrompt"), "") || "").trim();
+    if (!name) return;
+    const scope = presetSaveScope(entry, selectedModel);
+    try {
+      const res = await fetch("/api/chat/presets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, family: scope.family, model_name: scope.model_name, params }),
+      });
+      if (!res.ok) {
+        // El backend explica el rechazo (409 por colisión con un built-in,
+        // 422 por params fuera de rango) en detail: es más útil que un
+        // genérico, y solo se cae en la traducción si no trajo detalle.
+        const detail = (await res.json().catch(() => null))?.detail;
+        addToast(typeof detail === "string" ? detail : t("chatPresets.saveFailed"), "error");
+        return;
+      }
+      await refreshPresets();
+      setPresetChoice(name);
+      addToast(t("chatPresets.saved"), "success");
+    } catch {
+      addToast(t("chatPresets.saveFailed"), "error");
+    }
+  }, [presetOptions, presetChoice, selectedModel, params, addToast, t, refreshPresets, setPresetChoice]);
+
+  const handlePresetDelete = useCallback(async () => {
+    const entry = resolvePresetEntry(presetOptions, presetChoice);
+    if (!entry || entry.builtin) return;
+    if (!window.confirm(t("chatPresets.deleteConfirm", { name: entry.name }))) return;
+    try {
+      const res = await fetch(`/api/chat/presets/${encodeURIComponent(entry.name)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("presets/delete");
+    } catch {
+      addToast(t("chatPresets.deleteFailed"), "error");
+      return;
+    }
+    setPresetChoice(PRESET_AUTO);
+    await refreshPresets();
+    addToast(t("chatPresets.deleted"), "success");
+  }, [presetOptions, presetChoice, addToast, t, refreshPresets, setPresetChoice]);
 
   const [compact, setCompact] = useLocalStorage("glyvex_compact_chat", false);
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
@@ -157,6 +262,10 @@ export default function Chat() {
   const visionReady = Boolean(capabilities?.vision);
   const toolsSupported = Boolean(capabilities?.tools);
   const modelContextSize = capabilities?.context_size ?? 0;
+  // CHAT-REASON-CAP: false comprobado del template => el effort está muerto
+  // para este modelo. Mismo criterio en la UI (grisea) y en buildRequest
+  // (fuerza none): la regla vive en lib/chatReasoning.js.
+  const effortUnsupported = effortUnsupportedByTemplate(capabilities);
   const busyWithAttachments = attachments.some((a) => a.status === "pending");
 
   const { containerRef, bottomRef, showJump, scrollToBottom, handleScroll } = useAutoScroll({
@@ -331,7 +440,6 @@ export default function Chat() {
             api_key: apiKey,
             messages: pending,
             system_prompt: systemPrompt,
-            max_tokens: params.max_tokens,
             base_tokens: baseTokens,
           }),
         });
@@ -346,7 +454,7 @@ export default function Chat() {
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, attachments, draftBucket, systemPrompt, appendFileConvention, endpointUrl, apiKey, params.max_tokens, streaming]);
+  }, [path, attachments, draftBucket, systemPrompt, endpointUrl, apiKey, streaming]);
 
   // -- persistencia entre rutas ----------------------------------------------
   // sessionStorage (no localStorage): cambiar de página no pierde nada, pero
@@ -657,7 +765,7 @@ export default function Chat() {
       // antepone al primer mensaje del usuario en vez de perderse.
       const systemText = [
         systemPrompt.trim(),
-        appendFileConvention ? t("chat.fileConventionPrompt") : "",
+        t("chat.fileConventionPrompt"),
       ]
         .filter(Boolean)
         .join("\n\n");
@@ -686,12 +794,11 @@ export default function Chat() {
         // No se manda si la plantilla del modelo no lo entiende: es un
         // parámetro que llama-server pasa al template y sin soporte queda
         // ignorado en el mejor caso.
-        reasoning_effort:
-          capabilities && capabilities.reasoning_effort === false ? "none" : effective.effort,
+        reasoning_effort: effortUnsupported ? "none" : effective.effort,
         tools_enabled: toolsEnabled,
       };
     },
-    [reasoning, systemPrompt, appendFileConvention, endpointUrl, apiKey, selectedModel, params, toolsEnabled, capabilities, t]
+    [reasoning, systemPrompt, endpointUrl, apiKey, selectedModel, params, toolsEnabled, capabilities, t]
   );
 
   const handleSend = useCallback(async () => {
@@ -790,7 +897,7 @@ export default function Chat() {
   );
 
   /**
-   * Continuar una respuesta cortada por max_tokens.
+   * Continuar una respuesta cortada por el límite de generación del server.
    *
    * No crea rama: sigue escribiendo en el mismo nodo. El mensaje parcial va al
    * final del payload y el backend intenta que el modelo continúe ese turno;
@@ -882,10 +989,13 @@ export default function Chat() {
           onApiKeyChange={setApiKey}
           systemPrompt={systemPrompt}
           onSystemPromptChange={setSystemPrompt}
-          appendFileConvention={appendFileConvention}
-          onAppendFileConventionChange={setAppendFileConvention}
           params={params}
-          onParamChange={(patch) => setParams((prev) => ({ ...prev, ...patch }))}
+          onParamChange={handleParamChange}
+          presets={presetOptions}
+          presetChoice={presetChoice}
+          onPresetChange={setPresetChoice}
+          onPresetSave={handlePresetSave}
+          onPresetDelete={handlePresetDelete}
           onClear={handleClear}
           onExportJson={() => exportAsJson(path, selectedModel)}
           onExportMarkdown={() => exportAsMarkdown(path, selectedModel)}
@@ -996,6 +1106,7 @@ export default function Chat() {
                 liveTools={isLive ? stream.toolActivity : null}
                 busy={streaming}
                 reasoning={reasoning}
+                effortUnsupported={effortUnsupported}
                 onSwitchBranch={handleSwitchBranch}
                 onEdit={handleEdit}
                 onRegenerate={handleRegenerate}
@@ -1031,6 +1142,7 @@ export default function Chat() {
           onRemoveAttachment={removeAttachment}
           reasoning={reasoning}
           onReasoningChange={setReasoning}
+          effortUnsupported={effortUnsupported}
           streaming={streaming}
           onSend={handleSend}
           onStop={stream.stop}

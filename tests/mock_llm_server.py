@@ -9,6 +9,8 @@ una dependencia nueva) + uvicorn (ya está en requirements.txt).
 Expone:
   GET  /health                → {"status": "ok"}
   GET  /v1/models             → {"data": [{"id": "test-model", ...}]}
+  GET  /props                 → desactivado por defecto (404); con set_props({...})
+                               responde el payload dado (n_ctx para /estimate)
   GET  /slots                 → un slot con n_prompt_tokens creciendo (prompt + generados)
   GET  /metrics               → formato Prometheus de llama-server; cada lectura
                                 avanza los contadores (50 tokens en 1 s de decode).
@@ -49,6 +51,23 @@ MODELS_AUTH: dict = {"token": None}
 
 def set_models_auth(token: str | None) -> None:
     MODELS_AUTH["token"] = token
+
+
+# /props opcional (llama-server real lo expone; el mock base no lo tiene y así
+# los tests de capacidades por otras vías siguen probando el fallback). Se
+# activa por test con set_props({...}) para probar la lectura de n_ctx que usa
+# /api/chat/estimate.
+PROPS: dict = {"payload": None}
+
+
+def set_props(payload: dict | None) -> None:
+    PROPS["payload"] = payload
+
+
+async def _props(request: Request) -> JSONResponse:
+    if PROPS["payload"] is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse(PROPS["payload"])
 
 
 # URLs de POST /exit recibidos (el stop gracioso del launcher). Los tests lo
@@ -220,6 +239,7 @@ def build_mock_app() -> Starlette:
         routes=[
             Route("/health", _health),
             Route("/v1/models", _v1_models),
+            Route("/props", _props),
             Route("/metrics", _metrics),
             Route("/slots", _slots),
             Route("/api/v2/write", _influx_write, methods=["POST"]),

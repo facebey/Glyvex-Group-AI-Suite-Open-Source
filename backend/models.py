@@ -248,6 +248,9 @@ _METADATA_KEYS = (
     "eos_token",
     "thinking_support",
     "enable_thinking_kwarg",
+    "preserve_thinking_kwarg",
+    "reasoning_effort_kwarg",
+    "tools_in_template",
     "instruct_mode",
     "suggested_preset",
     "n_head_kv",
@@ -273,11 +276,38 @@ def _metadata_error(message: str) -> dict[str, Any]:
     payload: dict[str, Any] = {key: None for key in _METADATA_KEYS}
     payload["thinking_support"] = False
     payload["enable_thinking_kwarg"] = False
+    payload["preserve_thinking_kwarg"] = False
+    payload["reasoning_effort_kwarg"] = False
+    payload["tools_in_template"] = False
     payload["instruct_mode"] = False
     payload["is_moe"] = False
     payload["kv_data"] = {}
     payload["error"] = message
     return payload
+
+
+def _chat_template_flags(chat_template: str) -> dict[str, bool]:
+    """
+    Detector único de flags sobre el chat_template embebido en el GGUF.
+
+    Espeja lo que backend/chat.py lee en runtime del template del server
+    (_template_supports_tools / _template_supports_reasoning_effort) y lo que
+    llama.cpp deriva analizando el template (common/jinja/caps.cpp): los
+    kwargs son variables jinja y se buscan literales; tools se detecta por el
+    par tools+tool_call. Así el visor de la plantilla (CHAT-TPL-VIEW), el
+    griseado del Launcher y las capabilities del Chat afirman lo mismo sobre
+    el mismo archivo. Dos capas a propósito (mismo criterio que antes):
+    thinking_support es orientativo (alimenta suggested_preset); el kwarg
+    exacto es la puerta de los controles.
+    """
+    lowered = chat_template.lower()
+    return {
+        "thinking_support": "think" in lowered,
+        "enable_thinking_kwarg": "enable_thinking" in chat_template,
+        "preserve_thinking_kwarg": "preserve_thinking" in chat_template,
+        "reasoning_effort_kwarg": "reasoning_effort" in chat_template,
+        "tools_in_template": "tools" in lowered and "tool_call" in lowered,
+    }
 
 
 def _field_str(field: Any) -> str | None:
@@ -637,10 +667,7 @@ def _metadata_from_kv(header: dict[str, Any]) -> dict[str, Any]:
 
     arch = kvs.get("general.architecture") or ""
     chat_template = kvs.get("tokenizer.chat_template") or ""
-
-    lowered_template = chat_template.lower()
-    thinking_support = "think" in lowered_template
-    enable_thinking_kwarg = "enable_thinking" in chat_template
+    flags = _chat_template_flags(chat_template)
 
     ctx = _as_int(
         kvs.get(f"{arch}.context_length")
@@ -704,10 +731,13 @@ def _metadata_from_kv(header: dict[str, Any]) -> dict[str, Any]:
         "chat_template": chat_template or None,
         "bos_token": _as_int(kvs.get("tokenizer.ggml.bos_token_id")),
         "eos_token": _as_int(kvs.get("tokenizer.ggml.eos_token_id")),
-        "thinking_support": thinking_support,
-        "enable_thinking_kwarg": enable_thinking_kwarg,
+        "thinking_support": flags["thinking_support"],
+        "enable_thinking_kwarg": flags["enable_thinking_kwarg"],
+        "preserve_thinking_kwarg": flags["preserve_thinking_kwarg"],
+        "reasoning_effort_kwarg": flags["reasoning_effort_kwarg"],
+        "tools_in_template": flags["tools_in_template"],
         "instruct_mode": bool(chat_template),
-        "suggested_preset": "thinking" if thinking_support else "instruct",
+        "suggested_preset": "thinking" if flags["thinking_support"] else "instruct",
         "suggested_sampling": _parse_general_sampling(kvs.get("general.sampling")),
         "tensor_count": header.get("tensor_count"),
         "kv_data": {
@@ -734,16 +764,10 @@ def _metadata_from_reader(reader: Any) -> dict[str, Any]:
     arch = _field_str(fields.get("general.architecture")) or ""
     chat_template = _field_str(fields.get("tokenizer.chat_template")) or ""
 
-    # Detección en dos capas sobre el template (la heurística por arch
-    # daba falsos positivos: qwen3moe/qwen3vlmoe cuantizados traen template
-    # sin ningún think):
-    # - thinking_support: el template menciona thinking de alguna forma →
-    #   alimenta suggested_preset (modelo thinking aunque no use kwarg conocido).
-    # - enable_thinking_kwarg: el template lee literalmente el kwarg que la
-    #   app envía por --chat-template-kwargs → puerta del builder y griseado UI.
-    lowered_template = chat_template.lower()
-    thinking_support = "think" in lowered_template
-    enable_thinking_kwarg = "enable_thinking" in chat_template
+    # Detección sobre el template centralizada en _chat_template_flags: la
+    # misma que usa el camino rápido (_metadata_from_kv) y la que replica
+    # chat.py en runtime, para que UI y capacidades afirmen lo mismo.
+    flags = _chat_template_flags(chat_template)
 
     # El prefijo de las claves de arquitectura es el valor de
     # general.architecture ("qwen3.context_length", "llama.context_length"…).
@@ -813,10 +837,13 @@ def _metadata_from_reader(reader: Any) -> dict[str, Any]:
         "chat_template": chat_template or None,
         "bos_token": _field_int(fields.get("tokenizer.ggml.bos_token_id")),
         "eos_token": _field_int(fields.get("tokenizer.ggml.eos_token_id")),
-        "thinking_support": thinking_support,
-        "enable_thinking_kwarg": enable_thinking_kwarg,
+        "thinking_support": flags["thinking_support"],
+        "enable_thinking_kwarg": flags["enable_thinking_kwarg"],
+        "preserve_thinking_kwarg": flags["preserve_thinking_kwarg"],
+        "reasoning_effort_kwarg": flags["reasoning_effort_kwarg"],
+        "tools_in_template": flags["tools_in_template"],
         "instruct_mode": bool(chat_template),
-        "suggested_preset": "thinking" if thinking_support else "instruct",
+        "suggested_preset": "thinking" if flags["thinking_support"] else "instruct",
         "suggested_sampling": _parse_general_sampling(_field_str(fields.get("general.sampling"))),
         "tensor_count": _field_int(fields.get("GGUF.tensor_count")),
         "kv_data": kv_data,

@@ -145,6 +145,23 @@ class ChatConversationRow(Base):
     message_count: Mapped[int | None] = mapped_column(Integer)
 
 
+class ChatPresetRow(Base):
+    """
+    Presets de muestreo guardados por el usuario en el Chat (CHAT-PRESETS).
+
+    Espejo de HWTemplateRow pero sin columna `builtin`: los presets integrados
+    viven solo en el registro de código (chat_presets.py) y no se guardan acá.
+    Un preset aplica a un modelo por `family` (clave de chat_presets) o por
+    `model_name` exacto del endpoint.
+    """
+
+    __tablename__ = "chat_presets"
+    name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    family: Mapped[str | None] = mapped_column(String(64))
+    model_name: Mapped[str | None] = mapped_column(Text)
+    params: Mapped[str] = mapped_column(Text)  # JSON serializado
+
+
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
@@ -497,6 +514,57 @@ async def db_update_conversation(
 async def db_delete_conversation(conv_id: str) -> bool:
     async with get_session() as session:
         row = await session.get(ChatConversationRow, conv_id)
+        if row is None:
+            return False
+        await session.delete(row)
+        await session.commit()
+    return True
+
+
+# --------------------------------------------------------------------------
+# Presets de muestreo del Chat (tabla chat_presets)
+# --------------------------------------------------------------------------
+
+
+def _chat_preset_to_dict(row: ChatPresetRow) -> dict[str, Any]:
+    return {
+        "name": row.name,
+        "family": row.family,
+        "model_name": row.model_name,
+        "params": _loads_dict(row.params),
+    }
+
+
+async def db_list_chat_presets() -> list[dict[str, Any]]:
+    async with get_session() as session:
+        rows = (
+            await session.execute(select(ChatPresetRow).order_by(ChatPresetRow.name.asc()))
+        ).scalars().all()
+    return [_chat_preset_to_dict(row) for row in rows]
+
+
+async def db_get_chat_preset(name: str) -> dict[str, Any] | None:
+    async with get_session() as session:
+        row = await session.get(ChatPresetRow, name)
+        return _chat_preset_to_dict(row) if row is not None else None
+
+
+async def db_upsert_chat_preset(
+    name: str, family: str | None, model_name: str | None, params: dict[str, Any]
+) -> dict[str, Any]:
+    """INSERT OR REPLACE del preset. Retorna el preset guardado."""
+    payload = params if isinstance(params, dict) else {}
+    async with get_session() as session:
+        await session.merge(ChatPresetRow(
+            name=name, family=family, model_name=model_name, params=_dumps(payload)
+        ))
+        await session.commit()
+    return {"name": name, "family": family, "model_name": model_name, "params": dict(payload)}
+
+
+async def db_delete_chat_preset(name: str) -> bool:
+    async with get_session() as session:
+        row = await session.get(ChatPresetRow, name)
         if row is None:
             return False
         await session.delete(row)

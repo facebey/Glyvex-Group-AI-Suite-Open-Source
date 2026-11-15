@@ -65,10 +65,20 @@ from session_tokens import session_tokens
 logger = logging.getLogger("glyvex.chat")
 from database import (
     db_create_conversation,
+    db_delete_chat_preset,
     db_delete_conversation,
     db_get_conversation,
+    db_list_chat_presets,
     db_list_conversations,
     db_update_conversation,
+    db_upsert_chat_preset,
+)
+from chat_presets import (
+    BUILTIN_PRESETS,
+    FAMILY_KEYS,
+    detect_family,
+    resolve_builtin_presets,
+    validate_params,
 )
 from launcher import manager as launcher_manager
 
@@ -114,7 +124,16 @@ class ChatCompletionRequest(BaseModel):
     top_k: int = 40
     min_p: float = 0.0
     repeat_penalty: float = 1.1
-    max_tokens: int = 4096
+    # presence_penalty 0 = default del server (no se envía entonces). Existe
+    # porque la card oficial de Qwen3.8 instruct recomienda presence 1.5 para
+    # el modo no-thinking, y llama-server lo acepta por request (server-task.cpp).
+    presence_penalty: float = 0.0
+    # max_tokens -1 = sin límite propio de la Suite: llama-server corta la
+    # generación al llenar el contexto o con el token de stop. La UI del chat
+    # ya no expone max_tokens ni seed: antes un max_tokens == n_ctx hacía
+    # sonar la alerta de contexto aun cuando el prompt cabía holgado (y el
+    # server nunca por eso).
+    max_tokens: int = -1
     seed: int = -1
     stream: bool = True
 
@@ -169,7 +188,6 @@ class EstimateRequest(BaseModel):
     messages: list[dict[str, Any]] = Field(default_factory=list)
     system_prompt: str = ""
     draft: str = ""
-    max_tokens: int = 4096
     # Contexto que el servidor midió al terminar la última respuesta
     # (context_tokens del evento "done"). Si viene > 0, reemplaza al historial:
     # `messages` debe traer solo lo nuevo (borrador + adjuntos) y el system
@@ -186,7 +204,11 @@ class EstimateResponse(BaseModel):
     # Parte del total que salió de base_tokens (0 si no se usó).
     base_tokens: int = 0
     context_size: int = 0
-    # Contexto que queda libre después del envío, descontando max_tokens.
+    # Contexto que queda libre DESPUÉS del prompt. La generación usa lo que
+    # sobra: llama-server la autolimita al hueco (n_predict vuela con el
+    # contexto, tools/server/server-context.cpp). Por eso el desborde se mide
+    # solo con el prompt — restar aquí el espacio de generación daba falsos
+    # positivos cuando max_tokens era grande.
     headroom: int = 0
     fits: bool = True
 
@@ -219,6 +241,13 @@ class ConversationSummary(BaseModel):
 class ConversationDetail(ConversationSummary):
     messages: list[dict[str, Any]] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatPresetCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    family: str | None = None
+    model_name: str | None = None
+    params: dict[str, Any]
 
 
 # --------------------------------------------------------------------------
@@ -585,6 +614,16 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
         # budget_tokens; llama-server lo acepta directo en el payload.
         if req.reasoning_effort != "none":
             payload["reasoning_effort"] = req.reasoning_effort
+        # CHAT-REASON-CAP: el budget del popover de la lámpara es el que
+        # manda. llama-server lo acepta por request como reasoning_budget_tokens
+        # (tools/server/server-common.cpp), y -1 significa sin límite de forma
+        # explícita: así el "∞" de la UI no queda subordinado al budget con el
+        # que se lanzó el server. Solo con thinking activo: sin thinking no hay
+        # nada que presupuestar.
+        if req.thinking_enabled:
+            payload["reasoning_budget_tokens"] = req.budget_tokens
+        if req.presence_penalty != 0.0:
+            payload["presence_penalty"] = req.presence_penalty
         if req.tools_enabled:
             payload["tools"] = tools_module.TOOL_SPECS
             payload["tool_choice"] = "auto"
@@ -726,7 +765,7 @@ async def _stream_chat(req: ChatCompletionRequest) -> AsyncGenerator[str, None]:
                                 "message": (
                                     "El modelo vuelve a empezar la respuesta en vez de "
                                     "continuarla. Su chat template no soporta continuar "
-                                    "un turno; probá subiendo max_tokens."
+                                    "un turno."
                                 ),
                             }
                         )
@@ -1046,6 +1085,25 @@ def _template_supports_tools(props: dict[str, Any]) -> bool:
     return False
 
 
+def _template_supports_reasoning_effort(props: dict[str, Any]) -> bool:
+    """
+    reasoning_effort es una variable de la plantilla, no un flag del server:
+    solo funciona si el chat_template la lee (en llama.cpp el caps se calcula
+    parseando el template, common/jinja/caps.cpp — Gemma 4 no la lee y su
+    /props lo reporta false). Con builds que no traen chat_template_caps se
+    busca la variable en el propio template, mismo patrón que tools.
+    """
+    caps = props.get("chat_template_caps")
+    if isinstance(caps, dict):
+        return _cap_flag(props, "supports_reasoning_effort", "reasoning_effort")
+
+    template = props.get("chat_template")
+    if isinstance(template, str) and template:
+        return "reasoning_effort" in template
+
+    return False
+
+
 def _context_from_props(props: dict[str, Any]) -> int:
     settings = props.get("default_generation_settings")
     if isinstance(settings, dict):
@@ -1097,9 +1155,7 @@ async def probe_capabilities(endpoint: str, model: str = "") -> Capabilities:
                 result.parallel_tool_calls = _cap_flag(
                     props, "supports_parallel_tool_calls", "parallel_tool_calls"
                 )
-                result.reasoning_effort = _cap_flag(
-                    props, "supports_reasoning_effort", "reasoning_effort"
-                )
+                result.reasoning_effort = _template_supports_reasoning_effort(props)
                 result.preserve_reasoning = _cap_flag(
                     props, "supports_preserve_reasoning", "preserve_reasoning"
                 )
@@ -1235,7 +1291,9 @@ async def estimate_context(req: EstimateRequest) -> EstimateResponse:
 
     caps = await probe_capabilities(req.endpoint)
     context_size = caps.context_size
-    headroom = context_size - total - req.max_tokens if context_size > 0 else 0
+    # Igual que llama-server: el desborde lo define el prompt solo. La
+    # generación se autolimita al hueco restante (ver EstimateResponse).
+    headroom = context_size - total if context_size > 0 else 0
 
     return EstimateResponse(
         tokens=total,
@@ -1313,6 +1371,89 @@ async def endpoint_models(url: str, api_key: str | None = None) -> dict[str, Any
         if isinstance(m, dict) and m.get("id")
     ]
     return {"url": url, "models": models}
+
+
+# --------------------------------------------------------------------------
+# Presets de muestreo (CHAT-PRESETS)
+# --------------------------------------------------------------------------
+# Los built-in no se guardan en la DB: viven en chat_presets.py. La tabla
+# chat_presets guarda solo presets del usuario, que se aplican por familia
+# (clave detectada del nombre del modelo) o por nombre exacto del endpoint.
+
+
+def _user_preset_entry(preset: dict[str, Any]) -> dict[str, Any]:
+    """Forma uniforme de un preset de usuario, igual que la de los built-in en /presets."""
+    return {
+        "id": preset["name"],
+        "name": preset["name"],
+        "labelKey": None,
+        "family": preset["family"],
+        "model_name": preset["model_name"],
+        "params": preset["params"],
+        "builtin": False,
+        "recommended": False,
+    }
+
+
+def _user_preset_matches(preset: dict[str, Any], model: str, family: str | None) -> bool:
+    model_name = (preset.get("model_name") or "").strip().casefold()
+    if model_name and model_name == model.strip().casefold():
+        return True
+    fam = (preset.get("family") or "").strip()
+    return bool(fam and family and fam == family)
+
+
+@router.get("/presets")
+async def list_chat_presets(
+    model: str | None = None, mode: str | None = None
+) -> list[dict[str, Any]]:
+    """
+    Presets para la UI del Chat.
+
+    Sin `model`: solo los presets del usuario (para gestionarlos y borrarlos).
+    Con `model`: los built-in de su familia (con el recomendado marcado según
+    `mode`) más los presets del usuario que le apliquen por familia o por
+    nombre exacto. Con `model` un modelo sin familia ni presets devuelve [].
+    """
+    user = [_user_preset_entry(p) for p in await db_list_chat_presets()]
+    if model is None:
+        return user
+    entries = resolve_builtin_presets(model, mode)
+    family = detect_family(model)
+    entries.extend(p for p in user if _user_preset_matches(p, model, family))
+    return entries
+
+
+@router.post("/presets")
+async def save_chat_preset(preset: ChatPresetCreate) -> dict[str, Any]:
+    """Crea o actualiza un preset del usuario (upsert por nombre)."""
+    name = preset.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="El nombre del preset no puede estar vacío")
+    if name in {p["id"] for p in BUILTIN_PRESETS}:
+        # Mismo resguardo que los templates del launcher (launcher.py): sin
+        # esto, guardar con el nombre prellenado de un built-in lo pisaría.
+        raise HTTPException(
+            status_code=409,
+            detail="Ese nombre pertenece a un preset integrado: usá otro nombre.",
+        )
+    family = (preset.family or "").strip() or None
+    if family is not None and family not in FAMILY_KEYS:
+        raise HTTPException(status_code=422, detail=f"Familia desconocida: {family}")
+    model_name = (preset.model_name or "").strip() or None
+    clean, errors = validate_params(preset.params)
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
+    return _user_preset_entry(
+        await db_upsert_chat_preset(name, family, model_name, clean)
+    )
+
+
+@router.delete("/presets/{name}")
+async def delete_chat_preset(name: str) -> dict[str, Any]:
+    if not await db_delete_chat_preset(name):
+        raise HTTPException(status_code=404, detail="El preset no existe")
+    return {"deleted": True}
 
 
 # --------------------------------------------------------------------------

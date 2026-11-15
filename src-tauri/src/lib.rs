@@ -74,10 +74,17 @@ fn emit_state(
 
 fn health_ok(port: u16) -> bool {
     let url = format!("http://127.0.0.1:{port}/api/health");
-    let Ok(resp) = ureq::get(&url).timeout(Duration::from_secs(3)).call() else {
+    // ureq 3: el timeout global (equivalente al .timeout() de ureq 2) se
+    // configura a traves del builder de Config; el JSON se lee del Body.
+    let Ok(mut resp) = ureq::get(&url)
+        .config()
+        .timeout_global(Some(Duration::from_secs(3)))
+        .build()
+        .call()
+    else {
         return false;
     };
-    let Ok(v) = resp.into_json::<serde_json::Value>() else {
+    let Ok(v) = resp.body_mut().read_json::<serde_json::Value>() else {
         return false;
     };
     v.get("status").and_then(|s| s.as_str()) == Some("ok")
@@ -200,7 +207,12 @@ fn restore_fans_before_exit(state: &SidecarState) {
     };
     let Some(port) = port else { return };
     let url = format!("http://127.0.0.1:{port}/api/metrics/gpu/fan/restore-all");
-    let _ = ureq::post(&url).timeout(Duration::from_secs(3)).call();
+    // POST sin cuerpo: en ureq 3 es explicito con send_empty().
+    let _ = ureq::post(&url)
+        .config()
+        .timeout_global(Some(Duration::from_secs(3)))
+        .build()
+        .send_empty();
 }
 
 /// Arranca el ciclo de vida del sidecar en su propio thread: spawn →

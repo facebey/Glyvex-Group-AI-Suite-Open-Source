@@ -28,7 +28,7 @@ export const DEFAULT_REASONING = { mode: "off", budget: 8192, effort: "none" };
 // botón de regenerar (Bloque 4.3) va a necesitar el mismo control.
 // ---------------------------------------------------------------------------
 
-export default function ReasoningControl({ value, onChange }) {
+export default function ReasoningControl({ value, onChange, effortUnsupported = false }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const isPreset = EFFORT_PRESETS.some((p) => p.tokens === value.budget);
@@ -128,6 +128,7 @@ export default function ReasoningControl({ value, onChange }) {
               <span className="block text-xs text-glyvex-muted">
                 {t("reasoning.effort", { value: value.budget === -1 ? "∞" : value.budget.toLocaleString() })}
               </span>
+              <span className="block text-[10px] text-glyvex-muted">{t("reasoning.budgetHint")}</span>
             <div className="flex flex-wrap gap-1">
               {EFFORT_PRESETS.map((preset) => (
                 <button
@@ -175,22 +176,34 @@ export default function ReasoningControl({ value, onChange }) {
 
           <div className="px-3 py-2 space-y-2">
             <span className="block text-xs text-glyvex-muted">reasoning_effort (llama.cpp)</span>
+            {effortUnsupported && (
+              <span className="block text-xs text-glyvex-muted">{t("reasoning.effortUnsupported")}</span>
+            )}
             <div className="flex flex-wrap gap-1">
-              {REASONING_EFFORTS.map((effort) => (
-                <button
-                  key={effort}
-                  type="button"
-                  onClick={() => pick({ effort })}
-                  className={
-                    "px-2 py-1 rounded-md text-xs border " +
-                    (value.effort === effort
-                      ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-500"
-                      : "border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil")
-                  }
-                >
-                  {effort}
-                </button>
-              ))}
+              {REASONING_EFFORTS.map((effort) => {
+                // Sin soporte se muestra lo que de verdad se envía: buildRequest
+                // fuerza none cuando el template no lee la variable, y dejar
+                // 'high' pintada sería la mentira que este cambio viene a
+                // arreglar.
+                const shown = effortUnsupported ? "none" : value.effort;
+                return (
+                  <button
+                    key={effort}
+                    type="button"
+                    disabled={effortUnsupported}
+                    onClick={() => pick({ effort })}
+                    className={
+                      "px-2 py-1 rounded-md text-xs border " +
+                      (shown === effort
+                        ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-500"
+                        : "border-glyvex-border-soft text-glyvex-muted hover:text-glyvex-text hover:bg-glyvex-veil") +
+                      (effortUnsupported ? " opacity-40 cursor-not-allowed" : "")
+                    }
+                  >
+                    {effort}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

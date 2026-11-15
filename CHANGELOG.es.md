@@ -7,6 +7,68 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-15
+
+El Chat aprende a **leer a cada modelo**: presets de muestreo fieles a las
+fichas oficiales, controles de razonamiento que solo ofrecen lo que el chat
+template del modelo realmente lee, un visor que muestra el template real detrás
+de cada modelo, un override avanzado que reemplaza ese template por un Jinja
+propio y una contabilidad de contexto igual a la que llama.cpp aplica de verdad.
+
+### Añadido
+- **Presets de muestreo en el chat**: presets integrados que reproducen los
+  parámetros de generación oficiales de Hugging Face por familia de modelo —
+  resueltos por nombre (Gemma 4 se reconoce vía el nombre del endpoint,
+  Qwen3-Coder sin colisionar con las otras variantes Qwen3, y no se inventa nada
+  para modelos fuera del registro) — además de **presets de usuario** guardados
+  en una nueva tabla `chat_presets` con su propia API, siguiendo el patrón de
+  plantillas de hardware del Launcher. La barra lateral del chat tiene un selector
+  de preset (auto / integrado / usuario / personalizado) con guardar-como-preset y
+  eliminar; al resolver se integran los integrados y los de usuario por modelo.
+- **Visor de chat templates**: el template Jinja embebido de cada modelo ahora se
+  puede leer desde el panel de información del modelo (sección plegable después
+  del panel de muestreo), con badges de las capacidades que el template
+  *realmente* lee. La detección vive en un único punto — `_chat_template_flags()`
+  en `backend/models.py` — y se expone en la metadata del modelo; la UI nunca
+  afirma una capacidad que el dato medido no respalde.
+- **Override de chat template (avanzado)**: el modo avanzado del Launcher puede
+  reemplazar el chat template embebido del modelo por un Jinja propio — un botón
+  "partir del template embebido" precarga la base real. El texto se guarda en
+  `data/chat_templates/` como archivo contenido-direccionado (el mismo texto
+  reutiliza el mismo archivo; el `.gguf` nunca se modifica) y se lanza con
+  `--chat-template-file` justo después de `--jinja`, exactamente como exige
+  llama-server; las builds que solo conocen el `--chat-template` inline reciben
+  ese fallback, y las que no conocen ninguno no emiten nada en lugar de dejar
+  caer el flag en silencio. El override requiere `--jinja` y se aplica también
+  en modo automático: es una elección explícita del usuario, no tuning.
+
+### Cambiado
+- **Controles de razonamiento honestos con lo que cada modelo soporta**: el
+  presupuesto de thinking viaja por petición como `reasoning_budget_tokens` (se
+  envía `-1` explícito para que el "sin límite" de la UI sobrescriba el budget de
+  lanzamiento) y `reasoning_effort` se trata como lo que es: una variable del chat
+  template. Cuando el servidor no trae `chat_template_caps`, las capacidades se
+  derivan leyendo el `chat_template` del modelo; si el template no consume effort,
+  la fila aparece deshabilitada con la explicación de por qué.
+- **Shell Tauri: `ureq` 2 → 3**: `health_ok()` y `restore_fans_before_exit()`
+  adaptados a la API nueva (`timeout_global`, `read_json`, `send_empty`).
+- **Dependencias sincronizadas desde la distribución open-source**: las 13
+  actualizaciones de Dependabot aprobadas en el repo público se replican en los
+  manifests privados (historias independientes: manifests copiados, no fusionados
+  por git).
+
+### Corregido
+- **Falsas alarmas de "contexto desbordado"**: el chequeo de desborde mide el
+  prompt contra `n_ctx` como lo hace llama-server, en lugar de restar un margen de
+  generación que el propio servidor se concede. El chat envía ahora
+  `max_tokens: -1` (sin límite puesto por la Suite: llama-server corta por
+  contexto o por token de stop), la UI del chat deja de exponer `max_tokens` y
+  `seed`, y el `headroom` del estimado es lo que queda libre después del prompt.
+  `docs/TROUBLESHOOTING.es.md` enuncia la regla real que aplica llama.cpp
+  (`prompt >= n_ctx`).
+
+Tests nuevos: 36 backend + 17 frontend (1126 pytest, 130 vitest).
+
 ## [0.15.0] — 2026-11-13
 
 El runtime embebido pasa a **llama.cpp b12359** (la línea v1.0.0-dev) y la
