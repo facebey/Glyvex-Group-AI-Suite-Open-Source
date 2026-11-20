@@ -18,7 +18,7 @@
     "@tauri-apps/plugin-updater": "2.14.1",
     "highlight.js": "^11.9.0",
     "i18next": "^27.1.1",
-    "lucide-react": "^1.71.0",
+    "lucide-react": "^1.72.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-i18next": "^18.0.1",
@@ -35,7 +35,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
     "tailwindcss": "^4.0.0",
-    "vite": "^8.3.7",
+    "vite": "^8.3.8",
     "vitest": "^5.1.0"
   }
 }

@@ -1,4 +1,4 @@
-fastapi>=0.162.0
+fastapi>=0.162.7
 uvicorn[standard]>=0.54.0
 python-multipart>=0.0.33
 pydantic>=2.14.3
@@ -25,7 +25,7 @@ mcp>=2.3.0
 # Extracción de adjuntos del chat (módulo M3). Todas puras Python y livianas:
 # si falta alguna, ese tipo de archivo se sigue adjuntando como "no
 # interpretable" en vez de romper la app.
-pypdf>=7.0.0
+pypdf>=7.1.0
 python-docx>=1.2.0
 python-pptx>=1.0.2
 openpyxl>=3.1.5
@@ -55,7 +55,7 @@ readability-lxml>=0.9
 #   - num2words: normalización de texto de Piper.
 piper-tts>=1.7.0
 kokoro-onnx>=0.4.7
-onnxruntime>=1.29.0
+onnxruntime>=1.32.0
 # Piso 2.2 (soporta Python 3.10+): la rama CI corre 3.11 y 3.12, y numpy>=2.5
 # exige Python >=3.12 (rompía la install del job 3.11).
 numpy>=2.2.0
