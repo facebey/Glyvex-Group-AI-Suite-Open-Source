@@ -23,7 +23,7 @@
     "react-dom": "^19.3.0",
     "react-i18next": "^18.0.1",
     "react-markdown": "^10.1.0",
-    "react-router-dom": "^7.18.4",
+    "react-router-dom": "^7.18.6",
     "recharts": "^3.10.1",
     "rehype-highlight": "^7.0.0",
     "remark-gfm": "^4.0.0"
