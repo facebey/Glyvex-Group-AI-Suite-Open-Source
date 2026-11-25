@@ -73,16 +73,24 @@ def _id_for(models, filename):
     return next(m["id"] for m in models if m["filename"] == filename)
 
 
-def _draft_truth(meta: dict, weights_gb: float, ctx: int = CTX) -> float:
+def _draft_truth(
+    meta: dict, weights_gb: float, ctx: int = CTX, own_reserve: bool = False
+) -> float:
     """Verdad INDEPENDIENTE del clamp: el coste del draft es exactamente el
     estimador estándar aplicado a sus capas REALES (KV q8_0 + buffer FA), como
     lo documenta estimate_draft_aux_gb. Si el código no recorta las capas
-    declaradas, los totales divergen de estos números."""
+    declaradas, los totales divergen de estos números.
+
+    `own_reserve=True` es el caso SIN header legible del draft (F-2): el
+    contexto que llama.cpp construye para él reserva su propio bloque de
+    cómputo, medido como un segundo `sched_reserve` junto al del base."""
     est = vram.estimate_vram_usage(
         dict(meta), weights_gb, ctx,
         cache_type_k="q8_0", cache_type_v="q8_0",
         n_parallel=1, flash_attn=True, gpu_vram_gb=0.0,
     )
+    if own_reserve:
+        return round(est["total_gb"] + vram.DRAFT_CTX_RESERVE_GB, 2)
     return est["total_gb"]
 
 
@@ -198,11 +206,11 @@ def test_aproximacion_sin_metadata_se_dimensiona_con_max_layers():
     }
     assert vram.estimate_draft_aux_gb(
         BASE_META, CTX, 0.0, None, max_layers=approx_n,
-    ) == _draft_truth(approx_meta, 0.0)
+    ) == _draft_truth(approx_meta, 0.0, own_reserve=True)
     # Sin declaración sigue siendo exactamente la aproximación de una capa.
     one_layer = {**approx_meta, "n_layer": 1}
     assert vram.estimate_draft_aux_gb(BASE_META, CTX, 0.0, None) == (
-        _draft_truth(one_layer, 0.0)
+        _draft_truth(one_layer, 0.0, own_reserve=True)
     )
 
 

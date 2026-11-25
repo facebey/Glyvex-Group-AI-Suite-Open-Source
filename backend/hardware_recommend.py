@@ -18,7 +18,11 @@ discrepan en el encaje base (pesos + KV + compute). A2F-1 añade además la
 cuenta de los componentes auxiliares que la ficha del modelo trae de hecho
 (draft MTP y mmproj de visión): se presupuestan con su tamaño REAL de archivo
 o, si no hay archivo que medir, con la aproximación del propio estimador
-(vram_estimate.estimate_draft_aux_gb). LL-4 U3: el presupuesto del draft es ya
+(vram_estimate.estimate_draft_aux_gb). F-2: ese presupuesto incluye ahora los
+buffers de cómputo PROPIOS que llama.cpp reserva para cada contexto extra
+(DRAFT_CTX_RESERVE_GB para un draft sin header legible, MTMD_CONTEXT_RESERVE_GB
+para el `mtmd_context` de visión) — son memoria de trabajo, no pesos, y medidos
+en vivo valen tanto como un archivo pequeño. LL-4 U3: el presupuesto del draft es ya
 compartido para cualquier modo draft, pero la PROPUESTA automática de fit
 sigue siendo MTP-única en v1 — hoy MTP es el único draft auto-descubrible con
 confianza; dflash/simple/eagle3 se presupuestan en /vram-estimate y se eligen
@@ -34,7 +38,11 @@ import math
 from typing import Any
 
 from launcher import LaunchConfig
-from vram_estimate import estimate_draft_aux_gb, estimate_vram_usage
+from vram_estimate import (
+    MTMD_CONTEXT_RESERVE_GB,
+    estimate_draft_aux_gb,
+    estimate_vram_usage,
+)
 
 from hardware_detection import GpuInfo, HardwareSnapshot
 
@@ -249,22 +257,29 @@ def _plan_gpu(
                         warnings.append({"key": "mtp_no_room",
                                          "args": {"aux_gb": round(mtp_gb, 2),
                                                  "pct": round(100.0 * new_total / vram_gb, 1)}})
-            # 3) Visión: solo con mmproj medido, y solo si el peso real del
-            #    archivo entra en el presupuesto. Sus activaciones de encoder no
-            #    se modelan aparte: el margen FIT_RATIO las cubre (el único
-            #    overhead extra observado en llama.cpp es de tamaño moderado).
+            # 3) Visión: solo con mmproj medido, y solo si entra en el
+            #    presupuesto lo que el launch suma DE VERDAD: el peso real del
+            #    archivo MÁS el compute buffer propio del `mtmd_context`
+            #    (MTMD_CONTEXT_RESERVE_GB, medido en vivo: 248,10 MiB con el
+            #    mmproj de Qwen3.8-27B y 150,63 MiB con el de gemma-4-26B).
+            #    El margen FIT_RATIO no las cubre: Q4_K_XL + visión a 131k dejó
+            #    499 MiB libres de 24.576 reales y la card lo daba por bueno.
+            #    Mismo criterio que estimate_vram_usage, que suma esa reserva al
+            #    cómputo cuando su desglose trae un mmproj.
             if aux_vision is not None:
-                vis_gb = aux_vision["weights_gb"]
+                vis_gb = float(aux_vision["weights_gb"]) + MTMD_CONTEXT_RESERVE_GB
                 new_total = total + vis_gb
                 if new_total <= limit:
                     params["mmproj_path"] = aux_vision["path"]
                     rationale.append({"param": "mmproj_path", "key": "vision_fit",
-                                      "args": {"mmproj_gb": round(vis_gb, 2),
+                                      "args": {"mmproj_gb": round(float(aux_vision["weights_gb"]), 2),
+                                              "mtmd_gb": round(MTMD_CONTEXT_RESERVE_GB, 2),
                                               "pct": round(100.0 * new_total / vram_gb, 1)}})
                     total = new_total
                 else:
                     warnings.append({"key": "vision_no_room",
-                                     "args": {"mmproj_gb": round(vis_gb, 2),
+                                     "args": {"mmproj_gb": round(float(aux_vision["weights_gb"]), 2),
+                                              "mtmd_gb": round(MTMD_CONTEXT_RESERVE_GB, 2),
                                              "pct": round(100.0 * new_total / vram_gb, 1)}})
             # 4) KV f16: se re-estima el MISMO bundle con caché f16 y se emite
             #    solo si sigue bajo FIT_RATIO. Esto reemplaza el viejo umbral

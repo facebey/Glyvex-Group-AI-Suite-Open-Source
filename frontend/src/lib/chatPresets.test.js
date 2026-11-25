@@ -4,6 +4,7 @@ import {
   PRESET_AUTO,
   PRESET_CUSTOM,
   normalizePresetChoice,
+  presetOriginKeys,
   presetSaveScope,
   resolvePresetEntry,
 } from "./chatPresets.js";
@@ -47,5 +48,31 @@ describe("presetSaveScope", () => {
   it("sin entrada (custom/auto sin match) se ancla al modelo actual", () => {
     expect(presetSaveScope(null, "test-model")).toEqual({ family: null, model_name: "test-model" });
     expect(presetSaveScope(null, "")).toEqual({ family: null, model_name: null });
+  });
+});
+
+describe("presetOriginKeys", () => {
+  it("marca exactamente los parámetros que la entrada fija", () => {
+    expect([...presetOriginKeys(options[0])]).toEqual(["temperature"]);
+    const mezcla = { id: "mixto", params: { temperature: 0.5, presence_penalty: 1.2 } };
+    expect([...presetOriginKeys(mezcla)].sort()).toEqual(["presence_penalty", "temperature"]);
+  });
+
+  it("el auto marca los del recommended, igual que la entrada que aplica Chat.jsx", () => {
+    const entry = resolvePresetEntry(options, PRESET_AUTO);
+    expect([...presetOriginKeys(entry)]).toEqual(["temperature"]);
+  });
+
+  it("sin entrada (custom, auto sin recomendado, elección muerta) ningún campo tiene origen", () => {
+    expect(presetOriginKeys(resolvePresetEntry(options, PRESET_CUSTOM)).size).toBe(0);
+    const sinRecomendado = options.map((p) => ({ ...p, recommended: false }));
+    expect(presetOriginKeys(resolvePresetEntry(sinRecomendado, PRESET_AUTO)).size).toBe(0);
+    expect(presetOriginKeys(null).size).toBe(0);
+  });
+
+  it("una entrada sin params válidos no revienta y no marca nada", () => {
+    expect(presetOriginKeys({ id: "roto" }).size).toBe(0);
+    expect(presetOriginKeys({ id: "roto", params: null }).size).toBe(0);
+    expect(presetOriginKeys({ id: "roto", params: "no-objeto" }).size).toBe(0);
   });
 });

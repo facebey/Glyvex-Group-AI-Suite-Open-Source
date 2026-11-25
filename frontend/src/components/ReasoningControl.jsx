@@ -175,7 +175,8 @@ export default function ReasoningControl({ value, onChange, effortUnsupported = 
           </div>
 
           <div className="px-3 py-2 space-y-2">
-            <span className="block text-xs text-glyvex-muted">reasoning_effort (llama.cpp)</span>
+            <span className="block text-xs text-glyvex-muted">{t("reasoning.effortHeading")}</span>
+            <span className="block text-[10px] text-glyvex-muted">{t("reasoning.effortHint")}</span>
             {effortUnsupported && (
               <span className="block text-xs text-glyvex-muted">{t("reasoning.effortUnsupported")}</span>
             )}

@@ -202,6 +202,8 @@
     "systemPromptPlaceholder": "System instructions…",
     "params": "Parameters",
     "preset": "Sampling preset",
+    "originPreset": "from preset",
+    "originHint": "Values tagged 'from preset' come from the selected preset; untagged ones are the app defaults.",
     "clearConversation": "Clear conversation",
     "import": "Import"
   },
@@ -286,9 +288,11 @@
     "medium": "Medium",
     "high": "High",
     "max": "Max",
-    "effort": "Effort (budget_tokens): {{value}}",
-    "budgetHint": "Reasoning token limit per response; -1 means unlimited. The server applies it when generating thinking.",
+    "effort": "Thinking budget: {{value}} tokens",
+    "budgetHint": "Maximum reasoning tokens per response (-1 = unlimited). This is what actually limits how much the model thinks: Max lets it reason more than High.",
     "budgetPlaceholder": "tokens (-1 = unlimited)",
+    "effortHeading": "Suggested depth (reasoning_effort)",
+    "effortHint": "A hint for the model's chat template about how extensive the reasoning should be, always within the budget above.",
     "effortUnsupported": "This model's chat template does not read reasoning_effort: it does not control depth through effort. Use the thinking budget above."
   },
   "chatSettings": {
@@ -485,6 +489,14 @@
     "allFamilies": "All families",
     "allQuants": "All quantizations",
     "allBackends": "All backends",
+    "allKinds": "All kinds",
+    "kind": {
+      "llm": "LLM",
+      "image": "Image",
+      "audio": "Audio",
+      "unknown": "Unclassified"
+    },
+    "notLaunchable": "Not launchable",
     "sortBy": "Sort by {{name}}",
     "sort": {
       "name": "Name",
@@ -499,6 +511,7 @@
     "colQuant": "Quantization",
     "colSize": "Size",
     "colFormat": "Format",
+    "colKind": "Kind",
     "colBackends": "Backends",
     "selected": "Selected",
     "select": "Select"
@@ -814,7 +827,7 @@
       "max_fit": "Context {{ctx}}: the largest in the ladder that fully fits in {{vram_gb}} GB of VRAM ({{pct}}% estimated)",
       "headroom_f16": "f16 KV cache: plenty of headroom at {{pct}}% estimated VRAM",
       "mtp_fit": "MTP draft enabled: adds {{aux_gb}} GB estimated and the total stays at {{pct}}% of VRAM",
-      "vision_fit": "Vision (mmproj) enabled: adds {{mmproj_gb}} GB and the total stays at {{pct}}% of VRAM",
+      "vision_fit": "Vision (mmproj) enabled: adds {{mmproj_gb}} GB of weights + {{mtmd_gb}} GB of vision context and the total stays at {{pct}}% of VRAM",
       "moe_experts_cpu": "{{layers}} expert layers moved to RAM (--n-cpu-moe); attention and KV stay on GPU",
       "partial_fit": "{{layers}} of {{n_layer}} layers on GPU; the rest runs in RAM (partial fit with {{vram_gb}} GB)",
       "physical_cores": "{{cores}} CPU threads: physical cores, not logical SMT threads",
@@ -829,7 +842,7 @@
       "ram_tight": "Tight RAM: even {{weights_gb}} GB of weights do not fit in {{ram_gb}} GB available.",
       "quant_suggested": "Look for a smaller quantization: {{weights_gb}} GB are uncomfortable for {{ram_gb}} GB of RAM.",
       "mtp_no_room": "MTP draft dropped: it would add {{aux_gb}} GB and push the total to {{pct}}% of VRAM.",
-      "vision_no_room": "Vision (mmproj) dropped: it would add {{mmproj_gb}} GB and push the total to {{pct}}% of VRAM."
+      "vision_no_room": "Vision (mmproj) dropped: it would add {{mmproj_gb}} GB of weights + {{mtmd_gb}} GB of vision context and push the total to {{pct}}% of VRAM."
     }
   },
   "monitor": {

@@ -20,7 +20,7 @@ export function isExternalThemeName(name) {
 /** Metadatos por tema interno: clave i18n del nombre y swatch. */
 export const THEME_META = {
   dark:     { labelKey: "config.appPrefs.themeDark",     swatch: "#0d9488" },
-  light:    { labelKey: "config.appPrefs.themeLight",    swatch: "#bcb3d9" },
+  light:    { labelKey: "config.appPrefs.themeLight",    swatch: "#115e56" },
   carbon:   { labelKey: "config.appPrefs.themeCarbon",   swatch: "#14b8a6" },
   metallic: { labelKey: "config.appPrefs.themeMetallic", swatch: "#c4c8cd" },
   matrix:   { labelKey: "config.appPrefs.themeMatrix",   swatch: "#00ff66" },

@@ -48,5 +48,17 @@ export function toPayloadContent(message) {
  */
 export function toPayloadMessages(message) {
   const exchange = (message.tool_exchange || []).map((m) => ({ ...m }));
-  return [...exchange, { role: message.role, content: toPayloadContent(message) }];
+  const content = toPayloadContent(message);
+  // Un turno que falló antes de producir texto (message.error) no porta
+  // contexto: mandarlo vacío confusea a algunos upstreams y ensucia el
+  // historial que ve el modelo.
+  if (
+    message.role === "assistant" &&
+    message.error &&
+    exchange.length === 0 &&
+    !String(content ?? "").trim()
+  ) {
+    return [];
+  }
+  return [...exchange, { role: message.role, content }];
 }

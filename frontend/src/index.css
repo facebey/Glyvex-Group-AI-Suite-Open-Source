@@ -52,8 +52,9 @@
   --color-glyvex-bg-text:       #e8edf5;
   --color-glyvex-bg-muted:      #94a3b8;
   /* Paleta de datos (gráficos y barras de carga). Defaults = los hex que
-     antes estaban hardcodeados en Monitor/Benchmark/Launcher, así dark y
-     light no cambian; carbon/metallic/matrix los redefinen. */
+     antes estaban hardcodeados en Monitor/Benchmark/Launcher, así dark los
+     conserva; carbon/metallic/matrix los redefinen y light también desde
+     2026-11-23b (TH-L-V: sobre neutros medios los tonos vivos de dark daban ~2:1). */
   --color-glyvex-chart-1:       #3b82f6;  /* GPU / en curso */
   --color-glyvex-chart-2:       #06b6d4;  /* VRAM / RAM / contexto */
   --color-glyvex-chart-3:       #f59e0b;  /* CPU / en espera */
@@ -70,71 +71,82 @@
   --color-glyvex-load-none:     #9ca3af;
 }
 
-/* Light theme — paleta lavanda: fondo lila desaturado, cards lavanda clara
-   con gradiente y texto índigo (no negro puro) para que el conjunto sea
-   coherente en vez de "blanco con acentos violeta". */
+/* Light theme — paleta pizarra neblada: grises neutros de luminancia media
+   (casi sin croma), cards con gradiente y tinta fría profunda; acento teal
+   de marca (teal-800). Re-paleta 2026-11-23b (TH-L-V): la verde agua pastel
+   fue probada en la app real y rechazada — deslumbramiento (lum fondo 0.86)
+   y baño verde en toda la UI. Esta baja la luminancia de superficies a ~0.59
+   y el croma a ~0. Todos los pares medidos WCAG: texto AA-AAA, UI ≥4.0,
+   series de gráfico ≥3:1 sobre la recesión. */
 .light {
-  --color-glyvex-bg:        #b6acd5;
-  --color-glyvex-bg-2:      #a79cc7;
-  --color-glyvex-card:      #ccc2e2;
-  --color-glyvex-card-hi:   #bfb4d9;
-  --color-glyvex-border:    #cbc2e2;
-  --color-glyvex-border-hi: #b0a4d0;
-  --color-glyvex-text:      #241f38;
-  --color-glyvex-muted:     #4c4666;
-  --color-glyvex-muted-2:   #7d7598;
-  --color-glyvex-accent:    #6d28d9;  /* violeta: acento nativo de la paleta lavanda */
-  --color-glyvex-cyan:      #0e7490;
-  --color-glyvex-sky:       #1d4ed8;
-  --color-glyvex-violet:    #6d28d9;
-  --color-glyvex-orange:    #ea580c;
-  /* Overlays con tinte índigo (los blancos/grises neutros se veían ajenos
-     a la paleta) */
-  --color-glyvex-veil:           rgb(30 27 75 / 0.05);
-  --color-glyvex-veil-faint:     rgb(30 27 75 / 0.03);
-  --color-glyvex-veil-strong:    rgb(30 27 75 / 0.09);
-  --color-glyvex-veil-badge:     rgb(30 27 75 / 0.12);
-  --color-glyvex-border-soft:    rgb(30 27 75 / 0.14);
-  --color-glyvex-veil-box:       rgb(30 27 75 / 0.06);
-  --color-glyvex-veil-disabled:  rgb(30 27 75 / 0.10);
-  --color-glyvex-surface-code:   #b3a8d4;
-  --color-glyvex-bg-text:       #241f38;
-  --color-glyvex-bg-muted:      #4c4666;
-  /* -800 (no -700): la navbar y el badge Live viven sobre el fondo lavanda,
-     donde -700 daba solo ~3:1. En las cards quedan 6.5-8:1. */
-  --color-glyvex-ok:             #047857;
-  --color-glyvex-warn:           #92400e;
+  --color-glyvex-bg:        #c5cace;
+  --color-glyvex-bg-2:      #b7bec1;  /* shell/sidebar un paso más profundo que el fondo */
+  --color-glyvex-card:      #d8dde0;
+  --color-glyvex-card-hi:   #cdd3d6;
+  --color-glyvex-border:    #adb4b8;
+  --color-glyvex-border-hi: #8d969b;
+  --color-glyvex-text:      #1b2022;  /* 8.7–12:1 sobre cualquier surface */
+  --color-glyvex-muted:     #3b4448;  /* 5.3–7.3:1 */
+  --color-glyvex-muted-2:   #414a4e;  /* micro-labels 4.8–6.6:1 (la lavanda: 2.5:1) */
+  --color-glyvex-accent:    #115e56;  /* teal-800: 4.0–5.6:1 sobre surfaces */
+  --color-glyvex-cyan:      #0f4f63;
+  --color-glyvex-sky:       #1e40af;
+  --color-glyvex-violet:    #5b21b6;
+  --color-glyvex-orange:    #8a3411;
+  /* Overlays con tinte gris-tinta (el mismo color del texto; los neutros se
+     veían ajenos a la paleta) */
+  --color-glyvex-veil:           rgb(27 32 34 / 0.05);
+  --color-glyvex-veil-faint:     rgb(27 32 34 / 0.03);
+  --color-glyvex-veil-strong:    rgb(27 32 34 / 0.09);
+  --color-glyvex-veil-badge:     rgb(27 32 34 / 0.12);
+  --color-glyvex-border-soft:    rgb(27 32 34 / 0.14);
+  --color-glyvex-veil-box:       rgb(27 32 34 / 0.06);
+  --color-glyvex-veil-disabled:  rgb(27 32 34 / 0.10);
+  --color-glyvex-surface-code:   #c2c9cc;
+  --color-glyvex-bg-text:       #1b2022;
+  --color-glyvex-bg-muted:      #3b4448;
+  /* Tonos 900/800: sobre superficies neutras medias los 700 quedan bajo AA;
+     estos dan 4.9–6.7:1 (badge Live de la navbar: 5.5:1). */
+  --color-glyvex-ok:             #14532d;
+  --color-glyvex-warn:           #78420d;
   --color-glyvex-crit:           #991b1b;
-  /* Datos: mismos significados semánticos que dark, pero un tono más profundos
-     para legibilidad sobre lavanda clara */
-  --color-glyvex-chart-1:       #2563eb;
+  /* Datos: mismos significados semánticos que dark, tonos oscuros para que
+     las series lean 3.1–5.1:1 sobre la recesión */
+  --color-glyvex-chart-1:       #1d4ed8;
   --color-glyvex-chart-2:       #0e7490;
-  --color-glyvex-chart-3:       #d97706;
-  --color-glyvex-chart-4:       #16a34a;
-  --color-glyvex-chart-5:       #7c3aed;
-  --color-glyvex-chart-axis:    #5a5478;
-  --color-glyvex-chart-tick:    #6b6488;
-  --color-glyvex-chart-grid:    rgb(30 27 75 / 0.12);
-  --color-glyvex-chart-tip-bg:  #312b52;
+  --color-glyvex-chart-3:       #9a4406;
+  --color-glyvex-chart-4:       #166534;
+  --color-glyvex-chart-5:       #5b21b6;
+  --color-glyvex-chart-axis:    #444c50;
+  --color-glyvex-chart-tick:    #414a4e;
+  --color-glyvex-chart-grid:    rgb(27 32 34 / 0.12);
+  --color-glyvex-chart-tip-bg:  #22262a;
   --color-glyvex-chart-tip-bd:  rgb(255 255 255 / 0.14);
+  /* Barras de carga: light era el único tema sin load-* propios y heredaba los
+     de dark (verdes/ámbar vivos, ilegibles sobre neutro medio). Tonos propios
+     800/900: 4.7–5.2:1 sobre cards. */
+  --color-glyvex-load-ok:       #166534;
+  --color-glyvex-load-warn:     #9a4406;
+  --color-glyvex-load-crit:     #b91c1c;
+  --color-glyvex-load-none:     #5b6469;
 }
 
-/* Cards en light: placa lavanda media con gradiente vertical suave (más
-   cercana al fondo) para que no se vea plana ni blanca. */
+/* Cards en light: placa gris pizarra con gradiente vertical suave hacia
+   card-hi, para que no se vea plana. */
 .light .bg-glyvex-card {
-  background-image: linear-gradient(180deg, #ccc2e2, #bfb4d9);
+  background-image: linear-gradient(180deg, #d8dde0, #cdd3d6);
 }
 
-/* Gráficos en light: el plot vive en una recesión lavanda (un paso más
-   oscuro que la card) para dar profundidad sin romper la paleta. */
+/* Gráficos en light: el plot vive en una recesión gris (#bec5c8, un paso más
+   profunda que la card) para dar profundidad sin romper la paleta; series
+   3.1–5.1:1 y ticks 5.2:1 sobre ella. */
 .light .gx-chart {
-  background-color: #aea2cf;
-  background-image: linear-gradient(180deg, rgb(30 27 75 / 0.08), rgb(30 27 75 / 0.01) 45%);
-  border: 1px solid rgb(30 27 75 / 0.14);
+  background-color: #bec5c8;
+  background-image: linear-gradient(180deg, rgb(27 32 34 / 0.08), rgb(27 32 34 / 0.01) 45%);
+  border: 1px solid rgb(27 32 34 / 0.14);
   border-radius: 6px;
-  box-shadow: inset 0 1px 3px rgb(30 27 75 / 0.10), 0 1px 0 rgb(255 255 255 / 0.6);
+  box-shadow: inset 0 1px 3px rgb(27 32 34 / 0.10), 0 1px 0 rgb(255 255 255 / 0.35);
   padding: 8px 6px 4px;
-  --color-glyvex-chart-tick: #544d75;
 }
 
 /* ==========================================================================
@@ -606,6 +618,19 @@ select option {
   background-color: var(--color-glyvex-card);
   color: var(--color-glyvex-text);
 }
+
+/* El POPUP abierto del <select> (y checkbox nativo, scrollbars de formularios)
+   lo pinta el sistema, no el CSS: sin color-scheme usa el tema de Windows
+   (claro) y sobre los temas oscuros salía popup claro con highlight azul del
+   SO y etiquetas de optgroup en gris nativo, ilegibles — reportado por Fabian
+   en el preset de Sampling del Chat, 2026-11-22. Declarar color-scheme por
+   tema hace que el SO dibuje los controles nativos con colores acordes a la
+   app; la regla de option de arriba (fix MON-4) sigue aplicando al texto.
+   metallic se trata como claro: su select cerrado es texto oscuro sobre card
+   clara. Temas externos: si su paleta es clara que declaren color-scheme:
+   light en su propio CSS (el default del root es dark). */
+:root { color-scheme: dark; }
+html:is(.light, .metallic) { color-scheme: light; }
 
 /* JetBrains Mono para código, métricas y logs */
 code, pre, .font-mono {

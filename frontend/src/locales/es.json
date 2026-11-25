@@ -202,6 +202,8 @@
     "systemPromptPlaceholder": "Instrucciones de sistema…",
     "params": "Parámetros",
     "preset": "Preset de muestreo",
+    "originPreset": "del preset",
+    "originHint": "Los valores marcados «del preset» los fija el preset elegido; los sin marcar son los valores por defecto de la app.",
     "clearConversation": "Limpiar conversación",
     "import": "Importar"
   },
@@ -286,10 +288,12 @@
     "medium": "Medio",
     "high": "Alto",
     "max": "Máx",
-    "effort": "Esfuerzo (budget_tokens): {{value}}",
-    "budgetHint": "Límite de tokens de razonamiento por respuesta; -1 sin límite. El server lo aplica cuando genera thinking.",
+    "effort": "Presupuesto de thinking: {{value}} tokens",
+    "budgetHint": "Tokens máximos de razonamiento por respuesta (-1 = sin límite). Es lo que de verdad limita cuánto piensa el modelo: Máx lo deja razonar más que Alto.",
     "budgetPlaceholder": "tokens (-1 = sin límite)",
-    "effortUnsupported": "La plantilla de este modelo no lee reasoning_effort: no controla la profundidad por esfuerzo. Usa el budget de thinking de arriba."
+    "effortHeading": "Profundidad sugerida (reasoning_effort)",
+    "effortHint": "Pista para la plantilla del modelo sobre qué tan extenso debe ser el razonamiento, siempre dentro del presupuesto de arriba.",
+    "effortUnsupported": "La plantilla de este modelo no lee reasoning_effort: no controla la profundidad por esfuerzo. Usa el presupuesto de thinking de arriba."
   },
   "chatSettings": {
     "whisperDefault": "default",
@@ -485,6 +489,14 @@
     "allFamilies": "Todas las familias",
     "allQuants": "Todas las cuantizaciones",
     "allBackends": "Todos los backends",
+    "allKinds": "Todos los tipos",
+    "kind": {
+      "llm": "LLM",
+      "image": "Imagen",
+      "audio": "Audio",
+      "unknown": "Sin clasificar"
+    },
+    "notLaunchable": "No lanzable",
     "sortBy": "Ordenar por {{name}}",
     "sort": {
       "name": "Nombre",
@@ -499,6 +511,7 @@
     "colQuant": "Cuantización",
     "colSize": "Tamaño",
     "colFormat": "Formato",
+    "colKind": "Tipo",
     "colBackends": "Backends",
     "selected": "Seleccionado",
     "select": "Seleccionar"
@@ -814,7 +827,7 @@
       "max_fit": "Contexto {{ctx}}: el mayor de la escala que cabe completo en {{vram_gb}} GB de VRAM ({{pct}}% estimada)",
       "headroom_f16": "KV cache en f16: sobra margen con {{pct}}% de VRAM estimada",
       "mtp_fit": "Draft MTP activado: suma {{aux_gb}} GB estimados y el total queda en {{pct}}% de la VRAM",
-      "vision_fit": "Visión (mmproj) activada: suma {{mmproj_gb}} GB y el total queda en {{pct}}% de la VRAM",
+      "vision_fit": "Visión (mmproj) activada: suma {{mmproj_gb}} GB de pesos + {{mtmd_gb}} GB de contexto de visión y el total queda en {{pct}}% de la VRAM",
       "moe_experts_cpu": "{{layers}} capas de expertos en RAM (--n-cpu-moe); la atención y el KV quedan en GPU",
       "partial_fit": "{{layers}} de {{n_layer}} capas en GPU; el resto se ejecuta en RAM (ajuste parcial con {{vram_gb}} GB)",
       "physical_cores": "{{cores}} hilos de CPU: núcleos físicos, no lógicos con SMT",
@@ -829,7 +842,7 @@
       "ram_tight": "RAM ajustada: ni {{weights_gb}} GB de pesos caben en {{ram_gb}} GB disponibles.",
       "quant_suggested": "Busca una cuantización más chica: {{weights_gb}} GB superan lo cómodo para {{ram_gb}} GB de RAM.",
       "mtp_no_room": "Draft MTP descartado: sumaría {{aux_gb}} GB y llevaría el total al {{pct}}% de la VRAM.",
-      "vision_no_room": "Visión (mmproj) descartada: sumaría {{mmproj_gb}} GB y llevaría el total al {{pct}}% de la VRAM."
+      "vision_no_room": "Visión (mmproj) descartada: sumaría {{mmproj_gb}} GB de pesos + {{mtmd_gb}} GB de contexto de visión y llevaría el total al {{pct}}% de la VRAM."
     }
   },
   "monitor": {

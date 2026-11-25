@@ -66,6 +66,7 @@ _MODEL_FIELDS = (
     "mmproj_path",
     "mtp_embedded",
     "tags",
+    "model_kind",
 )
 
 

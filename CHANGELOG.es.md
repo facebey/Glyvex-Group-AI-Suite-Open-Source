@@ -7,6 +7,58 @@ Versionado: semántico `X.Y.Z` (ver README, sección "Versionado").
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-11-25
+
+El inventario **dice qué es cada modelo realmente**: checkpoints de imagen y audio
+se reconocen con evidencia medida y se marcan como no lanzables donde corresponde,
+el splash de arranque sigue el idioma de la app, el chat muestra qué valores de
+muestreo vienen de un preset, y la estimación de VRAM presupuesta ahora los
+buffers que la especulación y la visión realmente reservan.
+
+### Añadido
+- **Clasificación no-LLM del inventario** (`model_kind`: `llm` / `image` / `audio` /
+  `unknown`): los checkpoints `.safetensors` sueltos se indexan y clasifican desde su
+  config y sus nombres de tensor; las entradas `.gguf` se clasifican desde la metadata
+  medida de su header (arquitectura / tokenizer), y los GGUF estilo ComfyUI **sin
+  metadata** — que no escriben header alguno — se reconocen como `image` por la firma
+  de nombres de tensor difusión de su propia tabla tensor-info; los modelos de
+  audio/música (Qwen3-TTS, HeartMuLa, HeartCodec) se clasifican por tokens de tarea
+  medidos antes que los patrones de arquitectura. Las entradas no-LLM muestran badge
+  *Imagen* / *Audio* en la tabla del launcher, no reciben backends y quedan fuera de
+  los flujos de lanzamiento. La cabecera de la columna Tipo está localizada (ES/EN).
+- **Splash de arranque localizado**: el idioma de la app se refleja en la shell Tauri
+  (comando `ui_lang` + archivo `ui_lang` en el directorio de datos), de modo que la
+  pantalla de arranque se muestra en el idioma elegido y no en el del sistema.
+- **Etiquetas de origen de preset en el sidebar del chat**: los campos de muestreo cuyo
+  valor actual pertenece al preset activo se marcan («del preset» / «from preset»),
+  distinguiendo valores del preset de los defaults de la app o de ediciones propias.
+
+### Cambiado
+- Tema light repintado con una paleta neutra «pizarra» medida; cada tema declara su
+  `color-scheme` para que los popups nativos de `<select>` sigan el tema de la app.
+- Etiquetas del control de razonamiento aclaradas: presupuesto de tokens vs profundidad
+  sugerida.
+- La selección de preset **reemplaza** los parámetros de muestreo desde los defaults en
+  lugar de mezclarlos sobre los valores actuales.
+- Pisos de dependencias elevados desde los PRs de Dependabot #142–#147 (fastapi 0.162.7,
+  pypdf 7.1, onnxruntime 1.32, pytest-asyncio 1.5, vite 8.3.8, lucide-react 1.72).
+
+### Arreglado
+- **La estimación de VRAM presupuesta los buffers de contextos auxiliares**: el
+  `sched_reserve` del contexto de un draft de especulación (MTP/DFlash) y el
+  `mtmd_context` de un modelo de visión ahora se incluyen, cerrando una subestimación
+  de ~1,7–1,9 GiB con especulación encendida (medido end-to-end en llama.cpp b12359).
+- Los presets de chat de Qwen3.8 incluyen el par completo de penalizaciones que
+  declara su ficha de modelo (verificado con corridas A/B).
+- Aplicar una plantilla de hardware re-enlaza su preferencia de visión al modelo
+  seleccionado en lugar de arrastrar una referencia vieja.
+- Chat: la clave API bearer se envía a las probes de capacidades; el soporte de
+  `reasoning_effort` se detecta desde el chat template cuando las capacidades no lo
+  declaran; los errores upstream de turnos fallidos se persisten, se muestran en la
+  burbuja del mensaje y se descartan de los payloads de request.
+- La barra de acciones de bloques de código se movió al pie; la acción de descarga
+  está siempre disponible con nombres de archivo de fallback seguros.
+
 ## [0.16.0] — 2026-11-15
 
 El Chat aprende a **leer a cada modelo**: presets de muestreo fieles a las

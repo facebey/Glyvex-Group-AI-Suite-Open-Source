@@ -231,8 +231,19 @@ LLAMA_SERVER_VERBOSITY = 4
 
 # Presets de sampling. Son la fuente de verdad del backend; el frontend tiene
 # una copia con los mismos valores para poder previsualizarlos sin round-trip.
-# "instruct" usa penalties moderados: repeat_penalty 1.5 / presence 1.5
-# degeneran la salida en la familia Qwen (especialmente código).
+# "instruct" se queda en penalties moderados porque es lo que sostiene la medida,
+# no una intuición: A/B 2026-11-22 sobre Qwen3.8-27B Q4_K_M (4 tareas de código
+# x 3 reps, 12 runs por celda, juzgadas con ast.parse; temp 0.7 y el resto de la
+# infra idéntica, solo cambiaban los flags de muestreo). Resultado: toda salida
+# con presence <= 0.3 forma una banda indiferenciable entre sus variantes (38/60,
+# Fisher p >= 0.67 entre ellas) y 0.3/1.1 es la más corta y menos repetitiva de
+# esa banda (mediana 1097 tokens y 0,009 de 5-gramas repetidos, contra 1591 y
+# 0,020 con repeat 1.0). Las penalidades altas sí están medidas y son malas:
+# presence 1.5 con repeat 1.1 cae a 2/12 (p = 0.0007 contra la banda) y
+# 1.5/1.5 a 1/12 con el código sintácticamente roto. La card de Qwen3.8 usa
+# 1.5 pero acompañada de repeat 1.0 (8/12, sin señal contra la banda y +39 % de
+# tokens); esa pareja completa vive en chat_presets, que es lo que el usuario
+# elige explícitamente. Ninguna config cambió el rendimiento: 38,0-38,5 t/s.
 SAMPLING_PRESETS: dict[str, dict[str, float | int]] = {
     "thinking": {
         "temperature": 1.0,

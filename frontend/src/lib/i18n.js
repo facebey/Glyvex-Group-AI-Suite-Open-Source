@@ -26,6 +26,10 @@ export function setStoredLang(lang) {
   } catch {
     // localStorage bloqueado: el idioma solo rige para esta sesión
   }
+  // I18N-SPLASH: espejar a la shell para que el splash del próximo arranque
+  // hable este idioma (su origen no puede leer este localStorage). Fire-and-
+  // forget: si la shell no está o el comando falla, la app sigue igual.
+  import("./tauri.js").then(({ setUiLang }) => setUiLang(lang)).catch(() => {});
 }
 
 i18n.use(initReactI18next).init({

@@ -9,6 +9,10 @@ Cálculo deliberadamente simple y conservador (todo en GPU, sin offload):
             marcadas por sliding_window_pattern)
           + estado recurrente SSM (fijo, solo en modelos híbridos)
           + buffer de cómputo fijo
+          + auxiliares que el launch carga de verdad (mmproj/draft: pesos
+            medidos) y el buffer de cómputo PROPIO del contexto de ese
+            auxiliar (F-2: MTMD_CONTEXT_RESERVE_GB con un .mmproj,
+            DRAFT_CTX_RESERVE_GB con un draft sin header legible)
 
 Los modelos híbridos SSM/atención (Qwen3-Next/Qwen3.5: full_attention_interval=N)
 solo tienen KV que crece con el contexto en 1 de cada N capas; el resto son SSM
@@ -90,6 +94,36 @@ SPEC_NO_AUX_MODES = frozenset({"none", "ngram-simple", "ngram-mod"})
 # Q4 pesa ~2× el equivalente; 8× es holgura, no licencia para inflar).
 DRAFT_HEADER_GUARD_RATIO = 8.0
 
+# Reserva de cómputo PROPIA del contexto de un draft cuando no hay un header
+# legible suyo (cabeza MTP embebida, o .gguf de draft sin metadata) — F-2.
+# Medido en vivo (b12359, RTX 3090, ctx 131072, Qwen3.8-27B con su cabeza MTP
+# embebida): encender la especulación sube la VRAM usada **+1,69 GiB** con
+# Q4_K_M (20.203 → 21.897 GiB) y **+1,84 GiB** con Q4_K_XL (21.247 → 23.091).
+# El log dice de qué vive ese bloque: junto al `sched_reserve` del modelo base
+# (740.02 MiB CUDA0) aparece el del contexto del draft (**720.02 MiB CUDA0** +
+# 148 MiB host) y su KV propio (**272 MiB**, 1 capa al mismo n_ctx). Los
+# tensores de la cabeza NO suman: el `load_tensors` del base mide 15009.20 MiB
+# igual con spec ON que con spec OFF. El buffer que el draft heredaba del base
+# (COMPUTE_BUFFER_GB_FA, ~0.75 GB) más su KV dan ~1,0 GB de los ~1,7 medidos:
+# falta la memoria de gráficos/allocations del segundo contexto, que el log no
+# desglosa. Va como constante porque el delta medido no escala con el ctx
+# (idéntico a 32k, 65k y 131k). Con header legible del draft NO se aplica: ahí
+# la estimación ya queda por encima de lo medido (1,26–1,46 GB vs 1,12 en
+# gemma-4-26B-A4B) y sumarla sería inflar la card.
+DRAFT_CTX_RESERVE_GB = 0.75
+
+# Buffer propio del contexto multimodal (F-2): cuando un launch carga un
+# .mmproj, llama.cpp reserva APARTE un `mtmd_context` con su compute buffer,
+# que no está en el tamaño del archivo. Medido en vivo (b12359, RTX 3090,
+# línea `mtmd_context: CUDA0 compute buffer size`): **248,10 MiB** con el
+# mmproj de Qwen3.8-27B y **150,63 MiB** con el de gemma-4-26B-A4B. Se
+# presupuesta el mayor de los dos medidos — es lo que separa un «cabe» de un
+# «no cabe» en las configs de visión largas (Q4_K_XL + visión a 131k dejó
+# 499 MiB libres de 24.576 reales frente al margen que anunciaba la card).
+# Solo se suma con un archivo .mmproj real en el launch: con visión embebida no
+# hay medición propia y no se inventa un número.
+MTMD_CONTEXT_RESERVE_GB = 0.25
+
 _GIB = 1024 ** 3
 
 
@@ -152,6 +186,14 @@ def estimate_vram_usage(
     como componente {"kind": "draft_model"}. Por eso el llamador pasa solo
     los pesos/metadata del archivo y cada fila de la leyenda re-estima el
     suyo. Los modos ngram/none simplemente no pasan draft_aux: suman 0 VRAM.
+
+    Visión (F-2): si el desglose trae un componente {"kind": "mmproj"} con
+    tamaño real, este launch construye también un `mtmd_context` con su propio
+    compute buffer, y se suma MTMD_CONTEXT_RESERVE_GB al bloque de cómputo —
+    no a los pesos, porque no es un archivo sino memoria de trabajo del
+    encoder. El disparador es el desglose: quien decide si el launch carga
+    visión de verdad es el llamador (apagada o embebida = ningún componente =
+    ninguna reserva, porque ahí no hay medición propia).
     """
     n_layer = meta.get("n_layer")
     n_head = meta.get("n_head")
@@ -221,6 +263,14 @@ def estimate_vram_usage(
         }
         for c in (aux_components or [])
     ]
+    if any(c["kind"] == "mmproj" and c["size_gb"] > 0 for c in components):
+        # Un .mmproj contado en el desglose significa que el launch construye un
+        # `mtmd_context` con su propio compute buffer (F-2). Va en el bloque de
+        # cómputo, no como peso: no es un archivo, es memoria de trabajo del
+        # encoder. La señal es el propio desglose — `_vram_aux_components` ya
+        # decidió si este launch carga visión (sidecar) o no (apagada /
+        # embebida), así que no hay otro sitio que saiba cuándo aplica.
+        compute_gb += MTMD_CONTEXT_RESERVE_GB
     if draft_aux is not None:
         # El draft se re-estima para ESTE ctx (su KV propio crece con la fila;
         # tratarlo como peso fijo subestimaría los contextos largos). El tamaño
@@ -353,14 +403,20 @@ def estimate_draft_aux_gb(
       LaunchConfig define q8_0 por defecto (--spec-draft-type-k/-v).
     - Sin metadata del draft (cabeza embebida, o .gguf sin header legible):
       aproximación conservadora = una capa de atención completa del modelo
-      principal al ctx pedido (dims completas, sin ventanas SWA); los pesos
-      van aparte solo si vienen en archivo.
+      principal al ctx pedido (dims completas del base, incluido su `head_dim`
+      real — con el fallback `n_embd/n_head` el KV queda corto: 0,22 GB frente
+      a los 272 MiB medidos del contexto del draft a 131k; sin ventanas SWA);
+      los pesos van aparte solo si vienen en archivo, y se suma
+      DRAFT_CTX_RESERVE_GB.
 
-    El overhead de cómputo no es una constante aparte: es el propio buffer FA
-    que usa el estimador (COMPUTE_BUFFER_GB_FA). Medido en vivo con llama.cpp
-    b11827 (RTX 3090, ctx 131072, mtp-gemma-4-26B-A4B): ~690 MiB de cómputo
-    del draft junto a ~425 MiB de pesos y ~290 MiB de KV — el buffer ya cubre
-    esa suma con holgura.
+    El overhead de cómputo del draft SÍ es una constante aparte cuando no hay un
+    header legible suyo: `DRAFT_CTX_RESERVE_GB`. Medido en vivo con llama.cpp
+    b12359 (RTX 3090, ctx 131072, cabeza MTP embebida de Qwen3.8-27B): la
+    especulación suma +1,69 GiB de VRAM (Q4_K_M) / +1,84 GiB (Q4_K_XL), y el
+    log muestra un segundo `sched_reserve` de 720,02 MiB CUDA0 junto al del base
+    (740,02 MiB) más un KV propio de 272 MiB. Con ese header legible (sidecar
+    real) la reserva NO va: ahí el presupuesto con dims y pesos reales ya queda
+    alto (1,26–1,46 GB estimados vs 1,12 medidos en mtp-gemma-4-26B-A4B).
 
     Capas reales del draft (LL-4 U6): el header de muchos sidecars MTP es una
     COPIA del modelo base (declara sus N layers completos y sus dims) y
@@ -377,14 +433,17 @@ def estimate_draft_aux_gb(
     traen metadata mínima): entonces el draft no entra en el fit ni al
     presupuesto — mejor subestimar declarándolo que inventar un número."""
     draft_meta = draft_meta or {}
-    if draft_meta.get("n_layer") and draft_meta.get("n_head") and draft_meta.get("n_embd"):
+    real_header = bool(
+        draft_meta.get("n_layer") and draft_meta.get("n_head") and draft_meta.get("n_embd")
+    )
+    if real_header:
         base = dict(draft_meta)  # copia: el clamp no debe reescribir la metadata del llamador
         _clamp_draft_layers(
             base, base_meta, float(base_size_gb or 0.0), max_layers,
             float(draft_weights_gb or 0.0),
         )
     else:
-        base = {k: base_meta[k] for k in ("n_head", "n_embd") if base_meta.get(k)}
+        base = {k: base_meta[k] for k in ("n_head", "n_embd", "head_dim") if base_meta.get(k)}
         # Sin metadata propia, la aproximación usa las capas DECLARADAS si el
         # llamador las conoce (cabeza MTP embebida); si no, una capa del base.
         base["n_layer"] = max(1, _declared_layers(max_layers) or 1)
@@ -397,6 +456,10 @@ def estimate_draft_aux_gb(
     )
     if not est.get("available"):
         return None
+    if not real_header:
+        # El contexto del draft reserva su propio bloque de cómputo, que el
+        # buffer heredado del base no cubre (ver DRAFT_CTX_RESERVE_GB).
+        return round(est["total_gb"] + DRAFT_CTX_RESERVE_GB, 2)
     return est["total_gb"]
 
 

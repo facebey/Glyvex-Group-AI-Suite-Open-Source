@@ -70,8 +70,17 @@ presence 0.0 · repeat 1.0
 Preset `instruct` (default): temp 0.7 · top_p 0.80 · top_k 20 · min_p 0.0 ·
 presence 0.3 · repeat 1.1
 
-> Careful with high penalties: repeat_penalty 1.5 / presence 1.5 **degenerate
-> the output in the Qwen family** (especially code).
+> High penalties are measured, not folklore. A/B 2026-11-22 (Qwen3.8-27B
+> Q4_K_M, 4 code tasks x 3 reps, 12 runs per cell, judged with `ast.parse`):
+> `presence 1.5` **combined with `repeat 1.1`** produced 2/12 correct code and
+> `presence 1.5 / repeat 1.5` produced 1/12 with syntactically broken code,
+> against 38/60 for anything with `presence <= 0.3` (Fisher p = 0.0007). Within
+> that low band the variants are indistinguishable, and `0.3 / 1.1` is its
+> shortest and least repetitive one. The official Qwen3.8 card does use
+> `presence 1.5`, but paired with `repeat 1.0` — that complete pairing scored
+> 8/12, no signal against the low band, at +39% output length; it lives in the
+> Chat's `qwen3.8-instruct` preset, not here. Sampling cost nothing: 38.0–38.5
+> t/s in every cell.
 
 Valid ranges: temp 0–2 · top_p 0–1 · top_k ≥ 0 (0 = disabled) ·
 min_p 0–1.

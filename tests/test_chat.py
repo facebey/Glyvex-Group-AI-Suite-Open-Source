@@ -176,6 +176,90 @@ async def test_endpoint_models_unreachable(client):
     assert res.status_code == 502
 
 
+async def test_capabilities_con_api_key_ve_props(client, mock_llama_server):
+    # CHAT-API-CAPS: un server lanzado con --api-key (o el engine Strata, que
+    # la exige siempre) responde 401 a /props y /v1/models sin Bearer. Antes
+    # el probe no mandaba la key NUNCA, así que contra endpoints protegidos
+    # caía siempre a la heurística por nombre y marcaba mal vision/reasoning
+    # ("No soporta Thinking" en un Qwen3.8 que sí lo soporta).
+    chat_module._caps_cache.clear()
+    set_models_auth("sekret-key")
+    set_props(
+        {
+            "modalities": {"vision": True},
+            "chat_template_caps": {"supports_tools": True},
+            "default_generation_settings": {"n_ctx": 131072},
+            "model_alias": "test-model",
+        }
+    )
+    try:
+        res = await client.get(
+            f"/api/chat/capabilities?endpoint={mock_llama_server}&api_key=sekret-key"
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["source"] == "props"
+        assert data["vision"] is True
+        assert data["tools"] is True
+        assert data["context_size"] == 131072
+
+        # Sin la key el upstream da 401: el probe no debe reportar props.
+        chat_module._caps_cache.clear()
+        res = await client.get(f"/api/chat/capabilities?endpoint={mock_llama_server}")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["source"] != "props"
+        assert data["context_size"] == 0
+    finally:
+        set_models_auth(None)
+        set_props(None)
+        chat_module._caps_cache.clear()
+
+
+async def test_estimate_con_api_key_obtiene_contexto_de_props(client, mock_llama_server):
+    # El /estimate llama probe_capabilities por su cuenta: con endpoint
+    # protegido también necesita el Bearer o el contexto reportado es 0.
+    chat_module._caps_cache.clear()
+    set_models_auth("sekret-key")
+    set_props({"default_generation_settings": {"n_ctx": 131072}})
+    try:
+        res = await client.post(
+            "/api/chat/estimate",
+            json={
+                "endpoint": mock_llama_server,
+                "api_key": "sekret-key",
+                "messages": [{"role": "user", "content": "hola"}],
+            },
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["context_size"] == 131072
+    finally:
+        set_models_auth(None)
+        set_props(None)
+        chat_module._caps_cache.clear()
+
+
+def test_reasoning_effort_desde_template_cuando_el_caps_no_lo_menciona():
+    # Engines propios (Strata) publican chat_template_caps SIN este flag
+    # aunque su plantilla lee reasoning_effort: manda el template, como tools.
+    props = {
+        "chat_template_caps": {"supports_tools": True},
+        "chat_template": "{% if reasoning_effort %}xhigh{% endif %}",
+    }
+    assert chat_module._template_supports_reasoning_effort(props) is True
+
+
+def test_reasoning_effort_false_explito_no_se_sobrescribe():
+    # La negative explícita de llama.cpp (Gemma 4 reporta false) gana sobre
+    # la búsqueda en el template.
+    props = {
+        "chat_template_caps": {"supports_reasoning_effort": False},
+        "chat_template": "reasoning_effort",
+    }
+    assert chat_module._template_supports_reasoning_effort(props) is False
+
+
 async def test_reasoning_content_llega_como_thinking(client, mock_llama_server):
     payload = {
         "endpoint": mock_llama_server,

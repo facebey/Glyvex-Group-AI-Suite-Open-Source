@@ -4,7 +4,7 @@ import { Bookmark, Download, Trash2, Upload } from "lucide-react";
 import CollapsibleSection from "./ui/CollapsibleSection.jsx";
 import Slider from "./ui/Slider.jsx";
 import { inputClasses } from "../lib/styles.js";
-import { PRESET_AUTO, PRESET_CUSTOM } from "../lib/chatPresets.js";
+import { PRESET_AUTO, PRESET_CUSTOM, presetOriginKeys, resolvePresetEntry } from "../lib/chatPresets.js";
 
 // llama-server reporta como id del modelo la ruta completa del .gguf
 // (C:\LLM\gguf\Qwen…\modelo.gguf), que se corta en el selector. Se muestra
@@ -60,6 +60,12 @@ export default function ChatSidebar({
   const userPresets = presets.filter((p) => !p.builtin);
   // Solo los presets del usuario pueden borrarse; los built-in no viven en la DB.
   const selectedUserPreset = userPresets.find((p) => p.id === presetChoice) || null;
+
+  // PRESET-ORIGIN: la entrada que Chat.jsx está aplicando (auto incluye el
+  // recomendado; custom o auto sin recomendado = ninguna). Los sliders cuyo
+  // valor viene de esa entrada se marcan; lo no marcado es default de la app.
+  const originKeys = presetOriginKeys(resolvePresetEntry(presets, presetChoice));
+  const originTag = (key) => (originKeys.has(key) ? t("chatSidebar.originPreset") : undefined);
 
   const pingColor =
     endpointStatus === "ok"
@@ -235,12 +241,15 @@ export default function ChatSidebar({
             )}
           </div>
         </div>
-        <Slider label="Temperature" value={params.temperature} min={0} max={2} step={0.05} onChange={(v) => onParamChange({ temperature: v })} formatValue={(v) => v.toFixed(2)} />
-        <Slider label="Top P" value={params.top_p} min={0} max={1} step={0.01} onChange={(v) => onParamChange({ top_p: v })} formatValue={(v) => v.toFixed(2)} />
-        <Slider label="Top K" value={params.top_k} min={0} max={100} step={1} onChange={(v) => onParamChange({ top_k: v })} />
-        <Slider label="Min P" value={params.min_p} min={0} max={1} step={0.01} onChange={(v) => onParamChange({ min_p: v })} formatValue={(v) => v.toFixed(2)} />
-        <Slider label="Repeat penalty" value={params.repeat_penalty} min={1} max={1.5} step={0.01} onChange={(v) => onParamChange({ repeat_penalty: v })} formatValue={(v) => v.toFixed(2)} />
-        <Slider label="Presence penalty" value={params.presence_penalty} min={-2} max={2} step={0.1} onChange={(v) => onParamChange({ presence_penalty: v })} formatValue={(v) => v.toFixed(2)} />
+        <Slider label="Temperature" value={params.temperature} min={0} max={2} step={0.05} onChange={(v) => onParamChange({ temperature: v })} formatValue={(v) => v.toFixed(2)} originTag={originTag("temperature")} />
+        <Slider label="Top P" value={params.top_p} min={0} max={1} step={0.01} onChange={(v) => onParamChange({ top_p: v })} formatValue={(v) => v.toFixed(2)} originTag={originTag("top_p")} />
+        <Slider label="Top K" value={params.top_k} min={0} max={100} step={1} onChange={(v) => onParamChange({ top_k: v })} originTag={originTag("top_k")} />
+        <Slider label="Min P" value={params.min_p} min={0} max={1} step={0.01} onChange={(v) => onParamChange({ min_p: v })} formatValue={(v) => v.toFixed(2)} originTag={originTag("min_p")} />
+        <Slider label="Repeat penalty" value={params.repeat_penalty} min={1} max={1.5} step={0.01} onChange={(v) => onParamChange({ repeat_penalty: v })} formatValue={(v) => v.toFixed(2)} originTag={originTag("repeat_penalty")} />
+        <Slider label="Presence penalty" value={params.presence_penalty} min={-2} max={2} step={0.1} onChange={(v) => onParamChange({ presence_penalty: v })} formatValue={(v) => v.toFixed(2)} originTag={originTag("presence_penalty")} />
+        {originKeys.size > 0 && (
+          <p className="text-xs text-glyvex-muted">{t("chatSidebar.originHint")}</p>
+        )}
       </CollapsibleSection>
 
       <div className="border-t border-glyvex-border-soft pt-3 space-y-2">

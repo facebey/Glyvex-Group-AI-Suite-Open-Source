@@ -1,0 +1,7 @@
+[[permission]]
+identifier = "ui-lang"
+description = "Leer y espejar el idioma de la UI desde la shell: el splash de arranque (origen del bundle) no puede leer el localStorage del origen de la app."
+commands.allow = [
+  "ui_lang",
+  "set_ui_lang"
+]

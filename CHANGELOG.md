@@ -7,6 +7,57 @@ Versioning: semantic `X.Y.Z` (see README, "Versioning" section).
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-11-25
+
+The inventory **tells what each model really is**: image and audio checkpoints are
+recognized from measured evidence and marked non-launchable where they are, the boot
+splash follows the app language, the chat shows which sampling values came from a
+preset, and the VRAM estimate now budgets the buffers that speculative decoding and
+vision actually reserve.
+
+### Added
+- **Non-LLM inventory classification** (`model_kind`: `llm` / `image` / `audio` / `unknown`):
+  loose `.safetensors` checkpoints are indexed and classified from their config and
+  tensor names; `.gguf` entries are classified from measured header metadata
+  (architecture / tokenizer), and metadata-less ComfyUI-style GGUFs — which write no
+  header at all — are recognized as `image` through the diffusion tensor-name
+  signature of their own tensor-info table; audio/music models (Qwen3-TTS,
+  HeartMuLa, HeartCodec) are classified by measured task tokens before architecture
+  patterns. Classified non-LLM entries show an *Image* / *Audio* badge in the
+  launcher table, get no backends, and are excluded from launch flows. The Kind
+  column header is localized (ES/EN).
+- **Localized boot splash**: the app language is mirrored into the Tauri shell
+  (`ui_lang` command + `ui_lang` file in the app data dir), so the boot screen
+  renders in the language you picked instead of the OS locale.
+- **Preset provenance tags in the chat sidebar**: sampling fields whose current
+  value is owned by the active preset are marked ("del preset" / "from preset"),
+  distinguishing preset-driven values from app defaults or your own edits.
+
+### Changed
+- Light theme repainted with a measured neutral "pizarra" palette; each theme now
+  declares its `color-scheme` so native `<select>` popups match the app theme.
+- Reasoning control labels clarified: token budget vs suggested depth.
+- Preset selection **replaces** sampling parameters from defaults instead of
+  merging them over the current values.
+- Dependency floors raised from Dependabot PRs #142–#147 (fastapi 0.162.7,
+  pypdf 7.1, onnxruntime 1.32, pytest-asyncio 1.5, vite 8.3.8, lucide-react 1.72).
+
+### Fixed
+- **VRAM estimation budgets auxiliary-context buffers**: the `sched_reserve` of a
+  speculation draft context (MTP/DFlash) and the `mtmd_context` of a vision model
+  are now included, closing a ~1.7–1.9 GiB underestimation when speculation is on
+  (measured end-to-end on llama.cpp b12359).
+- Qwen3.8 chat presets ship the full penalty pair their model card declares
+  (verified with A/B runs).
+- Applying a hardware template re-links its vision preference to the selected model
+  instead of carrying a stale reference.
+- Chat: bearer API key is sent to capability probes; `reasoning_effort` support is
+  detected from the chat template when capabilities omit it; upstream errors on
+  failed turns are persisted, shown in the message bubble, and dropped from
+  request payloads.
+- Code-block action bar moved to the footer; the download action is always
+  available with safe fallback file names.
+
 ## [0.16.0] — 2026-11-15
 
 The Chat learns to **read each model**: sampling presets faithful to the official

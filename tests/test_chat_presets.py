@@ -4,7 +4,9 @@ from chat_presets import BUILTIN_PRESETS, detect_family, resolve_builtin_presets
 from helpers import drain_sse
 from mock_llm_server import COMPLETION_REQUESTS, reset_completion_requests
 
-# Valores exactos de las cards HF verificadas 2026-11-14 (Engram #1526).
+# Valores exactos de las cards HF verificadas 2026-11-14 (Engram #1526), con la
+# pareja de penalidades completa donde la card las declara (ver PRESET-CARD: el
+# A/B de código midió que presence sin repeat viaja mezclado con el default 1,1).
 # Si alguien los toca, este test explica contra qué card estaban fijados.
 _EXPECTED_PARAMS = {
     "qwen3-coder": {
@@ -18,12 +20,14 @@ _EXPECTED_PARAMS = {
         "top_p": 0.95,
         "top_k": 20,
         "min_p": 0.0,
+        "repeat_penalty": 1.0,
     },
     "qwen3.8-instruct": {
         "temperature": 0.7,
         "top_p": 0.8,
         "top_k": 20,
         "presence_penalty": 1.5,
+        "repeat_penalty": 1.0,
     },
     "gemma4": {
         "temperature": 1.0,
@@ -35,6 +39,43 @@ _EXPECTED_PARAMS = {
 
 def test_registry_fiel_a_las_cards():
     assert {p["id"]: p["params"] for p in BUILTIN_PRESETS} == _EXPECTED_PARAMS
+
+
+def test_penalidades_de_las_cards_de_qwen38_vienen_completas():
+    """Un preset de Qwen3.8 no puede declarar solo una penalidad.
+
+    Los params de un preset se mergean sobre los DEFAULT_PARAMS del Chat
+    (Chat.jsx), que traen repeat_penalty 1.1. Sin el repeat explícito el
+    qwen3.8-instruct enviaba presence 1.5 + repeat 1.1, una combinación que no
+    está en ninguna card: en el A/B de código medido 2026-11-22 dio 2/12
+    correctos contra 38/60 de la banda presence <= 0.3 (Fisher p = 0.0007), y
+    8/12 con su pareja 1.5/1.0.
+    """
+    for preset_id in ("qwen3.8-thinking", "qwen3.8-instruct"):
+        params = next(p["params"] for p in BUILTIN_PRESETS if p["id"] == preset_id)
+        assert params["repeat_penalty"] == 1.0, preset_id
+
+
+async def test_preset_qwen38_instruct_envia_la_pareja_al_endpoint(client, mock_llama_server):
+    """Aplicar el preset (merge sobre los defaults del Chat) no debe degradar la pareja."""
+    reset_completion_requests()
+    merged = dict(
+        temperature=0.7, top_p=0.9, top_k=40, min_p=0.0, repeat_penalty=1.1,
+        presence_penalty=0.0,
+    )
+    merged.update(next(p["params"] for p in BUILTIN_PRESETS if p["id"] == "qwen3.8-instruct"))
+    payload = {
+        "endpoint": mock_llama_server,
+        "messages": [{"role": "user", "content": "hola"}],
+        "model": "Qwen3.8-27B-it-UD-Q4_K_M",
+        **merged,
+    }
+    async with client.stream("POST", "/api/chat/completions", json=payload) as res:
+        assert res.status_code == 200
+        await drain_sse(res)
+    sent = COMPLETION_REQUESTS[-1]
+    assert sent["presence_penalty"] == 1.5 and sent["repeat_penalty"] == 1.0
+    assert sent["top_p"] == 0.8 and sent["top_k"] == 20
 
 
 def test_resuelve_gemma4_por_nombre_de_endpoint():

@@ -34,6 +34,8 @@ import {
   Bot,
   Wand2,
   FileCode,
+  Image as ImageIcon,
+  AudioLines,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useLlmStream } from "../hooks/useLlmStream.js";
@@ -64,12 +66,20 @@ import {
   flagState,
   templateHighlightSegments,
 } from "../lib/chatTemplate.js";
+import {
+  resolveVisionTemplate,
+  templateVisionIntent,
+  visionIntentFromState,
+} from "../lib/visionRelink.js";
 
 // Espejo de SAMPLING_PRESETS de backend/launcher.py. Vive acá para poder
 // previsualizar los valores sin round-trip; si cambian en el backend, hay
 // que actualizarlos también acá (o pedirlos a /api/launcher/sampling-presets).
-// "instruct" usa penalties moderados: repeat/presence 1.5 degeneran la
-// salida en la familia Qwen (especialmente código).
+// "instruct" se queda en penalties moderados por medida (A/B 2026-11-22 sobre
+// Qwen3.8-27B, código juzgado con ast.parse): presence >= 1.5 combinado con
+// repeat >= 1.1 dio 2/12 y 1/12 correctos contra 38/60 de la banda
+// presence <= 0,3. El detalle con los números está en el comentario de
+// backend/launcher.py.
 const SAMPLING_PRESETS = {
   thinking: {
     temperature: 1.0,
@@ -723,12 +733,43 @@ function BackendBadge({ backend }) {
   );
 }
 
+// Clase del modelo medida por el scanner (config.json / header .safetensors).
+// "image", "audio" y "unknown" se marcan; un LLM normal no necesita etiqueta propia.
+function KindBadge({ kind }) {
+  const { t } = useTranslation();
+  if (kind === "image") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-glyvex-accent/15 border border-glyvex-accent/30 text-glyvex-accent">
+        <ImageIcon size={12} className="mr-1" />
+        {t("modelTable.kind.image")}
+      </span>
+    );
+  }
+  if (kind === "audio") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-glyvex-accent/15 border border-glyvex-accent/30 text-glyvex-accent">
+        <AudioLines size={12} className="mr-1" />
+        {t("modelTable.kind.audio")}
+      </span>
+    );
+  }
+  if (kind === "unknown") {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-glyvex-veil-disabled border border-glyvex-border-soft text-glyvex-bg-muted">
+        {t("modelTable.kind.unknown")}
+      </span>
+    );
+  }
+  return <span className="text-glyvex-bg-muted">{t("modelTable.kind.llm")}</span>;
+}
+
 function ModelTable({ modelList, selectedId, onSelect }) {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [familyFilter, setFamilyFilter] = useState("all");
   const [quantFilter, setQuantFilter] = useState("all");
   const [backendFilter, setBackendFilter] = useState("all");
+  const [kindFilter, setKindFilter] = useState("all");
   const [sortBy, setSortBy] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
 
@@ -744,6 +785,15 @@ function ModelTable({ modelList, selectedId, onSelect }) {
     () => [...new Set(modelList.flatMap((m) => m.compatible_backends))].sort(),
     [modelList]
   );
+  // El filtro de tipo solo ofrece las clases que realmente hay en el
+  // inventario: si no hay modelos de imagen, no se muestra esa opción.
+  const kinds = useMemo(
+    () => [...new Set(modelList.map((m) => m.model_kind || "llm"))].sort(),
+    [modelList]
+  );
+  // Con un inventario 100% LLM la columna de tipo no aporta nada: solo aparece
+  // si el scanner encontró modelos que NO son LLM.
+  const showKindColumn = kinds.some((k) => k !== "llm");
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -752,6 +802,7 @@ function ModelTable({ modelList, selectedId, onSelect }) {
       if (familyFilter !== "all" && m.family !== familyFilter) return false;
       if (quantFilter !== "all" && m.quantization !== quantFilter) return false;
       if (backendFilter !== "all" && !m.compatible_backends.includes(backendFilter)) return false;
+      if (kindFilter !== "all" && (m.model_kind || "llm") !== kindFilter) return false;
       return true;
     });
     result = [...result].sort((a, b) => {
@@ -765,7 +816,7 @@ function ModelTable({ modelList, selectedId, onSelect }) {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return result;
-  }, [modelList, search, familyFilter, quantFilter, backendFilter, sortBy, sortDir]);
+  }, [modelList, search, familyFilter, quantFilter, backendFilter, kindFilter, sortBy, sortDir]);
 
   function toggleSort(field) {
     if (sortBy === field) setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -796,6 +847,12 @@ function ModelTable({ modelList, selectedId, onSelect }) {
           <option value="all">{t("modelTable.allBackends")}</option>
           {backends.map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
+        {kinds.length > 1 && (
+          <select className={selectClasses} value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
+            <option value="all">{t("modelTable.allKinds")}</option>
+            {kinds.map((k) => <option key={k} value={k}>{t(`modelTable.kind.${k}`)}</option>)}
+          </select>
+        )}
         <select className={selectClasses} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
           {SORT_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{t("modelTable.sortBy", { name: t(`modelTable.sort.${opt.value}`) })}</option>)}
         </select>
@@ -815,6 +872,7 @@ function ModelTable({ modelList, selectedId, onSelect }) {
                 <th className="px-3 py-2 font-medium">{t("modelTable.colQuant")}</th>
                 <th className="px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("size_gb")} className="flex items-center gap-1 hover:text-glyvex-text">{t("modelTable.colSize")} <ArrowUpDown size={12} /></button></th>
                 <th className="px-3 py-2 font-medium">{t("modelTable.colFormat")}</th>
+                {showKindColumn && <th className="px-3 py-2 font-medium">{t("modelTable.colKind")}</th>}
                 <th className="px-3 py-2 font-medium">{t("modelTable.colBackends")}</th>
                 <th className="px-3 py-2 font-medium"></th>
               </tr>
@@ -828,12 +886,17 @@ function ModelTable({ modelList, selectedId, onSelect }) {
                   <td className="px-3 py-2 text-glyvex-bg-muted">{m.quantization || "—"}</td>
                   <td className="px-3 py-2 text-glyvex-bg-muted">{m.size_gb} GB</td>
                   <td className="px-3 py-2 text-glyvex-bg-muted">{m.format}</td>
+                  {showKindColumn && <td className="px-3 py-2"><KindBadge kind={m.model_kind || "llm"} /></td>}
                   <td className="px-3 py-2"><div className="flex flex-wrap gap-1">{m.compatible_backends.map((b) => <BackendBadge key={b} backend={b} />)}</div></td>
                   <td className="px-3 py-2">
-                    <button type="button" onClick={() => onSelect(m.id)}
-                      className={"px-3 py-1 rounded-md text-xs shrink-0 " + (m.id === selectedId ? "bg-glyvex-accent text-white" : "border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card")}>
-                      {m.id === selectedId ? t("modelTable.selected") : t("modelTable.select")}
-                    </button>
+                    {(m.model_kind || "llm") !== "llm" ? (
+                      <span className="text-xs text-glyvex-bg-muted">{t("modelTable.notLaunchable")}</span>
+                    ) : (
+                      <button type="button" onClick={() => onSelect(m.id)}
+                        className={"px-3 py-1 rounded-md text-xs shrink-0 " + (m.id === selectedId ? "bg-glyvex-accent text-white" : "border border-glyvex-border-soft text-glyvex-bg-muted hover:text-glyvex-text hover:bg-glyvex-card")}>
+                        {m.id === selectedId ? t("modelTable.selected") : t("modelTable.select")}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -878,7 +941,7 @@ function SourcePicker({ value, options, onChange }) {
   );
 }
 
-function GroupCard({ group, onSelect }) {
+function GroupCard({ group, onSelect, visionTemplate = null }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [selectedBaseId, setSelectedBaseId] = useState(group.base_models[0]?.id ?? null);
@@ -934,12 +997,18 @@ function GroupCard({ group, onSelect }) {
     else { setUseSpec(false); setSpecSource("none"); }
   }, [selectedBaseId, hasEmbeddedMtp, hasSidecarDraft]);
 
+  // F-4 TPL-VISION-RELINK: con una receta que pide visión aplicada, la card
+  // encende el checkbox cuando el modelo puede cumplirlo (el path lo emite
+  // emitSelection con el sidecar del inventario). Sin receta, el default es el
+  // de siempre: preselección con fuente pero checkbox apagado. Si el modelo no
+  // ofrece visión, la receta no puede cumplirse: sin path inventado y sin aviso.
+  const templateWantsVision = Boolean(visionTemplate?.enabled);
   useEffect(() => {
     if (mmprojTouchedRef.current) return;
     if (hasEmbeddedVision) { setUseMmproj(true); setMmprojSource("embedded"); }
-    else if (hasSidecarVision) { setUseMmproj(false); setMmprojSource("sidecar"); }
+    else if (hasSidecarVision) { setUseMmproj(templateWantsVision); setMmprojSource("sidecar"); }
     else { setUseMmproj(false); setMmprojSource("none"); }
-  }, [selectedBaseId, hasEmbeddedVision, hasSidecarVision]);
+  }, [selectedBaseId, hasEmbeddedVision, hasSidecarVision, templateWantsVision]);
 
   if (group.base_models.length === 0) return null;
 
@@ -1700,6 +1769,26 @@ export default function Launcher() {
 
   const selectedModel = useMemo(() => modelList.find((m) => m.id === selectedId) || null, [modelList, selectedId]);
 
+  // F-4 TPL-VISION-RELINK: la receta activa pide visión. Se lee de la plantilla
+  // guardada (vision_intent o, en templates viejos, el snapshot toggles.mmproj),
+  // nunca del launchConfig: la intención sobrevive a cambiar de modelo.
+  const activeVisionIntent = useMemo(() => {
+    const tpl = templateList.find((t) => t.name === selectedTemplate);
+    return tpl?.params ? templateVisionIntent(tpl.params) : { enabled: false, manual_path: "" };
+  }, [templateList, selectedTemplate]);
+
+  // Capacidades reales de visión de un modelo del inventario, para re-ligar la
+  // intención de una receta: lo embebido es propiedad del .gguf; los sidecars
+  // son los mismos que el escaneo ofrece al picker de la GroupCard (nunca una
+  // ruta guardada de un modelo anterior).
+  const visionCapabilities = useCallback((modelId) => {
+    const model = modelId ? modelList.find((m) => m.id === modelId) || null : null;
+    const group = groupList.find((g) => g.base_models.some((m) => m.id === modelId)) ?? null;
+    const mmprojPaths = (group?.mmproj_models ?? []).map((m) => m.path).filter(Boolean);
+    if (mmprojPaths.length === 0 && model?.mmproj_path) mmprojPaths.push(model.mmproj_path);
+    return { embeddedVision: Boolean(model?.has_vision_embedded), mmprojPaths };
+  }, [modelList, groupList]);
+
   // Modo automático (F4): comando estricto -m + --port. Grisea los 16
   // toggles y sus controles (el payload hace bypass total de la config).
   const autoMode = Boolean(launchConfig.auto_mode);
@@ -2080,12 +2169,29 @@ export default function Launcher() {
       setToggles(tpl.params.toggles
         ? { ...DEFAULT_TOGGLES, ...tpl.params.toggles }
         : { ...DEFAULT_TOGGLES });
-      // `toggles` no es un campo de launchConfig: se saca antes de merguear.
-      const { toggles: _toggles, ...configParams } = tpl.params;
+      // `toggles` y `vision_intent` no son campos de launchConfig: se sacan
+      // antes de merguear (vision_intent se procesa aparte, ver abajo).
+      const { toggles: _toggles, vision_intent: _visionIntent, ...configParams } = tpl.params;
       // Templates guardados antes de LL-4 traen los campos MTP viejos: se
       // normalizan acá, no en el backend (el backend no migra cuando el
       // payload ya trae un spec_type explícito).
-      updateConfig(migrateLegacySpecFields(configParams));
+      const merged = migrateLegacySpecFields(configParams);
+      // F-4 TPL-VISION-RELINK: la receta que pide visión se re-liga al modelo
+      // realmente seleccionado, con la ruta medida del inventario (el scan solo
+      // lista archivos que existen — mismo patrón que el override mmproj del
+      // MCP). Si el modelo no ofrece visión, la receta simplemente no la aplica
+      // y el panel queda apagado: sin path inventado y sin avisos.
+      // La intención se lee del propio tpl: `selectedTemplate` todavía apunta a
+      // la plantilla anterior cuando applyTemplate recién empieza.
+      const intent = templateVisionIntent(tpl.params);
+      if (intent.enabled && selectedId) {
+        const resolved = resolveVisionTemplate(intent, visionCapabilities(selectedId));
+        if (resolved.enabled) {
+          merged.mmproj_path = resolved.path || null;
+          setToggles((prev) => ({ ...prev, mmproj: true }));
+        }
+      }
+      updateConfig(merged);
       // Un template guardado trae su propio sampling: no dejamos que la
       // metadata del modelo lo sobrescriba después.
       if (Object.prototype.hasOwnProperty.call(tpl.params, "sampling_preset")) {
@@ -2145,6 +2251,16 @@ export default function Launcher() {
     const params = Object.fromEntries(TEMPLATE_FIELDS.map((k) => [k, launchConfig[k]]));
     // P1.5 F5: snapshot de los toggles (estado por grupo, no solo valores).
     params.toggles = { ...toggles };
+    // F-4 TPL-VISION-RELINK: la receta guarda la INTENCIÓN de visión, no la
+    // ruta de un modelo concreto (mmproj_path sigue fuera de TEMPLATE_FIELDS a
+    // propósito). El path solo viaja cuando NO es el que el escaneo detectó
+    // para este modelo: una elección explícita entre varios sidecars o un path
+    // manual. Si coincide con lo detectado se omite: al aplicar se re-liga.
+    params.vision_intent = visionIntentFromState({
+      enabled: Boolean(toggles.mmproj),
+      mmprojPath: launchConfig.mmproj_path,
+      detectedPaths: visionCapabilities(selectedId).mmprojPaths,
+    });
     setActionError(null);
     try {
       const res = await fetch("/api/launcher/templates", {
@@ -2212,20 +2328,25 @@ export default function Launcher() {
           : specType === "draft-mtp" && mtpSidecars > 0
             ? (group?.mtp_models?.[0]?.path ?? "")
             : "";
+      // El mmproj del modelo anterior no viaja: si la receta activa pide visión
+      // se re-liga a lo que el NUEVO modelo ofrezca (F-4); si la receta no
+      // pide visión, o este modelo no tiene, queda apagado.
+      const relink = activeVisionIntent.enabled
+        ? resolveVisionTemplate(activeVisionIntent, visionCapabilities(modelId))
+        : { enabled: false, path: "" };
       setLaunchConfig((prev) => ({
         ...prev,
         spec_type: specType,
         draft_model: draftPath,
         mtp_embedded: specType === "draft-mtp" ? embeddedMtp : false,
-        // El mmproj del modelo anterior no viaja: se re-liga al nuevo modelo.
-        mmproj_path: "",
+        mmproj_path: relink.enabled ? relink.path : "",
       }));
-      setToggles((prev) => ({ ...prev, mmproj: false }));
+      setToggles((prev) => ({ ...prev, mmproj: relink.enabled }));
     }
     setActionError(null);
     // Las emiciones en vivo de la card no arrastran la página al panel.
     if (announce) setScrollTick((tick) => tick + 1);
-  }, [modelList, groupList]);
+  }, [modelList, groupList, activeVisionIntent, visionCapabilities]);
 
   const handleLaunch = useCallback(async () => {
     if (!selectedModel) return;
@@ -2563,7 +2684,10 @@ export default function Launcher() {
           <p className="text-sm text-glyvex-bg-muted">{t("modelTable.emptyInventory")}</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {groupList.map((g) => <GroupCard key={g.group_id} group={g} onSelect={handleSelectModel} />)}
+            {groupList.map((g) => (
+              <GroupCard key={g.group_id} group={g} onSelect={handleSelectModel}
+                visionTemplate={activeVisionIntent.enabled ? activeVisionIntent : null} />
+            ))}
           </div>
         )
       ) : (

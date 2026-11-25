@@ -3,7 +3,8 @@ models.py — Gestión e inventario de modelos LLM locales (módulo M1).
 
 Responsabilidades:
 - Escanear los `model_dirs` configurados en config.json (recursivo, max depth 3).
-- Detectar archivos .gguf, .ggml y carpetas HuggingFace (config.json + *.safetensors).
+- Detectar archivos .gguf, .ggml, carpetas HuggingFace (config.json + *.safetensors)
+  y checkpoints .safetensors sueltos (flux/sd de ComfyUI, sin config.json).
 - Extraer metadata (familia, parámetros, cuantización) del nombre de archivo GGUF.
 - Leer metadata real del header GGUF (context_length, arquitectura, chat template,
   soporte de thinking) vía la librería `gguf`, sin cargar el modelo en memoria.
@@ -64,12 +65,25 @@ MAX_SCAN_DEPTH = 3
 # dependa de leer el header GGUF (no hace falta para campos derivados solo del
 # nombre de archivo, que se recalculan igual de rápido).
 #
-# Historial: 7 — EST-SWA añadió claves SWA por capa derivadas del header
+# Historial: 11 — INVENT-GGUF-TENSORNAMES: los .gguf sin metadata (n_kv=0,
+# los ComfyUI-GGUF como qwen-image-2.1) ahora se afirman "image" por la firma
+# de nombres de tensor del propio header — las entradas viejas del cache quedaron
+# afirmadas "unknown" sin esa señal.
+# 10 — INVENT-AUDIO-KIND (F-5): la ruta config.json ahora puede
+# afirmar "audio" (tarea medida antes que el patrón de arquitectura) — las
+# entradas qwen-tts/heart-music del cache viejo quedaron afirmadas "llm" sin
+# tarea medida.
+# 9 — INVENT-GGUF-KIND: las entradas .gguf ahora llevan model_kind
+# derivado de la metadata del header (antes heredaban el default "llm" sin
+# medirla) — las entradas viejas del cache no tienen esa clase real.
+# 8 — INVENT-NOLLM añadió model_kind, derivado de leer config.json /
+# el header .safetensors (carpetas HF) — las entradas viejas no lo tienen.
+# 7 — EST-SWA añadió claves SWA por capa derivadas del header
 # (n_head_kv_layers, head_dim_swa, sliding_window, sliding_window_pattern) sin
 # subir la versión; las fichas escaneadas antes del fix se reusaban por mtime
 # sin esas claves y el estimador de VRAM caía al camino denso legacy (sugería
 # 16K para gemma4 en 24 GB). 6 — metadata kv_data/kv-arrays del header.
-MODELS_CACHE_SCHEMA_VERSION = 7
+MODELS_CACHE_SCHEMA_VERSION = 11
 
 # --------------------------------------------------------------------------
 # Schema (Pydantic v2)
@@ -111,6 +125,17 @@ class ModelEntry(BaseModel):
     # ni tras un restart (cold start cero). Si es None (entrada de esquema
     # viejo), los endpoints caen a read_gguf_metadata_cached.
     metadata: dict[str, Any] | None = None
+    # INVENT-NOLLM / INVENT-GGUF-KIND: clase de modelo medida, no adivinada.
+    #   "llm"     -> .gguf/.ggml cuyo header declara tokenizer o una arch de
+    #                llama.cpp no-difusión (los drafts heredan la del base), o
+    #                weights transformers con config legible (architectures/model_type)
+    #   "image"   -> pipeline diffusers (_class_name conocido) o pesos con nombres
+    #                de tensor característicos de difusión (flux/SD/UNet/LoRA UNet);
+    #                en .gguf, arch medida ltxv/wan/flux/clip sin tokenizer, o
+    #                tabla tensor-info con firma de difusión cuando el archivo no
+    #                declara KV alguna (ComfyUI-GGUF: qwen-image-2.1, minimax)
+    #   "unknown" -> sin señal medible: no se afirma nada
+    model_kind: Literal["llm", "image", "audio", "unknown"] = "llm"
 
 
 class ModelPatch(BaseModel):
@@ -1067,7 +1092,12 @@ def _detect_embedded_modules(path: Path) -> dict[str, Any]:
     durante horas — vale más un log ruidoso que un "no detectado"
     indistinguible de "no tiene esto".
     """
-    fallback = {"mtp_embedded": False, "mtp_layers": None, "vision_embedded": False}
+    fallback = {
+        "mtp_embedded": False,
+        "mtp_layers": None,
+        "vision_embedded": False,
+        "tensor_names": [],
+    }
 
     header = read_gguf_header_fast(path)
     if header is not None:
@@ -1096,6 +1126,9 @@ def _detect_embedded_modules(path: Path) -> dict[str, Any]:
             "mtp_embedded": mtp_embedded,
             "mtp_layers": layers if mtp_embedded else None,
             "vision_embedded": vision_embedded,
+            # Rebote para INVENT-GGUF-TENSORNAMES: la misma tabla ya recorrida
+            # sirve como señal de clasificación cuando el archivo no declara KV.
+            "tensor_names": tensor_names,
         }
 
     return _detect_embedded_modules_via_reader(path, fallback)
@@ -1142,6 +1175,7 @@ def _detect_embedded_modules_via_reader(
             "mtp_embedded": mtp_embedded,
             "mtp_layers": layers if mtp_embedded else None,
             "vision_embedded": vision_embedded,
+            "tensor_names": tensor_names,
         }
     except Exception:
         logger.exception("excepcion detectando modulos embebidos en %s", path)
@@ -1152,11 +1186,163 @@ def _detect_embedded_modules_via_reader(
 # Scanner
 # --------------------------------------------------------------------------
 
+# Señales de modelos de generación de imagen (INVENT-NOLLM). Se leen del
+# config.json de carpetas HF y del header .safetensors (nombres de tensores y
+# _metadata_). Nunca se afirma desde el nombre de archivo: sin señal medida,
+# la entrada queda "unknown" y la UI lo dice tal cual.
+_DIFFUSION_CLASS_TOKENS = (
+    "flux",
+    "diffusion",
+    "unet",
+    "autoencoder",
+    "vae",
+    "controlnet",
+    "sdxl",
+    "mochi",
+    "sana",
+)
+
+# Firmas de nombres de tensor típicas de checkpoints SD/Flux/LoRA de imagen.
+# (model.diffusion_model.*, cond_stage_model.*, single_blocks/double_blocks de
+# Flux, lora_unet_/lora_te_ de LoRAs SD, alphas_cumprod de checkpoints diffusers.)
+_DIFFUSION_TENSOR_RE = re.compile(
+    r"lora_unet_|lora_te_|model\.diffusion_model|cond_stage_model\."
+    r"|alphas_cumprod|first_stage_model\."
+)
+_DIFFUSION_TENSOR_TOKENS = (
+    "single_blocks",
+    "double_blocks",
+    "triple_blocks",
+    "joint_attention",
+    "txt_in.",
+    "img_in.",
+    "context_embedder",
+    "diffusion_model.",
+)
+
+# Clases HF de LLM (config.json de transformers).
+_LLM_ARCH_TOKENS = ("causallm", "lmheadmodel", "forconditionalgeneration")
+
+# Tareas de audio/música (INVENT-AUDIO-KIND F-5). Miden la tarea antes que el
+# patrón de arquitectura: "forconditionalgeneration" matchea también
+# Qwen3TTSForConditionalGeneration, y HeartMuLa/HeartCodec salían afirmados
+# "llm" solo por el fallback de model_type (falsos positivos medidos 2026-11-23
+# en los config.json reales de
+# I:\Proyectos\comfyui\ComfyUI\models: qwen-tts y heart-music salían `llm` con
+# backends unsloth/vllm). La lista es amplia por decisión de Fabian: toma
+# cualquier familia que declare su tarea de audio con estos tokens (Qwen2-Audio,
+# Data2VecAudio, music) y familias futuras. Un LLM multimodal con entrada de
+# audio (p. ej. Qwen2-Audio) queda aquí a propósito — llama.cpp no lo lanza
+# como chat de todos modos.
+_AUDIO_TASK_TOKENS = (
+    "asr",
+    "tts",
+    "speech",
+    "audio",
+    "music",
+    "codec",
+    "heartmula",
+    "heartcodec",
+)
+
+# Shards de un repo HF multi-archivo: pertenecen a la carpeta (que ya entra
+# como safetensors_dir cuando hay config.json). Sueltos, sin config, no son
+# un modelo completo: no entran al inventario.
+_SHARD_NAME_RE = re.compile(r"^model[-_]\d{4,5}-of-\d{4,5}", re.IGNORECASE)
+
+# Cap de lectura del header .safetensors: los headers reales son < 1 MB; se
+# limita para no leer un archivo corrupto gigante.
+_SAFETENSORS_HEADER_MAX = 1024 * 1024
+
+
+def _read_safetensors_header(path: Path) -> dict | None:
+    """
+    Lee solo el header de un .safetensors (u64 little-endian de longitud +
+    JSON) sin tocar los pesos. Devuelve el dict de tensores (claves = nombres
+    de tensor, con '_metadata_' opcional) o None si el archivo no es legible
+    como safetensors.
+    """
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            head = f.read(8)
+            if len(head) < 8:
+                return None
+            (hlen,) = struct.unpack("<Q", head)
+            if hlen == 0 or hlen > min(_SAFETENSORS_HEADER_MAX, size):
+                return None
+            raw = f.read(hlen)
+        header = json.loads(raw.decode("utf-8"))
+        return header if isinstance(header, dict) else None
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return None
+
+
+def _tensor_names_are_diffusion(names) -> bool:
+    """Firma de difusión sobre nombres de tensor (mismas firmas para .safeten-
+    sors y para la tabla tensor-info de un .gguf, INVENT-GGUF-TENSORNAMES)."""
+    blob = "\n".join(names)
+    if _DIFFUSION_TENSOR_RE.search(blob):
+        return True
+    return any(tok in blob for tok in _DIFFUSION_TENSOR_TOKENS)
+
+
+def _safetensors_header_is_diffusion(header: dict) -> bool:
+    if _tensor_names_are_diffusion(k for k in header if k != "_metadata_"):
+        return True
+    meta = header.get("_metadata_")
+    if isinstance(meta, dict):
+        blob = json.dumps(meta).lower()
+        if any(tok in blob for tok in ("flux", "stable_diffusion", "diffusers")):
+            return True
+    return False
+
+
+def _config_json_model_kind(directory: Path) -> str | None:
+    """
+    "llm" | "image" | "audio" | None desde config.json. None = sin señal en el
+    config (el llamador decide por header .safetensors o "unknown").
+    """
+    try:
+        cfg = json.loads((directory / "config.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    class_name = str(cfg.get("_class_name", "")).lower()
+    archs = cfg.get("architectures")
+    arch_blob = " ".join(str(a) for a in archs).lower() if isinstance(archs, list) else ""
+    model_type = str(cfg.get("model_type", "")).lower()
+    # F-5: la tarea medida manda sobre el patrón de arquitectura (misma
+    # precedencia que F-1 con la arquitectura no-LLM sobre el tokenizer).
+    if any(tok in f"{class_name} {arch_blob} {model_type}" for tok in _AUDIO_TASK_TOKENS):
+        return "audio"
+    if class_name and any(tok in class_name for tok in _DIFFUSION_CLASS_TOKENS):
+        return "image"
+    if any(tok in arch_blob for tok in _LLM_ARCH_TOKENS):
+        return "llm"
+    if model_type and model_type != "diffusion":
+        return "llm"
+    return None
+
+
+def _classify_safetensors_kind(directory: Path, files: list[Path]) -> str:
+    """Clasifica pesos .safetensors: config.json primero, luego headers."""
+    kind = _config_json_model_kind(directory)
+    if kind:
+        return kind
+    for f in files[:2]:
+        header = _read_safetensors_header(f)
+        if header is not None and _safetensors_header_is_diffusion(header):
+            return "image"
+    return "unknown"
+
 
 def _walk_dir(root: Path, max_depth: int):
     """
     Recorre `root` recursivamente hasta `max_depth` niveles, yieldeando
-    (path, kind) donde kind es "gguf", "ggml" o "safetensors_dir".
+    (path, kind) donde kind es "gguf", "ggml", "safetensors_dir" o
+    "safetensors_file".
     """
     if not root.exists() or not root.is_dir():
         return
@@ -1184,10 +1370,82 @@ def _walk_dir(root: Path, max_depth: int):
                     yield (entry, "gguf")
                 elif entry.suffix.lower() == ".ggml":
                     yield (entry, "ggml")
+                elif entry.suffix.lower() == ".safetensors" and not _SHARD_NAME_RE.match(
+                    entry.name
+                ):
+                    # INVENT-NOLLM: checkpoints sueltos (flux/sd de ComfyUI) que
+                    # no viven en una carpeta HF con config.json.
+                    yield (entry, "safetensors_file")
             elif entry.is_dir():
                 yield from _walk(entry, depth + 1)
 
     yield from _walk(root, 0)
+
+
+# Arquitecturas GGUF que NO son un pipeline de lenguaje, medidas desde el propio
+# header (INVENT-GGUF-KIND). Verificadas sobre los 11 .gguf reales de la carpeta
+# de modelos de ComfyUI (2026-11-21): `ltxv` (LTX-Video), `wan` (Wan2.2) y
+# `clip` (encoder de visión de los mmproj-*.gguf). `flux` se agrega porque
+# llama.cpp ya la escribe como arch en sus conversiones de Flux. La lista solo
+# contiene arquitecturas que llama.cpp afirma en el KV general.architecture —
+# nunca una suposición por nombre de archivo.
+_GGUF_NON_LLM_ARCHS = frozenset({"ltxv", "wan", "flux", "clip"})
+
+
+def _classify_gguf_kind(
+    metadata: dict[str, Any] | None, tensor_names: list[str] | None = None
+) -> str:
+    """
+    "llm" | "image" | "unknown" desde la metadata del header que el scan YA
+    leyó — sin IO extra: `general.architecture` y los campos del tokenizer los
+    materializa read_gguf_header_fast (ver _FAST_STRING_KEYS y _metadata_from_kv),
+    y la tabla tensor-info del mismo parse trae los nombres de tensor
+    (INVENT-GGUF-TENSORNAMES).
+
+    Señales medidas (taxonomía de los 11 .gguf de ComfyUI y de los sidecars
+    reales de C:\\LLM\\gguf):
+      - arch ∈ _GGUF_NON_LLM_ARCHS → "image": ltxv/wan (difusión) y clip
+        (encoder de visión). Va primero que el tokenizer a propósito: los CLIP
+        completos que escribe `convert_clip.py` declaran `clip.tokens` /
+        `clip.vocab_size` y aun así no son un modelo de chat lanzable; ninguna
+        arch de lenguaje de llama.cpp usa estos nombres, así que la arch no-LLM
+        nunca puede degradar un LLM.
+      - tokenizer presente (tokenizer.ggml.*, vocab_size o chat template)
+        → "llm": es lo que declaran gemma3/qwen3vl;
+      - arch presente, no de difusión, sin tokenizer → "llm": los drafts
+        MTP/DFlash heredan el tokenizer del base pero siguen siendo un LLM;
+      - sin arch ni tokenizer (GGUF v3 con n_kv=0: qwen-image-2.1,
+        minimax fl2va) PERO con nombres de tensor de difusión en el propio
+        header → "image": los .gguf que escribe ComfyUI (ComfyUI-GGUF) no
+        declaran metadata alguna, pero su tabla tensor-info es señal medida —
+        verado 2026-11-24 en los 4 qwen-image-2.1 reales de G:\\LLM\\gguf:
+        265/265 tensores `model.diffusion_model.*` (misma firma que los
+        checkpoints .safetensors de flux/sd). Es último en la cascada a
+        propósito: un archivo que ya declaró tokenizer o arch LLM queda "llm"
+        pase lo que pase con los nombres.
+      - sin arch, sin tokenizer y sin firma de tensor → "unknown": sin señal
+        no se afirma nada, tampoco por nombre de archivo;
+      - metadata None (header no legible) → "llm": el formato en sí es de
+        llama.cpp y no hay señal medida que lo contradiga.
+    """
+    if metadata is None:
+        return "llm"
+    arch = str(metadata.get("architecture") or "").lower()
+    if arch in _GGUF_NON_LLM_ARCHS:
+        return "image"
+    has_tokenizer = bool(
+        metadata.get("tokenizer_model")
+        or metadata.get("chat_template")
+        or (metadata.get("vocab_size") or 0) > 0
+        or metadata.get("added_tokens_count")
+    )
+    if has_tokenizer:
+        return "llm"
+    if arch:
+        return "llm"
+    if tensor_names and _tensor_names_are_diffusion(tensor_names):
+        return "image"
+    return "unknown"
 
 
 def _build_gguf_entry(path: Path, existing: dict[str, Any] | None) -> ModelEntry:
@@ -1202,6 +1460,11 @@ def _build_gguf_entry(path: Path, existing: dict[str, Any] | None) -> ModelEntry
     # _detect_embedded_modules ya leyó el header (rápido) y guardó la
     # metadata completa en la cache: la reutilizamos aquí, sin reabrir.
     metadata = _metadata_cache_get(path)
+    # INVENT-GGUF-KIND / INVENT-GGUF-TENSORNAMES: la clase se mide de esa
+    # metadata y, cuando el archivo no declara KV, de los nombres de tensor que
+    # el mismo header ya trajo. Hasta acá la entrada GGUF heredaba el default
+    # "llm" y un ltxv/wan/clip se ofrecía como lanzable.
+    model_kind = _classify_gguf_kind(metadata, detected.get("tensor_names"))
 
     return ModelEntry(
         id=_make_id(path),
@@ -1213,7 +1476,12 @@ def _build_gguf_entry(path: Path, existing: dict[str, Any] | None) -> ModelEntry
         quantization=quantization,
         family=family,
         parameters=parameters,
-        compatible_backends=_compatible_backends("gguf"),
+        # El claim de backends sigue a la clase medida (mismo criterio que en
+        # las carpetas HF): un GGUF de difusión o un mmproj no se ofrece a
+        # llama_server/ollama/lm_studio.
+        compatible_backends=(
+            _compatible_backends("gguf") if model_kind == "llm" else []
+        ),
         has_mmproj=mmproj is not None,
         mmproj_path=str(mmproj.resolve()) if mmproj else None,
         mtp_embedded=detected["mtp_embedded"],
@@ -1223,6 +1491,7 @@ def _build_gguf_entry(path: Path, existing: dict[str, Any] | None) -> ModelEntry
         tags=tags,
         mtime=stat.st_mtime,
         metadata=metadata,
+        model_kind=model_kind,
     )
 
 
@@ -1254,11 +1523,11 @@ def _build_ggml_entry(path: Path, existing: dict[str, Any] | None) -> ModelEntry
 def _build_safetensors_entry(directory: Path, existing: dict[str, Any] | None) -> ModelEntry:
     name = directory.name
     family, parameters, quantization = _extract_metadata(name)
-    total_bytes = sum(
-        f.stat().st_size for f in directory.glob("*.safetensors") if f.is_file()
-    )
+    files = [f for f in directory.glob("*.safetensors") if f.is_file()]
+    total_bytes = sum(f.stat().st_size for f in files)
     stat = directory.stat()
     tags = existing.get("tags", []) if existing else []
+    model_kind = _classify_safetensors_kind(directory, files)
 
     return ModelEntry(
         id=_make_id(directory),
@@ -1270,12 +1539,55 @@ def _build_safetensors_entry(directory: Path, existing: dict[str, Any] | None) -
         quantization=quantization,
         family=family,
         parameters=parameters,
-        compatible_backends=_compatible_backends("safetensors"),
+        # El claim de backends sigue a la clase medida: a un modelo de imagen
+        # no se le adjudican unsloth/vllm.
+        compatible_backends=(
+            _compatible_backends("safetensors") if model_kind == "llm" else []
+        ),
         has_mmproj=False,
         mmproj_path=None,
         last_seen=datetime.now(timezone.utc).isoformat(),
         tags=tags,
         mtime=stat.st_mtime,
+        model_kind=model_kind,
+    )
+
+
+def _build_safetensors_file_entry(path: Path, existing: dict[str, Any] | None) -> ModelEntry:
+    """
+    Checkpoint .safetensors suelto (INVENT-NOLLM): flux/sd de ComfyUI y
+    similares que no viven en una carpeta HF con config.json. La clase se mide
+    del header del propio archivo; sin señal, queda "unknown".
+    """
+    stem = path.stem
+    family, parameters, quantization = _extract_metadata(stem)
+    stat = path.stat()
+    tags = existing.get("tags", []) if existing else []
+
+    header = _read_safetensors_header(path)
+    model_kind = "image" if header is not None and _safetensors_header_is_diffusion(header) else "unknown"
+
+    return ModelEntry(
+        id=_make_id(path),
+        name=stem,
+        filename=path.name,
+        path=str(path.resolve()),
+        format="safetensors",
+        size_gb=round(stat.st_size / (1024**3), 2),
+        quantization=quantization,
+        family=family,
+        parameters=parameters,
+        # Sin clase medida como LLM no se adjudican backends (mismo criterio
+        # que en las carpetas HF).
+        compatible_backends=(
+            _compatible_backends("safetensors") if model_kind == "llm" else []
+        ),
+        has_mmproj=False,
+        mmproj_path=None,
+        last_seen=datetime.now(timezone.utc).isoformat(),
+        tags=tags,
+        mtime=stat.st_mtime,
+        model_kind=model_kind,
     )
 
 
@@ -1422,6 +1734,8 @@ class ModelInventory:
                     entry = await loop.run_in_executor(None, _build_gguf_entry, target, existing_dict)
                 elif kind == "ggml":
                     entry = await loop.run_in_executor(None, _build_ggml_entry, target, existing_dict)
+                elif kind == "safetensors_file":
+                    entry = await loop.run_in_executor(None, _build_safetensors_file_entry, target, existing_dict)
                 else:
                     entry = await loop.run_in_executor(None, _build_safetensors_entry, target, existing_dict)
 
@@ -1514,7 +1828,19 @@ def build_groups(entries: list[ModelEntry]) -> list[ModelGroup]:
         base_models, mtp_models, draft_models, mmproj_models = [], [], [], []
         for item in items:
             lowered = item.filename.lower()
-            if "mtp" in lowered:
+            if "mmproj" in lowered:
+                # Un mmproj es auxiliar del modelo padre aunque su propia ficha se
+                # clasifique "image" (arch clip sin tokenizer, INVENT-GGUF-KIND):
+                # nunca es base, pero sigue siendo candidato de visión del grupo.
+                mmproj_models.append(item)
+            elif item.model_kind != "llm":
+                # INVENT-NOLLM + INVENT-GGUF-KIND: ni los modelos de imagen ni
+                # los que quedaron "unknown" (sin señal medida) forman parte de
+                # la composición de un launch: afirmarlos como base sería justo
+                # lo que su clase dice que no se puede afirmar. Quedan visibles
+                # solo en la vista de lista, con su marca.
+                continue
+            elif "mtp" in lowered:
                 mtp_models.append(item)
             elif "dflash" in lowered:
                 # Familia DFlash (LL-4 U2): sidecars dflash-*.gguf, oficialmente
@@ -1525,6 +1851,11 @@ def build_groups(entries: list[ModelEntry]) -> list[ModelGroup]:
             else:
                 base_models.append(item)
 
+        if not (base_models or mtp_models or draft_models or mmproj_models):
+            # Carpeta con solo modelos de imagen: no hay nada que componer para
+            # un launch, así que no se crea grupo vacío (esos modelos se ven en
+            # la vista de lista con su marca).
+            continue
         groups.append(
             ModelGroup(
                 group_id=_group_folder_id(folder),
@@ -1813,6 +2144,12 @@ def _vram_aux_components(
     contados en model_size_gb, agregarlos sería doble conteo. Sin `use_vision`
     (None) el comportamiento es el legacy conservador: se presupuesta el
     mmproj de la entry si existe.
+
+    El compute buffer propio del `mtmd_context` que ese .mmproj construye (F-2)
+    NO va aquí: estimate_vram_usage lo suma al bloque de cómputo cuando ve un
+    componente mmproj en este desglose. Así el hecho de que este listado es la
+    única fuente de «¿este launch carga visión?» decide también la reserva, sin
+    declararla en dos sitios.
     """
     components: list[dict[str, Any]] = []
     own = str(Path(entry.path).resolve())

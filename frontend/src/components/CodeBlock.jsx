@@ -86,11 +86,13 @@ const WRAP_BY_DEFAULT = new Set(["text", "txt", "plaintext", "plain", "log", "md
 
 /**
  * Nombre seguro para el atributo `download`: el nombre viene del modelo, así
- * que se queda solo con el basename (sin separadores de ruta). Si queda
- * vacío, un nombre por defecto.
+ * que se queda solo con el basename y sin los caracteres que Windows no acepta
+ * en un archivo (`<>:"|?*` y los separadores de ruta). Sin ese filtro, un
+ * `C:\tmp\notas.md` descargaba `C:tmpnotas.md`, que el sistema rechaza.
+ * Si queda vacío, un nombre por defecto.
  */
-function safeFilename(filename) {
-  const base = String(filename || "").replace(/[/\\]+/g, "").trim();
+export function safeFilename(filename) {
+  const base = String(filename || "").replace(/[<>:"/\\|?*]+/g, "").trim();
   return base || "archivo.txt";
 }
 
@@ -106,9 +108,26 @@ function downloadText(filename, text) {
 }
 
 /**
- * Envoltorio de un bloque de código: header con el lenguaje detectado,
- * ajuste de líneas y botón de copiar; debajo el <pre> que ya viene resaltado
- * por rehype-highlight.
+ * Nombre por defecto cuando el modelo no nombró el archivo: se arma a partir de
+ * la etiqueta del lenguaje (que ya está traducida), así el archivo que baja el
+ * usuario se llama igual en español que en inglés.
+ */
+export function fallbackName(languageLabel) {
+  const base = String(languageLabel || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "bloque";
+  return `${base}.txt`;
+}
+
+/**
+ * Envoltorio de un bloque de código: header con el lenguaje detectado, y una
+ * barra de acciones AL PIE (descarga, ajuste de líneas, copiar); debajo del
+ * header viene el <pre> que ya viene resaltado por rehype-highlight.
+ *
+ * Las acciones van al pie porque el bloque puede ocupar varias pantallas: con
+ * la barra arriba había que subir todo el mensaje para poder copiar o descargar
+ * al final de una respuesta larga.
  *
  * Ajuste de líneas: con el chat angosto, una línea larga dejaba el bloque con
  * barra de desplazamiento horizontal. El código conserva sus líneas por
@@ -118,38 +137,18 @@ function downloadText(filename, text) {
 export default function CodeBlock({ language, code, children, filename }) {
   const { t } = useTranslation();
   const [wrap, setWrap] = useState(() => !language || WRAP_BY_DEFAULT.has(language.toLowerCase()));
+  const label = labelFor(language, t);
+  // La descarga está disponible siempre: si el modelo no abrió la cerca con
+  // `lenguaje:nombre`, se usa un nombre por defecto (antes el botón directo
+  // no existía, y eso dependía de que el modelo obedeciera una instrucción).
+  const downloadName = filename || fallbackName(label);
 
   return (
     <div className="my-2 rounded-md border border-glyvex-border-soft overflow-hidden bg-glyvex-surface-code max-w-full min-w-0">
       <div className="flex items-center justify-between gap-2 px-3 py-1 border-b border-glyvex-border-soft bg-glyvex-veil-disabled">
         <span className="text-xs text-glyvex-muted font-mono truncate min-w-0">
-          {labelFor(language, t)}
+          {label}
           {filename ? <span className="text-glyvex-text"> · {filename}</span> : null}
-        </span>
-        <span className="inline-flex items-center gap-0.5 shrink-0">
-          {filename && (
-            <button
-              type="button"
-              onClick={() => downloadText(filename, code)}
-              title={t("code.download", { filename })}
-              className="p-1 rounded hover:bg-glyvex-veil-strong text-glyvex-muted hover:text-glyvex-text"
-            >
-              <Download size={13} />
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setWrap((v) => !v)}
-            aria-pressed={wrap}
-            title={wrap ? t("code.showFullLines") : t("code.wrapLines")}
-            className={
-              "p-1 rounded hover:bg-glyvex-veil-strong " +
-              (wrap ? "text-glyvex-accent" : "text-glyvex-muted hover:text-glyvex-text")
-            }
-          >
-            <WrapText size={13} />
-          </button>
-          <CopyButton text={code} label={t("code.copyBlock")} className="p-1" />
         </span>
       </div>
       {/* Sin ajuste, el scroll horizontal queda adentro del bloque. highlight.js
@@ -163,6 +162,29 @@ export default function CodeBlock({ language, code, children, filename }) {
         }
       >
         {children}
+      </div>
+      <div className="flex items-center justify-end gap-0.5 px-3 py-1 border-t border-glyvex-border-soft bg-glyvex-veil-disabled">
+        <button
+          type="button"
+          onClick={() => downloadText(downloadName, code)}
+          title={t("code.download", { filename: downloadName })}
+          className="p-1 rounded hover:bg-glyvex-veil-strong text-glyvex-muted hover:text-glyvex-text"
+        >
+          <Download size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setWrap((v) => !v)}
+          aria-pressed={wrap}
+          title={wrap ? t("code.showFullLines") : t("code.wrapLines")}
+          className={
+            "p-1 rounded hover:bg-glyvex-veil-strong " +
+            (wrap ? "text-glyvex-accent" : "text-glyvex-muted hover:text-glyvex-text")
+          }
+        >
+          <WrapText size={13} />
+        </button>
+        <CopyButton text={code} label={t("code.copyBlock")} className="p-1" />
       </div>
     </div>
   );

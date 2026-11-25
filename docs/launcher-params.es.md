@@ -70,8 +70,17 @@ presence 0.0 · repeat 1.0
 Preset `instruct` (default): temp 0.7 · top_p 0.80 · top_k 20 · min_p 0.0 ·
 presence 0.3 · repeat 1.1
 
-> Ojo con penalties altos: repeat_penalty 1.5 / presence 1.5 **degeneran la
-> salida en la familia Qwen** (especialmente código).
+> Con penalties altos hay medida, no intuición. A/B 2026-11-22 (Qwen3.8-27B
+> Q4_K_M, 4 tareas de código × 3 reps, 12 runs por celda, juzgadas con
+> `ast.parse`): `presence 1,5` **combinado con `repeat 1,1`** dio 2/12 de código
+> correcto y `presence 1,5 / repeat 1,5` dio 1/12 con código sintácticamente
+> roto, contra 38/60 de cualquier config con `presence <= 0,3` (Fisher
+> p = 0,0007). Dentro de esa banda baja las variantes no se distinguen entre sí,
+> y `0,3 / 1,1` es la más corta y menos repetitiva. La card oficial de Qwen3.8 sí
+> usa `presence 1,5`, pero acompañada de `repeat 1,0` — esa pareja completa dio
+> 8/12, sin señal contra la banda, con +39 % de longitud de salida; vive en el
+> preset `qwen3.8-instruct` del Chat, no acá. El muestreo no costó rendimiento:
+> 38,0–38,5 t/s en todas las celdas.
 
 Rangos válidos: temp 0–2 · top_p 0–1 · top_k ≥ 0 (0 = deshabilitado) ·
 min_p 0–1.

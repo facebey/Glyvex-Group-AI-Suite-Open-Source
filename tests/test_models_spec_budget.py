@@ -69,10 +69,12 @@ def _id_for(models, filename):
 
 def _approx_gb(ctx: int, kv_heads: int, head_dim: int, weights: float = 0.0) -> float:
     """Coste declarado del draft SIN metadata: 1 capa de atención del modelo
-    principal al ctx (kv_heads/head_dim del base) + pesos + buffer FA (0.75).
+    principal al ctx (kv_heads/head_dim del base) + pesos + buffer FA (0.75) +
+    la reserva propia del contexto del draft (F-2: medido como un segundo
+    `sched_reserve` de 720,02 MiB CUDA0 junto al del base).
     q8_0 = 34/32 bytes por elemento, K y V."""
     kv_bytes = 2 * (ctx * kv_heads * head_dim) * (34.0 / 32.0)
-    return round(weights + kv_bytes / (1024 ** 3) + 0.75, 2)
+    return round(weights + kv_bytes / (1024 ** 3) + 0.75 + vram.DRAFT_CTX_RESERVE_GB, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -106,10 +108,50 @@ def test_draft_aux_usa_metadata_real_del_draft():
 def test_draft_aux_sin_metadata_aproxima_una_capa_del_base():
     # Cabeza embebida o .gguf sin header legible: aproximación conservadora =
     # una capa completa del MODELO principal al ctx pedido + pesos del archivo
-    # si los hay + buffer FA del estimador.
+    # si los hay + buffer FA del estimador + la reserva propia del contexto del
+    # draft (F-2).
     assert vram.estimate_draft_aux_gb(BASE_META, 8192, 0.5, None) == _approx_gb(
         8192, kv_heads=4, head_dim=128, weights=0.5
     )
+
+
+# Dimens REALES de Qwen3.8-27B (arch `qwen35`, híbrido: 1 de cada 4 capas con
+# atención completa → 16 capas de KV), leídas del propio .gguf.
+QWEN38_META = {
+    "n_layer": 65, "n_head": 24, "n_head_kv": 4, "n_embd": 5120, "head_dim": 256,
+    "full_attention_interval": 4,
+}
+
+
+def test_draft_embebido_cubre_el_delta_medido_en_la_3090():
+    """F-2: con la cabeza MTP embebida de Qwen3.8-27B encender la especulación
+    sumó **+1,69 GiB** de VRAM medida (RTX 3090, b12359, Q4_K_M, ctx 131072;
+    +1,84 GiB con Q4_K_XL). El log atribuye ese bloque a un KV propio de
+    272,00 MiB (1 capa al mismo n_ctx) y un segundo `sched_reserve` de 720,02
+    MiB CUDA0; los TENSORES de la cabeza no suman (el `load_tensors` del base
+    mide 15009,20 MiB igual con spec ON y OFF). La estimación sin la reserva
+    propia se quedaba en ~1,0 GB, por debajo de lo medido."""
+    est = vram.estimate_draft_aux_gb(QWEN38_META, 131072, 0.0, None, max_layers=1)
+    assert est >= 1.69
+    # El KV del draft usa el head_dim REAL (256): 2·131072·4·256·34/32 = 272,00
+    # MiB. Con el fallback n_embd/n_head (213) serían 226 MiB y el assert de
+    # arriba no se cumpliría ni con la reserva.
+    assert est == pytest.approx(2 * vram.DRAFT_CTX_RESERVE_GB + 272.0 / 1024.0, abs=0.01)
+    assert est - vram.DRAFT_CTX_RESERVE_GB < 1.69
+
+
+def test_draft_con_header_legible_no_suma_la_reserva():
+    """El lado opuesto: con header legible del draft el presupuesto ya usa sus
+    dims y pesos reales y queda por ENCIMA de lo medido (1,26–1,46 GB
+    estimados frente a ~1,12 GiB medidos en mtp-gemma-4-26B-A4B), así que la
+    reserva propia del contexto NO se suma ahí: sería inflar la card."""
+    with_header = vram.estimate_draft_aux_gb(BASE_META, 8192, 0.5, DRAFT_META)
+    without = vram.estimate_draft_aux_gb(BASE_META, 8192, 0.5, None)
+    assert with_header == vram.estimate_vram_usage(
+        dict(DRAFT_META), 0.5, 8192,
+        cache_type_k="q8_0", cache_type_v="q8_0", n_parallel=1, flash_attn=True,
+    )["total_gb"]
+    assert without > with_header
 
 
 def test_draft_aux_none_sin_datos_minimos():
@@ -309,8 +351,9 @@ async def test_spec_draft_model_manual_pisa_a_la_autodeteccion(client, tmp_path)
 
 async def test_spec_draft_mtp_embebido_presupuesta_la_cabeza(client, tmp_path):
     # Cabeza embebida (sin sidecar): 0 pesos nuevos — sus tensores ya están
-    # en el .gguf — pero SUELO propio: su KV al ctx y el buffer FA entran al
-    # presupuesto con la aproximación de una capa del modelo principal.
+    # en el .gguf (medido: el `load_tensors` del base no cambia con spec ON) —
+    # pero SUELO propio: su KV al ctx, el buffer FA y la reserva de su contexto
+    # entran al presupuesto con la aproximación de una capa del modelo principal.
     d, base = _base_dir(tmp_path)
     models = await _scan_dir(client, d)
     model_id = _id_for(models, BASE_NAME)

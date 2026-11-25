@@ -418,6 +418,41 @@ async def test_launch_model_mmproj_true_solo_con_sidecar_real(client, tmp_path, 
     assert captured["cfg"].mmproj_path == applied
 
 
+async def test_launch_model_vision_intent_de_plantilla_no_contamina_el_config(client, tmp_path, monkeypatch):
+    # F-4 TPL-VISION-RELINK: `vision_intent` es la clave de frontend que guardan
+    # ahora las plantillas (la preferencia de visión, sin ruta fija). Para el
+    # MCP el contrato es el mismo que con 'toggles' (ver _build_launch_config):
+    # pydantic la ignora, no popula cfg.mmproj_path ni altera la validación.
+    # En MCP la visión se sigue enganchando solo con overrides {mmproj:true},
+    # y engancha la ruta MEDIDA por el scan, nunca una ruta de la receta.
+    dir_b = tmp_path / "con-mmproj"
+    dir_b.mkdir()
+    write_gguf(dir_b / "Vision-Mini-Q4_K_M.gguf", "llama", None, _MINI_KV)
+    (dir_b / "Vision-Mini-mmproj.gguf").touch()
+    await client.post("/api/config", json={"model_dirs": [str(dir_b)]})
+    await scan_and_wait(client)
+    model_id = await _model_id_by_filename(client, "Vision-Mini-Q4_K_M.gguf")
+    captured = await _stub_manager_start(monkeypatch)
+    await _save_template(client, "test-vision-intent", {
+        "n_ctx": 4096,
+        "toggles": {"mmproj": True},
+        "vision_intent": {"enabled": True, "manual_path": ""},
+    })
+
+    # La plantilla se aplica sin la clave de frontend: launch válido, sin visión.
+    await _call("launch_model", {"model_id": model_id, "template": "test-vision-intent"})
+    assert captured["cfg"].n_ctx == 4096
+    assert captured["cfg"].mmproj_path is None
+    assert not hasattr(captured["cfg"], "vision_intent")
+
+    # El override explícito sigue enganchando el sidecar del inventario.
+    data = await _call("launch_model", {"model_id": model_id, "template": "test-vision-intent",
+                                        "overrides": {"mmproj": True}})
+    applied = data["applied_config"]["mmproj_path"]
+    assert applied and applied.lower().endswith("vision-mini-mmproj.gguf")
+    assert captured["cfg"].mmproj_path == applied
+
+
 async def test_launch_model_preflight_no_cabe_bloquea_y_force_lo_deja_pasar(client, tmp_path, monkeypatch):
     model_id = await _model_with_kv(client, tmp_path, "Grande-8B-Q4_K_M.gguf", "llama", _BIG_KV)
     await client.post("/api/config", json={"hardware": {"vram_gb": 1}})

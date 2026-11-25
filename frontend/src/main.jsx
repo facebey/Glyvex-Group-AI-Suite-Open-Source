@@ -2,7 +2,8 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./lib/i18n.js";
 import App from "./App.jsx";
-import { isTauri, onSidecarState, hasProvisionFlag } from "./lib/tauri.js";
+import { isTauri, onSidecarState, hasProvisionFlag, getUiLang } from "./lib/tauri.js";
+import { resolveSplashLang, SPLASH_TEXTS } from "./lib/splashLang.js";
 import "./index.css";
 
 // Shell Tauri en producción: la ventana carga la SPA desde el bundle
@@ -64,6 +65,15 @@ async function tauriBootstrapRedirect() {
 // origen) y las fuentes Poppins van embebidas (app 100% offline).
 function BootSplash() {
   const [version, setVersion] = useState(null);
+  // I18N-SPLASH: el idioma elegido en la app vive en el localStorage del
+  // origen del backend, invisible desde acá; se lee por IPC de la shell.
+  // Sin valor espejado (primera ejecución): el default "es" de i18n.js.
+  const [texts, setTexts] = useState(SPLASH_TEXTS.es);
+  useEffect(() => {
+    getUiLang().then((lang) => {
+      if (lang) setTexts(SPLASH_TEXTS[resolveSplashLang(lang)]);
+    });
+  }, []);
   useEffect(() => {
     import("@tauri-apps/api/app")
       .then(({ getVersion }) => getVersion())
@@ -103,13 +113,13 @@ function BootSplash() {
           <span className="gx-splash-grad">AI Suite</span>
         </div>
         <div style={{ fontSize: "12.5px", color: "#8a90a6", marginTop: "2px" }}>
-          IA local, sin nube
+          {texts.tagline}
         </div>
         <div className="gx-splash-bar" style={{ width: "220px", height: "3px", borderRadius: "3px", background: "#1e2133", marginTop: "26px", overflow: "hidden" }}>
           <i />
         </div>
         <div style={{ fontSize: "10.5px", color: "#6b7089", marginTop: "8px" }}>
-          Iniciando servicios…
+          {texts.starting}
         </div>
       </div>
       {version && (

@@ -1095,8 +1095,13 @@ def _template_supports_reasoning_effort(props: dict[str, Any]) -> bool:
     """
     caps = props.get("chat_template_caps")
     if isinstance(caps, dict):
-        return _cap_flag(props, "supports_reasoning_effort", "reasoning_effort")
-
+        for key in ("supports_reasoning_effort", "reasoning_effort"):
+            if key in caps:
+                return bool(caps[key])
+        # Un caps dict que NO menciona la bandera no es un "no": engines
+        # propios (Strata) publican chat_template_caps sin este flag aunque su
+        # plantilla sí lee reasoning_effort. Ahí manda el template, como con
+        # tools. Una negative explícita (Gemma 4) ya salió arriba.
     template = props.get("chat_template")
     if isinstance(template, str) and template:
         return "reasoning_effort" in template
@@ -1121,7 +1126,9 @@ _CAPS_TTL_S = 30.0
 _caps_cache: dict[str, tuple[float, Capabilities]] = {}
 
 
-async def probe_capabilities(endpoint: str, model: str = "") -> Capabilities:
+async def probe_capabilities(
+    endpoint: str, model: str = "", api_key: str = ""
+) -> Capabilities:
     """
     Qué soporta de verdad el endpoint activo.
 
@@ -1129,6 +1136,11 @@ async def probe_capabilities(endpoint: str, model: str = "") -> Capabilities:
     (parcial: solo contexto) → nombre del modelo (adivinanza). El campo
     `source` le dice al frontend con cuánta confianza puede tratar el
     resultado.
+
+    `api_key` viaja como Bearer en las dos sondas: un endpoint lanzado con
+    --api-key (o el engine Strata, que la exige siempre) responde 401 a todo
+    sin ella, y sin esto el probe caía SIEMPRE a la heurística por nombre
+    marcando mal vision/tools/reasoning.
     """
     import re
 
@@ -1139,11 +1151,14 @@ async def probe_capabilities(endpoint: str, model: str = "") -> Capabilities:
         return cached[1]
 
     result = Capabilities(endpoint=base, model=model)
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     async with httpx.AsyncClient(timeout=4.0) as client:
         # 1. /props — ruta nativa de llama-server
         try:
-            res = await client.get(f"{base}/props")
+            res = await client.get(f"{base}/props", headers=headers)
             if res.status_code == 200:
                 props = res.json()
                 modalities = props.get("modalities") or {}
@@ -1176,7 +1191,7 @@ async def probe_capabilities(endpoint: str, model: str = "") -> Capabilities:
 
         # 2. /v1/models — ollama, LM Studio, o un proxy que esconde /props
         try:
-            res = await client.get(f"{base}/v1/models")
+            res = await client.get(f"{base}/v1/models", headers=headers)
             if res.status_code == 200:
                 entries = (res.json() or {}).get("data") or []
                 first = next(
@@ -1215,6 +1230,7 @@ async def probe_capabilities(endpoint: str, model: str = "") -> Capabilities:
 async def get_capabilities(
     endpoint: str = Query(..., description="URL base del endpoint OpenAI-compatible"),
     model: str = Query("", description="Modelo activo, solo para el fallback heurístico"),
+    api_key: str = Query("", description="Bearer token del endpoint, si es que pide auth"),
 ) -> Capabilities:
     """
     Ruta fina sobre probe_capabilities.
@@ -1223,7 +1239,7 @@ async def get_capabilities(
     llamar a una función de ruta desde código normal hace que los defaults
     de Query lleguen como objetos Query en vez de valores.
     """
-    return await probe_capabilities(endpoint, model)
+    return await probe_capabilities(endpoint, model, api_key)
 
 
 @router.post("/estimate", response_model=EstimateResponse)
@@ -1289,7 +1305,7 @@ async def estimate_context(req: EstimateRequest) -> EstimateResponse:
     image_tokens = image_count * per_image
     total = base_tokens + text_tokens + image_tokens + overhead
 
-    caps = await probe_capabilities(req.endpoint)
+    caps = await probe_capabilities(req.endpoint, api_key=req.api_key)
     context_size = caps.context_size
     # Igual que llama-server: el desborde lo define el prompt solo. La
     # generación se autolimita al hueco restante (ver EstimateResponse).

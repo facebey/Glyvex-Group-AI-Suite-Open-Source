@@ -84,8 +84,17 @@ export function useChatStream({ nodes, setNodes, onFinish, onError }) {
         })
       );
     }
-    if (s.finished === "failed" && s.error === NETWORK_ERROR) {
-      const message = i18n.t("chatErrors.connection");
+    if (s.finished === "failed") {
+      // Un upstream 4xx/5xx (p. ej. Strata rechazando una imagen) dejaba el
+      // nodo assistant vacío y sin métricas: en el historial parecía un
+      // "stopped early" más. Se persiste el motivo para que la burbuja lo
+      // muestre y toPayloadMessages pueda descartarlo del próximo prompt.
+      const message = s.error === NETWORK_ERROR ? i18n.t("chatErrors.connection") : s.error;
+      if (message) {
+        setNodes((prev) =>
+          prev.map((m) => (m.id === s.assistantId ? { ...m, error: message } : m))
+        );
+      }
       cbRef.current.onError?.(message);
     }
     clear();

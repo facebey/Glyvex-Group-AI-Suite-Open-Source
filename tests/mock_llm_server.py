@@ -67,6 +67,10 @@ def set_props(payload: dict | None) -> None:
 async def _props(request: Request) -> JSONResponse:
     if PROPS["payload"] is None:
         return JSONResponse({"error": "not found"}, status_code=404)
+    if MODELS_AUTH["token"]:
+        auth = request.headers.get("authorization", "")
+        if auth != f"Bearer {MODELS_AUTH['token']}":
+            return JSONResponse({"error": {"message": "invalid api key"}}, status_code=401)
     return JSONResponse(PROPS["payload"])
 
 

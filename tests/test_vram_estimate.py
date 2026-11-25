@@ -6,7 +6,8 @@ Función pura: se testea con números representativos de modelos reales
 
 from vram_estimate import (
     CACHE_TYPE_BYTES, COMPUTE_BUFFER_GB, COMPUTE_BUFFER_GB_FA,
-    LEGEND_CTXS, estimate_vram_usage, estimate_vram_legend,
+    DRAFT_CTX_RESERVE_GB, LEGEND_CTXS, MTMD_CONTEXT_RESERVE_GB,
+    estimate_draft_aux_gb, estimate_vram_usage, estimate_vram_legend,
 )
 
 
@@ -289,8 +290,9 @@ def test_aux_default_no_cambia_nada():
 def test_auxiliares_entran_al_total_y_al_estado():
     # Caso real Agents-A1-4B-Q8_0: 4.17 GB + mmproj 0.63 GB. Con la meta de
     # 128 KiB/token en f16 y 8192 tokens: KV=1, cómputo=1.5.
-    # Sin aux: 5+1+1.5 = 7.5 en 8 GB → 93.8% justo. Con mmproj: 8.13 → 101.6%
-    # no_cabe: el estado y el pct deben usar el total real con auxiliares.
+    # Sin aux: 5+1+1.5 = 7.5 en 8 GB → 93.8% justo. Con mmproj: 5+1+1.5+0.63
+    # (pesos) +0.25 (el `mtmd_context` que ese launch construiría, F-2) = 8.38
+    # → 104.7% no_cabe: el estado y el pct deben usar el total real.
     meta = {"n_layer": 32, "n_head": 32, "n_embd": 4096, "n_head_kv": 8, "head_dim": 128}
     aux = [{"kind": "mmproj", "label": "mmproj-F16.gguf", "size_gb": 0.63}]
     base = estimate_vram_usage(meta, model_size_gb=5, n_ctx=8192,
@@ -301,11 +303,71 @@ def test_auxiliares_entran_al_total_y_al_estado():
     assert base["total_gb"] == 7.5 and base["state"] == "justo"
     assert with_aux["aux_gb"] == 0.63
     assert with_aux["aux_components"] == aux
-    assert with_aux["total_gb"] == 8.13
-    assert with_aux["pct"] == 101.6
+    assert with_aux["total_gb"] == 8.38
+    assert with_aux["compute_gb"] == 1.5 + MTMD_CONTEXT_RESERVE_GB
+    assert with_aux["pct"] == 104.7
     assert with_aux["state"] == "no_cabe"
-    # El desglose de pesos del modelo NO se toca: aux vive aparte.
+    # El desglose de pesos del modelo NO se toca: aux vive aparte, y la reserva
+    # de visión tampoco se disfraza de peso.
     assert with_aux["weights_gb"] == 5.0
+
+
+def test_reserva_mtmd_va_solo_cuando_el_desglose_trae_un_mmproj():
+    """F-2: un launch con .mmproj construye un `mtmd_context` con su propio
+    compute buffer, medido en vivo en el log de llama.cpp b12359: 248,10 MiB
+    CUDA0 con el mmproj de Qwen3.8-27B y 150,63 MiB con el de gemma-4-26B. La
+    señal de que ESTE launch lo hace es un componente mmproj con tamaño real:
+    sin él (visión apagada, embebida, o un auxiliar que no es visión) no se
+    inventa la reserva."""
+    meta = _dense_meta()
+    plain = estimate_vram_usage(meta, model_size_gb=10, n_ctx=8192, flash_attn=True,
+                                gpu_vram_gb=24)
+    mmproj = [{"kind": "mmproj", "label": "mmproj-F16.gguf", "size_gb": 0.86}]
+    with_mmproj = estimate_vram_usage(meta, model_size_gb=10, n_ctx=8192, flash_attn=True,
+                                      gpu_vram_gb=24, aux_weights_gb=0.86, aux_components=mmproj)
+    assert with_mmproj["compute_gb"] == plain["compute_gb"] + MTMD_CONTEXT_RESERVE_GB
+    assert with_mmproj["aux_gb"] == 0.86  # la reserva no se disfraza de peso
+
+    # Sin componente que diga «visión cargada»: misma reserva que sin visión.
+    unreadable = [{"kind": "mmproj", "label": "mmproj-F16.gguf", "size_gb": 0.0}]
+    draft_only = [{"kind": "draft_model", "label": "draft-mtp.gguf", "size_gb": 1.25}]
+    for kwargs in (
+        {"aux_weights_gb": 0.86},                       # pesos sin desglose
+        {"aux_components": unreadable},                 # archivo sin tamaño medido
+        {"aux_weights_gb": 1.25, "aux_components": draft_only},
+    ):
+        r = estimate_vram_usage(meta, model_size_gb=10, n_ctx=8192, flash_attn=True,
+                                gpu_vram_gb=24, **kwargs)
+        assert r["compute_gb"] == plain["compute_gb"]
+
+    # La leyenda no puede clasificar distinto que la fila principal.
+    legend = estimate_vram_legend(meta, model_size_gb=10, ctx_values=(8192,),
+                                  flash_attn=True, gpu_vram_gb=24,
+                                  aux_weights_gb=0.86, aux_components=mmproj)
+    assert legend[0]["total_gb"] == with_mmproj["total_gb"]
+    assert legend[0]["state"] == with_mmproj["state"]
+
+
+def test_draft_sin_header_suma_su_reserva_y_con_header_no():
+    """F-2 en el propio helper del draft: con dims y pesos reales el
+    presupuesto ya es alto y la reserva NO va; sin header legible el contexto
+    que llama.cpp construye para el draft reserva su propio bloque (medido:
+    segundo `sched_reserve` de 720,02 MiB CUDA0 frente a los 740,02 del base)."""
+    meta = _dense_meta()
+    # Mismas dims en los dos caminos, cambia solo si el header es legible: así
+    # la diferencia es exactamente la reserva, sin otros términos mezclados.
+    legible = {**meta, "n_layer": 1}
+    con_header = estimate_draft_aux_gb(meta, 8192, 0.5, legible)
+    sin_header = estimate_draft_aux_gb(meta, 8192, 0.5, None)
+    assert sin_header == round(con_header + DRAFT_CTX_RESERVE_GB, 2)
+
+    # La reserva es una constante: no escala con el ctx, como escala el delta
+    # medido end-to-end al encender la especulación (idéntico a 32k, 65k y
+    # 131k). Lo único que crece aquí es el KV del contexto del draft.
+    a = estimate_draft_aux_gb(meta, 32768, 0.0, None)
+    b = estimate_draft_aux_gb(meta, 131072, 0.0, None)
+    kv_delta = 2 * (131072 - 32768) * 8 * 160 * (34.0 / 32.0) / (1024 ** 3)
+    assert round(b - a, 2) == round(kv_delta, 2)
 
 
 def test_leyenda_cubre_auxiliares_en_cada_fila():

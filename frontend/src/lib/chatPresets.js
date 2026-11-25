@@ -29,3 +29,14 @@ export function presetSaveScope(entry, selectedModel) {
   if (entry?.model_name) return { family: null, model_name: entry.model_name };
   return { family: null, model_name: selectedModel || null };
 }
+
+/** PRESET-ORIGIN: qué parámetros fija la entrada resuelta del preset. Al
+ *  aplicarse, esos valores reemplazan a los defaults de la app (Chat.jsx hace
+ *  { ...DEFAULT_PARAMS, ...entry.params }); la UI los marca para que se sepa
+ *  qué valor viene del preset y cuál es default. Con 'custom' o 'auto' sin
+ *  recomendado no hay entrada: ningún campo tiene origen de preset. */
+export function presetOriginKeys(entry) {
+  const params = entry?.params;
+  if (!params || typeof params !== "object") return new Set();
+  return new Set(Object.keys(params));
+}

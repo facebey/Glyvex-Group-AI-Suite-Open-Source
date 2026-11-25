@@ -148,7 +148,11 @@ export default function Chat() {
   // lista o la elección cambian: los sliders pasan a mostrar sus valores.
   useEffect(() => {
     const entry = resolvePresetEntry(presetOptions, presetChoice);
-    if (entry?.params) setParams((prev) => ({ ...prev, ...entry.params }));
+    // REEMPLAZA desde los defaults, no mezcla sobre lo anterior: elegir un
+    // preset tras haber usado otro dejaba valores del anterior por fuera
+    // (p. ej. temperature 1 del preset thinking + presence 1.5 del instruct,
+    // una combinación que ningún preset recomienda).
+    if (entry?.params) setParams({ ...DEFAULT_PARAMS, ...entry.params });
   }, [presetOptions, presetChoice, setParams]);
 
   const handleParamChange = useCallback(
@@ -335,7 +339,14 @@ export default function Chat() {
   useEffect(() => {
     if (!endpointUrl) return undefined;
     let cancelled = false;
-    const qs = new URLSearchParams({ endpoint: endpointUrl, model: selectedModel || "" });
+    // La api_key viaja en la query: un endpoint con --api-key (o Strata)
+    // responde 401 a /props y /v1/models sin Bearer, y el backend caía a la
+    // heurística por nombre marcando mal vision/tools/reasoning.
+    const qs = new URLSearchParams({
+      endpoint: endpointUrl,
+      model: selectedModel || "",
+      api_key: apiKey || "",
+    });
     fetch(`/api/chat/capabilities?${qs.toString()}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -347,7 +358,7 @@ export default function Chat() {
     return () => {
       cancelled = true;
     };
-  }, [endpointUrl, selectedModel]);
+  }, [endpointUrl, selectedModel, apiKey]);
 
   // Estado de las imágenes ya adjuntadas según lo que soporte el modelo
   // activo. Es BIDIRECCIONAL a propósito: antes solo degradaba

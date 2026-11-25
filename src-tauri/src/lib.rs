@@ -384,6 +384,41 @@ fn provision_requested() -> bool {
     std::env::args().any(|arg| arg == "--provision")
 }
 
+/// I18N-SPLASH: el splash de arranque vive en el origen del bundle
+/// (tauri.localhost), donde el localStorage está aislado del origen de la app
+/// y no puede leer el idioma que eligió el usuario. `set_ui_lang` lo espeja a
+/// un archivo en app_data (lo llama i18n.js al cambiar el idioma) y
+/// `ui_lang` se lo devuelve al splash por IPC. Sin valor espejado todavía:
+/// None → el frontend usa el mismo default inicial que i18n.js ("es").
+const UI_LANGS: [&str; 2] = ["es", "en"];
+
+fn ui_lang_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.join("ui_lang"))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ui_lang(app: AppHandle) -> Option<String> {
+    let raw = std::fs::read_to_string(ui_lang_path(&app).ok()?).ok()?;
+    let raw = raw.trim().to_lowercase();
+    UI_LANGS.contains(&raw.as_str()).then(|| raw)
+}
+
+#[tauri::command]
+fn set_ui_lang(app: AppHandle, lang: String) -> Result<(), String> {
+    let lang = lang.trim().to_lowercase();
+    if !UI_LANGS.contains(&lang.as_str()) {
+        return Err(format!("idioma de UI no soportado: {lang}"));
+    }
+    let path = ui_lang_path(&app)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, &lang).map_err(|e| e.to_string())
+}
+
 /// Gate del redirect del bootstrap: solo pasa con /api/health verificado
 /// por la shell (ver SidecarState::healthy).
 #[tauri::command]
@@ -500,7 +535,9 @@ pub fn run() {
             sidecar_restart,
             stop_sidecar,
             provision_requested,
-            sidecar_healthy
+            sidecar_healthy,
+            ui_lang,
+            set_ui_lang
         ])
         .build(tauri::generate_context!())
         .expect("error al construir la app Tauri");

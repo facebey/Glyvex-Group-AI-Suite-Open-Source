@@ -39,6 +39,22 @@ export async function hasProvisionFlag() {
   return invoke("provision_requested");
 }
 
+// I18N-SPLASH: espejo del idioma de la UI del lado de la shell (archivo en
+// app_data). El splash de arranque vive en el origen del bundle, aislado del
+// localStorage de la app: así puede mostrar el idioma elegido. Fuera de
+// Tauri get devuelve null y set es no-op (en el navegador no hay splash).
+export async function getUiLang() {
+  if (!isTauri()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("ui_lang").catch(() => null);
+}
+
+export async function setUiLang(lang) {
+  if (!isTauri()) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("set_ui_lang", { lang }).catch(() => {});
+}
+
 // Abre un URL en el navegador externo. La webview no abre <a target="_blank">
 // (no hay shell por defecto); shell.open lo delega al handler del SO. Fuera de
 // Tauri (navegador de dev) no hace nada: el <a> normal ya cubre ese caso.

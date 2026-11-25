@@ -13,6 +13,12 @@ las cards se trasladan directos a los nombres de llama-server.
 
 Los ids son estables: la UI los traduce vía labelKey y las variantes de una
 misma familia se distinguen por `mode` (None = aplica a cualquier modo).
+
+Un preset declara la PAREJA de penalidades completa, nunca solo una: los params
+de un preset se mezclan sobre los DEFAULT_PARAMS del Chat (Chat.jsx), así que un
+preset que fija `presence_penalty` sin `repeat_penalty` termina enviando el
+repeat 1,1 heredado, y esa combinación no es la de ninguna card. En código esa
+mezcla fue lo peor que midió el A/B de 2026-11-22 (2/12 correctos).
 """
 
 from __future__ import annotations
@@ -42,6 +48,10 @@ BUILTIN_PRESETS: list[dict] = [
             "top_p": 0.95,
             "top_k": 20,
             "min_p": 0.0,
+            # La card fija repetition_penalty 1,0 en AMBOS modos. Sin este valor
+            # el preset heredaba el repeat_penalty 1,1 de los DEFAULT_PARAMS del
+            # Chat, que no es un valor de la card.
+            "repeat_penalty": 1.0,
         },
     },
     {
@@ -49,12 +59,20 @@ BUILTIN_PRESETS: list[dict] = [
         "family": "qwen3.8",
         "mode": "instruct",
         "labelKey": "chatPresets.qwen38Instruct",
-        # presence 1.5 es el valor de la card, ajustable 0-2 según la guía.
+        # Pareja completa de la card: presence 1,5 CON repeat 1,0. Viajan juntas
+        # porque la penalidad alta solo está medida con su repeat bajo: en el A/B
+        # de código de 2026-11-22 (Qwen3.8-27B Q4_K_M, 4 tareas x 3 reps, 12 runs
+        # por celda) esta pareja dio 8/12, y dejar que el preset herede el repeat
+        # 1,1 del Chat lo dejaba en 2/12 (Fisher p=0,0007 contra la banda de
+        # presence <= 0,3, que midió 38/60). Ver el comentario de
+        # SAMPLING_PRESETS en launcher.py: ahí queda la banda baja que usa la app
+        # por defecto; acá queda la card entera para quien la elija.
         "params": {
             "temperature": 0.7,
             "top_p": 0.8,
             "top_k": 20,
             "presence_penalty": 1.5,
+            "repeat_penalty": 1.0,
         },
     },
     {

@@ -515,6 +515,26 @@ def test_vision_no_room_when_tight():
     _assert_valid_draft(out["params"])
 
 
+def test_vision_fit_presupuesta_tambien_el_contexto_mtmd():
+    """F-2: el fit de visión no puede decidir solo con el peso del archivo.
+    Cargar un mmproj construye además un `mtmd_context` con su propio compute
+    buffer (medido en vivo: 248,10 MiB con el mmproj de Qwen3.8-27B, 150,63
+    con el de gemma-4-26B). Mismo modelo y mismo ctx que
+    test_vision_no_room_when_tight, pero con un mmproj que SÍ cabía suelto en
+    el hueco (14.55 + 0.60 = 15.15 ≤ 15.2): con la reserva pasa a 15.40 y el
+    fit debe descartarla. Sin la reserva este caso se emitiría mal."""
+    model = dict(GENERIC_MODEL, size_gb=13.0, mmproj_path="M:/vision-F16.gguf",
+                 mmproj_size_gb=0.60)
+    snap = _snapshot(gpus=[_amd(16384)], cpu_physical=8, ram_available_mb=32768)
+    out = rec.recommend(snap, model)
+    assert out["params"]["n_ctx"] == 8192
+    assert "mmproj_path" not in out["params"]
+    warn = next(w for w in out["warnings"] if w["key"] == "vision_no_room")
+    assert warn["args"]["mmproj_gb"] == 0.6
+    assert warn["args"]["mtmd_gb"] == rec.MTMD_CONTEXT_RESERVE_GB
+    _assert_valid_draft(out["params"])
+
+
 def test_aux_unmeasured_is_not_budgeted():
     # mmproj declarado sin tamaño legible (stat falló) o MTP sin archivo ni
     # embebido: no hay fit honesto que hacer -> no se emite ni se avisa.

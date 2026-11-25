@@ -289,7 +289,11 @@ export default function MessageBubble({
 
         {!isUser && streaming && !hasText && <StreamStatus phase={livePhase} />}
 
-        {!isUser && !streaming && !hasText && (
+        {!isUser && !streaming && !hasText && message.error && (
+          <p className="text-xs text-red-400 px-1">{message.error}</p>
+        )}
+
+        {!isUser && !streaming && !hasText && !message.error && (
           <p className="text-xs italic text-glyvex-bg-muted px-1">
             {message.thinking || message.tool_activity?.length
               ? t("message.noText")
@@ -317,6 +321,12 @@ export default function MessageBubble({
               </>
             )}
           </div>
+        )}
+
+        {/* Respuesta que sí produjo texto pero el upstream cortó con error:
+            se muestra el texto y debajo el motivo, en rojo. */}
+        {!isUser && !streaming && hasText && message.error && (
+          <p className="mt-1 px-1 text-xs text-red-400">{message.error}</p>
         )}
 
         {canContinue && (
